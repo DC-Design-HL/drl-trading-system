@@ -1,3 +1,13 @@
+---
+title: DRL Trading Bot
+emoji: 🤖
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # DRL Trading System
 
 An autonomous Deep Reinforcement Learning trading system using PPO-LSTM for Binance Testnet trading with real-time Streamlit monitoring.
