@@ -1,0 +1,34 @@
+# DRL Trading System Dependencies
+# Core RL Framework
+stable-baselines3[extra]>=2.3.0
+shimmy>=1.3.0
+gymnasium>=0.29.1
+torch>=2.1.0
+
+# Exchange Connectivity
+ccxt>=4.2.0
+
+# Technical Analysis
+pandas-ta>=0.3.14b
+pandas>=2.1.0
+numpy>=1.24.0
+
+# UI & Visualization
+streamlit>=1.30.0
+streamlit-lightweight-charts>=0.1.0
+plotly>=5.18.0
+
+# Configuration & Utilities
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Data Processing
+ta-lib>=0.4.28  # Optional: faster TA calculations
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pymongo
+python-dotenv
+dnspython
+certifi

@@ -1,0 +1,78 @@
+# DRL Trading System Configuration
+# =================================
+
+# Exchange Settings
+exchange:
+  name: binance
+  testnet: true
+  # API credentials - use environment variables for security
+  api_key: ${BINANCE_TESTNET_API_KEY}
+  api_secret: ${BINANCE_TESTNET_API_SECRET}
+  
+# Trading Settings
+trading:
+  symbol: BTC/USDT
+  timeframe: 1h
+  initial_balance: 10000.0  # USDT
+  position_size: 0.1  # 10% of balance per trade
+  max_positions: 1
+
+# Risk Management
+risk:
+  max_daily_loss_pct: 0.05  # 5% circuit breaker
+  max_drawdown_pct: 0.20    # 20% max drawdown
+  stop_loss_pct: 0.02       # 2% stop loss per trade
+  take_profit_pct: 0.04     # 4% take profit per trade
+
+# Model Hyperparameters
+model:
+  algorithm: PPO
+  policy: MlpPolicy  # Standard SB3 policy (MlpLstmPolicy requires sb3-contrib)
+  learning_rate: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+
+# Environment Settings
+environment:
+  lookback_window: 30       # Number of historical candles
+  include_indicators: true
+  normalize_observations: true
+  
+# Self-Improvement Loop
+self_improvement:
+  enabled: true
+  finetune_interval_hours: 24
+  min_high_reward_samples: 100
+  reward_threshold: 0.5     # Min reward to save to replay buffer
+
+# Technical Indicators
+indicators:
+  - name: RSI
+    period: 14
+  - name: MACD
+    fast: 12
+    slow: 26
+    signal: 9
+  - name: BB
+    period: 20
+    std: 2
+
+# Backtest Settings
+backtest:
+  start_date: "2024-01-01"
+  end_date: "2025-01-01"
+  min_sharpe_ratio: 0.5
+  max_drawdown: 0.20
+
+# UI Settings
+ui:
+  port: 8501
+  refresh_interval: 5  # seconds
+  chart_candles: 200

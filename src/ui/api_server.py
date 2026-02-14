@@ -1,0 +1,321 @@
+"""
+API endpoints for live streaming data to the dashboard.
+This provides JSON endpoints that JavaScript can poll for updates.
+"""
+
+from flask import Flask, jsonify
+from flask_cors import CORS
+import json
+from pathlib import Path
+from datetime import datetime
+
+app = Flask(__name__)
+CORS(app)
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+@app.route('/api/state')
+def get_state():
+    """Get current trading state."""
+    state_file = PROJECT_ROOT / 'logs' / 'trading_state.json'
+    if state_file.exists():
+        with open(state_file, 'r') as f:
+            return jsonify(json.load(f))
+    return jsonify({})
+
+@app.route('/api/trades')
+def get_trades():
+    """Get recent trades."""
+    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
+    trades = []
+    if log_file.exists():
+        with open(log_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        trades.append(json.loads(line))
+                    except:
+                        pass
+    return jsonify(trades)
+
+@app.route('/api/trades/count')
+def get_trade_count():
+    """Get trade count for change detection."""
+    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
+    count = 0
+    if log_file.exists():
+        with open(log_file, 'r') as f:
+            count = sum(1 for line in f if line.strip())
+    return jsonify({'count': count, 'timestamp': datetime.now().isoformat()})
+
+@app.route('/api/model')
+def get_model_info():
+    """Get active model information."""
+    import os
+    
+    model_path = PROJECT_ROOT / 'data' / 'models' / 'ultimate_agent.zip'
+    state_file = PROJECT_ROOT / 'logs' / 'trading_state.json'
+    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
+    
+    # Model info
+    model_exists = model_path.exists()
+    if model_exists:
+        model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
+        model_date = model_mtime.strftime("%Y-%m-%d")
+    else:
+        model_date = "Not found"
+    
+    # State info
+    state = {}
+    if state_file.exists():
+        with open(state_file, 'r') as f:
+            state = json.load(f)
+    
+    balance = state.get('balance', 10000)
+    total_return = ((balance - 10000) / 10000) * 100
+    
+    # Trade stats
+    trades = []
+    if log_file.exists():
+        with open(log_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        trades.append(json.loads(line))
+                    except:
+                        pass
+    
+    winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
+    total = len(trades)
+    win_rate = (winning / total * 100) if total > 0 else 0
+    
+    return jsonify({
+        'model_name': 'Ultimate Agent (PPO)',
+        'model_exists': model_exists,
+        'model_date': model_date,
+        'total_return': round(total_return, 2),
+        'win_rate': round(win_rate, 1),
+        'total_trades': total,
+        'winning_trades': winning,
+        'balance': balance,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/market')
+def get_market_analysis():
+    """Get comprehensive market analysis from all analyzers."""
+    import sys
+    from flask import request
+    sys.path.insert(0, str(PROJECT_ROOT))
+    
+    # Get symbol from query params, default to BTC/USDT
+    symbol = request.args.get('symbol', 'BTCUSDT')
+    # Clean symbol for analyzers that expect just the pair name (e.g. BTCUSDT)
+    clean_symbol = symbol.replace('/', '').upper()
+    # Symbol with slash for some analyzers if needed (though most seem to take clean)
+    # Checking usage in analyzers... usually standardizing to clean is safest or passing as is
+    # Let's use the clean symbol for everything to be consistent with live_trading logic
+    
+    result = {
+        'timestamp': datetime.now().isoformat(),
+        'symbol': symbol,
+        'whale': None,
+        'regime': None,
+        'mtf': None,
+        'funding': None,
+        'order_flow': None
+    }
+    
+    # Try to load from state first (Consistency with Bot)
+    state_file = PROJECT_ROOT / 'logs' / 'trading_state.json'
+    state_analysis = None
+    
+    if state_file.exists():
+        try:
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+                assets = state.get('assets', {})
+                # Try explicit symbol or clean symbol
+                asset_data = assets.get(symbol, assets.get(clean_symbol))
+                if asset_data:
+                    state_analysis = asset_data.get('analysis')
+        except Exception as e:
+            logger.error(f"Failed to load state for market analysis: {e}")
+
+    # Use state analysis if available
+    if state_analysis:
+        # Whale
+        whale_data = state_analysis.get('whale', {})
+        if whale_data:
+            result['whale'] = {
+                'score': round(whale_data.get('score', 0), 2),
+                'direction': whale_data.get('direction', 'NEUTRAL'),
+                'confidence': int(whale_data.get('confidence', 0) * 100),
+                'bullish': whale_data.get('bullish_signals', 0),
+                'bearish': whale_data.get('bearish_signals', 0),
+                'neutral': whale_data.get('neutral_signals', 0),
+                'flow_metrics': whale_data.get('flow_metrics', {})
+            }
+            
+        # Funding
+        funding_data = state_analysis.get('funding', {})
+        if funding_data:
+            result['funding'] = {
+                'rate': round(funding_data.get('rate', 0) * 100, 4), # rate is usually float
+                'bias': funding_data.get('signal', 'neutral'),
+                'annualized': round(funding_data.get('rate', 0) * 3 * 365 * 100, 1)
+            }
+            
+        # Order Flow
+        of_data = state_analysis.get('order_flow', {})
+        if of_data:
+             result['order_flow'] = {
+                'large_buys': of_data.get('large_buys', 0),
+                'large_sells': of_data.get('large_sells', 0),
+                'bias': of_data.get('bias', 'neutral'),
+                'net_flow': of_data.get('large_buy_volume', 0) - of_data.get('large_sell_volume', 0)
+            }
+            
+    # Fallbacks and Regime (Regime is not in state yet, calculate it)
+    # ... (Keep existing regime calculation as it's fast) ...
+    
+    if not result['whale']:
+        try:
+            # Whale Tracker - Use persistent instance for WebSocket
+            from src.features.whale_tracker import WhaleTracker
+            
+            # Global store for active trackers
+            if not hasattr(app, 'whale_trackers'):
+                app.whale_trackers = {}
+                
+            if clean_symbol not in app.whale_trackers:
+                logger.info(f"Initializing new WhaleTracker for {clean_symbol}")
+                tracker = WhaleTracker(symbol=clean_symbol)
+                tracker.start_stream()
+                app.whale_trackers[clean_symbol] = tracker
+            
+            whale = app.whale_trackers[clean_symbol]
+            signals = whale.get_whale_signals() 
+            
+            result['whale'] = {
+                'score': round(signals.get('score', 0), 2),
+                'direction': signals.get('direction', 'NEUTRAL'),
+                'confidence': int(signals.get('confidence', 0) * 100),
+                'bullish': signals.get('bullish_signals', 0),
+                'bearish': signals.get('bearish_signals', 0),
+                'neutral': signals.get('neutral_signals', 0),
+                'flow_metrics': signals.get('flow_metrics', {})
+            }
+        except Exception as e:
+            result['whale'] = {'error': str(e)}
+    
+    try:
+        # Fetch current market data for regime detection (fast REST call)
+        import requests as req
+        import os as _os
+        url = _os.environ.get("BINANCE_FUTURES_URL", "https://data-api.binance.vision") + "/api/v3/klines"
+        params = {"symbol": clean_symbol, "interval": "1h", "limit": 100}
+        resp = req.get(url, params=params, timeout=10)
+        data = resp.json()
+        
+        import pandas as pd
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
+        ])
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        
+        # Regime Detector
+        from src.features.regime_detector import MarketRegimeDetector
+        regime = MarketRegimeDetector()
+        regime_result = regime.detect_regime(df)
+        
+        regime_type = getattr(regime_result, 'regime', 'UNKNOWN')
+        result['regime'] = {
+            'type': str(regime_type.name) if hasattr(regime_type, 'name') else str(regime_type),
+            'adx': round(getattr(regime_result, 'adx', 0), 1),
+            'direction': str(getattr(regime_result, 'direction', 'NEUTRAL')),
+            'volatility': round(getattr(regime_result, 'volatility_multiplier', 1), 2)
+        }
+    except Exception as e:
+        result['regime'] = {'error': str(e)}
+    
+    if not result['mtf'] and state_analysis:
+        mtf_data = state_analysis.get('mtf', {})
+        if mtf_data:
+             result['mtf'] = {
+                'bias': mtf_data.get('bias', 'NEUTRAL'),
+                'aligned': mtf_data.get('aligned', False),
+                'reason': mtf_data.get('reason', 'Syncing...'),
+                '4h': mtf_data.get('4h', 'neutral'),
+                '1h': mtf_data.get('1h', 'neutral'),
+                '15m': mtf_data.get('15m', 'neutral')
+            }
+
+    if not result['mtf']:
+        try:
+            # MTF Analyzer - use get_mtf_data method
+            from src.features.mtf_analyzer import MultiTimeframeAnalyzer
+            mtf = MultiTimeframeAnalyzer(symbol=clean_symbol)
+            
+            # Using get_summary() which is more robust than manual checks
+            mtf_res = mtf.get_summary()
+            
+            result['mtf'] = {
+                'bias': 'BULLISH' if mtf_res['aligned'] and mtf_res['direction'] == 'bullish' else 
+                        'BEARISH' if mtf_res['aligned'] and mtf_res['direction'] == 'bearish' else 'NEUTRAL',
+                'aligned': mtf_res['aligned'],
+                'reason': mtf_res['recommendation'],
+                '4h': mtf_res['signals'].get('4h', {}).get('direction', 'neutral'),
+                '1h': mtf_res['signals'].get('1h', {}).get('direction', 'neutral'),
+                '15m': mtf_res['signals'].get('15m', {}).get('direction', 'neutral')
+            }
+        except Exception as e:
+            result['mtf'] = {'error': str(e)}
+    
+    if not result['funding']:
+        try:
+            # Funding Rate Analyzer - use get_signal method
+            from src.features.order_flow import FundingRateAnalyzer
+            funding = FundingRateAnalyzer(symbol=clean_symbol)
+            funding_signal = funding.get_signal()
+            result['funding'] = {
+                'rate': round(funding_signal.rate * 100, 4),
+                'bias': funding_signal.signal,
+                'annualized': round(funding_signal.rate * 3 * 365 * 100, 1)
+            }
+        except Exception as e:
+            result['funding'] = {'error': str(e)}
+    
+    if not result['order_flow']:
+        try:
+            # Order Flow Analyzer - use analyze_large_orders method
+            from src.features.order_flow import OrderFlowAnalyzer
+            order_flow = OrderFlowAnalyzer(symbol=clean_symbol)
+            of_result = order_flow.analyze_large_orders()
+            result['order_flow'] = {
+                'large_buys': of_result.get('large_buys', 0),
+                'large_sells': of_result.get('large_sells', 0),
+                'bias': of_result.get('bias', 'neutral'),
+                'net_flow': of_result.get('large_buy_volume', 0) - of_result.get('large_sell_volume', 0)
+            }
+        except Exception as e:
+            result['order_flow'] = {'error': str(e)}
+    
+    return jsonify(result)
+
+@app.route('/api/debug/log')
+def get_crash_log():
+    """Get crash log if exists."""
+    log_file = PROJECT_ROOT / 'crash.log'
+    if log_file.exists():
+        with open(log_file, 'r') as f:
+            return f.read(), 200, {'Content-Type': 'text/plain'}
+    return "No crash log found. Bot might be running or log not written.", 404
+
+if __name__ == '__main__':
+    app.run(port=5001, debug=False)

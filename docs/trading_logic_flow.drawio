@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-02-06T21:43:00.000Z" agent="draw.io" version="21.0.0">
+  <diagram id="trading-logic" name="Trading Logic Flow">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;DRL Trading System - Complete Trade Logic Flow&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="400" y="10" width="400" height="30" as="geometry" />
+        </mxCell>
+        
+        <!-- Start -->
+        <mxCell id="start" value="📊 New Candle&#xa;(Every 5 min)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="540" y="50" width="120" height="60" as="geometry" />
+        </mxCell>
+        
+        <!-- Fetch Data -->
+        <mxCell id="fetch" value="Fetch Market Data&#xa;(720 candles)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="530" y="130" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="start" target="fetch">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Check Position -->
+        <mxCell id="checkpos" value="Current Position?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="190" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="fetch" target="checkpos">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- In Position Branch -->
+        <mxCell id="inpos" value="LONG or SHORT" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="680" y="205" width="80" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- Check SL/TP -->
+        <mxCell id="sltp" value="Check Stop Loss&#xa;/ Take Profit&#xa;/ Trailing Stop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="760" y="195" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="checkpos" target="sltp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- SL/TP Hit? -->
+        <mxCell id="sltphit" value="SL/TP/Trail&#xa;Triggered?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="770" y="280" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="sltp" target="sltphit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Close Position -->
+        <mxCell id="closepos" value="❌ CLOSE POSITION&#xa;Record P&amp;L&#xa;Update Kelly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="910" y="275" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="sltphit" target="closepos">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="yeslabel" value="YES" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=9;fontStyle=1;fontColor=#009900" vertex="1" parent="1">
+          <mxGeometry x="870" y="290" width="30" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- FLAT Branch -->
+        <mxCell id="flattext" value="FLAT" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="570" y="265" width="40" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- Model Prediction -->
+        <mxCell id="model" value="🤖 PPO Model&#xa;Prediction&#xa;(94 Features)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="530" y="310" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;" edge="1" parent="1" source="checkpos" target="model">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6b" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;" edge="1" parent="1" source="sltphit" target="model">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="370" />
+              <mxPoint x="600" y="370" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="nolabel" value="NO" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=9;fontStyle=1;fontColor=#CC0000" vertex="1" parent="1">
+          <mxGeometry x="830" y="340" width="25" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- Action Decision -->
+        <mxCell id="action" value="Model Action?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="390" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="model" target="action">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- HOLD -->
+        <mxCell id="hold" value="HOLD&#xa;(Wait)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="480" width="80" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;" edge="1" parent="1" source="action" target="hold">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="holdlabel" value="HOLD" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=9;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="585" y="455" width="35" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- BUY Signal -->
+        <mxCell id="buysig" value="BUY Signal" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;fontStyle=1;fontColor=#009900" vertex="1" parent="1">
+          <mxGeometry x="310" y="405" width="70" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- SELL Signal -->
+        <mxCell id="sellsig" value="SELL Signal" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=10;fontStyle=1;fontColor=#CC0000" vertex="1" parent="1">
+          <mxGeometry x="820" y="405" width="70" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- ========== LONG FILTERS ========== -->
+        <mxCell id="longfilters" value="&lt;b&gt;LONG FILTERS&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=#d5e8d4;align=center;fontSize=11;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="80" y="340" width="100" height="25" as="geometry" />
+        </mxCell>
+        
+        <!-- Whale Filter Long -->
+        <mxCell id="whalelong" value="🐋 Whale Filter&#xa;score &gt; -0.15?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="70" y="375" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;" edge="1" parent="1" source="action" target="whalelong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Regime Filter Long -->
+        <mxCell id="regimelong" value="📊 Regime Filter&#xa;Not Downtrend?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="70" y="445" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="whalelong" target="regimelong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- MTF Filter Long -->
+        <mxCell id="mtflong" value="📊 MTF Confluence&#xa;4H/1H/15m Aligned?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="70" y="515" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="regimelong" target="mtflong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Funding Filter Long -->
+        <mxCell id="fundlong" value="💰 Funding Filter&#xa;Not Short Favored?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="70" y="585" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="mtflong" target="fundlong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Order Flow Long -->
+        <mxCell id="flowlong" value="📊 Order Flow&#xa;Not Bearish?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="70" y="655" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="fundlong" target="flowlong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Open Long -->
+        <mxCell id="openlong" value="✅ OPEN LONG&#xa;&#xa;• Adaptive SL/TP (ATR)&#xa;• Kelly Position Size&#xa;• Track Trailing Stop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="220" y="640" width="150" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="flowlong" target="openlong">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Block Labels Long -->
+        <mxCell id="blocklong" value="❌ BLOCK" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=8;fontStyle=1;fontColor=#CC0000" vertex="1" parent="1">
+          <mxGeometry x="10" y="395" width="50" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- ========== SHORT FILTERS ========== -->
+        <mxCell id="shortfilters" value="&lt;b&gt;SHORT FILTERS&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=#f8cecc;align=center;fontSize=11;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="340" width="110" height="25" as="geometry" />
+        </mxCell>
+        
+        <!-- Whale Filter Short -->
+        <mxCell id="whaleshort" value="🐋 Whale Filter&#xa;score &lt; 0.15?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="375" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;" edge="1" parent="1" source="action" target="whaleshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Regime Filter Short -->
+        <mxCell id="regimeshort" value="📊 Regime Filter&#xa;Not Uptrend?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="445" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="whaleshort" target="regimeshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- MTF Filter Short -->
+        <mxCell id="mtfshort" value="📊 MTF Confluence&#xa;4H/1H/15m Aligned?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="515" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="regimeshort" target="mtfshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Funding Filter Short -->
+        <mxCell id="fundshort" value="💰 Funding Filter&#xa;Not Long Favored?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="585" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="mtfshort" target="fundshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Order Flow Short -->
+        <mxCell id="flowshort" value="📊 Order Flow&#xa;Not Bullish?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="655" width="120" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="fundshort" target="flowshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Open Short -->
+        <mxCell id="openshort" value="✅ OPEN SHORT&#xa;&#xa;• Adaptive SL/TP (ATR)&#xa;• Kelly Position Size&#xa;• Track Trailing Stop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;fontStyle=1;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="640" width="150" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;" edge="1" parent="1" source="flowshort" target="openshort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        
+        <!-- Block Labels Short -->
+        <mxCell id="blockshort" value="❌ BLOCK" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=8;fontStyle=1;fontColor=#CC0000" vertex="1" parent="1">
+          <mxGeometry x="1140" y="395" width="50" height="15" as="geometry" />
+        </mxCell>
+        
+        <!-- ========== SL/TP DETAIL BOX ========== -->
+        <mxCell id="sltpbox" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="545" width="400" height="200" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sltptitle" value="&lt;b&gt;🎯 Stop Loss / Take Profit Logic&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="480" y="555" width="240" height="20" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sltpdetail" value="&lt;div style=&quot;text-align: left;&quot;&gt;&lt;b&gt;Adaptive SL/TP (ATR-based):&lt;/b&gt;&lt;br&gt;• Higher volatility → Wider stops&lt;br&gt;• Lower volatility → Tighter stops&lt;br&gt;• SL: 0.8% - 3.0% (dynamic)&lt;br&gt;• TP: 1.5% - 6.0% (dynamic)&lt;br&gt;&lt;br&gt;&lt;b&gt;Trailing Stop:&lt;/b&gt;&lt;br&gt;• Activates when profit &gt; TP * 50%&lt;br&gt;• Trails at SL% from highest point&lt;br&gt;• Locks in profits on pullbacks&lt;br&gt;&lt;br&gt;&lt;b&gt;Kelly Position Sizing:&lt;/b&gt;&lt;br&gt;• Uses trade history (last 50 trades)&lt;br&gt;• Half-Kelly for safety (10% - 75%)&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="410" y="575" width="190" height="165" as="geometry" />
+        </mxCell>
+        
+        <mxCell id="sltpformula" value="&lt;div style=&quot;text-align: left;&quot;&gt;&lt;b&gt;LONG Exit Conditions:&lt;/b&gt;&lt;br&gt;• Stop Loss: price ≤ entry × (1 - SL%)&lt;br&gt;• Take Profit: price ≥ entry × (1 + TP%)&lt;br&gt;• Trailing: price drops SL% from high&lt;br&gt;&lt;br&gt;&lt;b&gt;SHORT Exit Conditions:&lt;/b&gt;&lt;br&gt;• Stop Loss: price ≥ entry × (1 + SL%)&lt;br&gt;• Take Profit: price ≤ entry × (1 - TP%)&lt;br&gt;• Trailing: price rises SL% from low&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontSize=10;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="575" width="190" height="165" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="50" width="140" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="legendtitle" value="&lt;b&gt;Legend&lt;/b&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1185" y="55" width="70" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="Start/End" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="80" width="50" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="Process" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="80" width="50" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="Decision" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="110" width="50" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="Action" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="110" width="50" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="Long" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="145" width="50" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="Short" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="145" width="50" height="20" as="geometry" />
+        </mxCell>
+        
+        <!-- Loop back -->
+        <mxCell id="loop" value="Next Candle" style="text;html=1;strokeColor=none;fillColor=none;align=center;fontSize=9;fontStyle=2" vertex="1" parent="1">
+          <mxGeometry x="380" y="770" width="60" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="openlong" target="start">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="295" y="780" />
+              <mxPoint x="40" y="780" />
+              <mxPoint x="40" y="80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="openshort" target="start">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="905" y="780" />
+              <mxPoint x="1160" y="780" />
+              <mxPoint x="1160" y="220" />
+              <mxPoint x="1100" y="220" />
+              <mxPoint x="1100" y="80" />
+              <mxPoint x="660" y="80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="hold" target="start">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="800" />
+              <mxPoint x="40" y="800" />
+              <mxPoint x="40" y="80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="closepos" target="model">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="970" y="360" />
+              <mxPoint x="700" y="360" />
+              <mxPoint x="700" y="335" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
