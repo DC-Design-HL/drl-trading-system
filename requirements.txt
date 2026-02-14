@@ -9,7 +9,8 @@ torch>=2.1.0
 ccxt>=4.2.0
 
 # Technical Analysis
-pandas-ta>=0.3.14b
+# Technical Analysis
+pandas_ta
 pandas>=2.1.0
 numpy>=1.24.0
 
@@ -23,7 +24,7 @@ pyyaml>=6.0.1
 python-dotenv>=1.0.0
 
 # Data Processing
-ta-lib>=0.4.28  # Optional: faster TA calculations
+# ta-lib removed to avoid build errors (pandas_ta handles this)
 
 # Testing
 pytest>=7.4.0
