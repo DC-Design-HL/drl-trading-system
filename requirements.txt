@@ -11,7 +11,7 @@ torch>=2.1.0
 ccxt>=4.2.0
 
 # Technical Analysis
-pandas-ta
+git+https://github.com/twopirllc/pandas-ta.git@development
 pandas>=2.1.0
 numpy>=1.24.0
 
