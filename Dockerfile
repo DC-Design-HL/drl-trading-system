@@ -19,11 +19,8 @@ RUN pip3 install -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make start script executable
-RUN chmod +x start.sh
-
 # Expose Streamlit port
 EXPOSE 7860
 
-# Run the start script
-CMD ["./start.sh"]
+# Run the start script directly with bash
+CMD ["bash", "start.sh"]
