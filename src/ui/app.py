@@ -152,18 +152,33 @@ def check_pid_running(pid: int) -> bool:
     except OSError:
         return False
 
-def check_pid_running_by_name(process_name: str) -> bool:
-    """Check if a process with the given name is running."""
+def check_process_running(process_name_substr: str) -> bool:
+    """Check if a process is running by parsing ps aux output."""
     try:
-        # Use pgrep to find process
         import subprocess
-        # simple check to see if process name is in ps list
-        # avoiding pgrep if not available, but mac usually has it
-        cmd = f"pgrep -f {process_name}"
-        result = subprocess.run(cmd.split(), capture_output=True)
-        return result.returncode == 0
+        # Run ps aux
+        res = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+        if res.returncode != 0:
+            return False
+            
+        # Check if process name is in output
+        for line in res.stdout.splitlines():
+            if process_name_substr in line and "grep" not in line:
+                return True
+        return False
     except:
         return False
+
+def get_last_logs(log_path: Path, lines: int = 50) -> str:
+    """Read last N lines of a log file."""
+    if not log_path.exists():
+        return f"Log file not found: {log_path}"
+    try:
+        # Use simple file reading for portability
+        content = log_path.read_text().splitlines()
+        return "\n".join(content[-lines:])
+    except Exception as e:
+        return f"Error reading logs: {e}"
 
 
 
@@ -1141,7 +1156,19 @@ def main():
             m1.metric("Total Portfolio Value", f"${total_balance:,.2f}")
             m2.metric("Total Realized P&L", f"${total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
             m3.metric("Active Assets", active_assets_count)
-            m4.metric("System Status", "🟢 Online" if check_pid_running_by_name("live_trading") or check_pid_running_by_name("live_trading_multi.py") else "🔴 Offline")
+            is_online = check_process_running("live_trading_multi.py")
+            m4.metric("System Status", "🟢 Online" if is_online else "🔴 Offline")
+            
+            if not is_online:
+                st.error("⚠️ System Verification Failed")
+                with st.expander("📝 Debug Logs (Process & API)", expanded=True):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.text("Trading Bot Log:")
+                        st.code(get_last_logs(project_root / "process.log"), language="text")
+                    with c2:
+                        st.text("API Server Log:")
+                        st.code(get_last_logs(project_root / "api_server.log"), language="text")
 
             st.divider()
             
