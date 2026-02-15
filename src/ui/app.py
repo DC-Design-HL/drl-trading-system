@@ -1455,7 +1455,6 @@ def main():
         
         # Get model last modified time
         if model_exists:
-            import os
             model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
             model_age = (datetime.now() - model_mtime).days
             model_date = model_mtime.strftime("%Y-%m-%d")
