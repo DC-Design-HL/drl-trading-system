@@ -9,6 +9,7 @@ torch>=2.1.0
 
 # Exchange Connectivity
 ccxt>=4.2.0
+websocket-client>=1.6.0
 
 # Technical Analysis
 # pandas-ta dependency removed (unused and causing build errors)
