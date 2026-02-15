@@ -37,7 +37,7 @@ env/
 
 # Data
 data/historical/*.csv
-data/models/*.zip
+# data/models/*.zip  <-- Removed to allow LFS tracking
 data/models/*.pkl
 
 # Logs
@@ -61,7 +61,6 @@ deploy.zip
 data/checkpoints/
 deploy.zip
 data/checkpoints/
-data/models/
-data/models/
+# data/models/ <-- Removed
 data/checkpoints/
 deploy.zip
