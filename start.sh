@@ -5,7 +5,7 @@
 python -u live_trading_multi.py --assets BTCUSDT ETHUSDT SOLUSDT XRPUSDT --balance 5000 > process.log 2>&1 &
 
 # Start the API server in the background (provides Market Analysis data)
-python -u src/ui/api_server.py &
+python -u src/ui/api_server.py > api_server.log 2>&1 &
 
 # Start the Streamlit dashboard in the foreground
 # Streamlit runs on port 7860 by default in HF Spaces

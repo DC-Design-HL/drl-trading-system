@@ -837,6 +837,14 @@ def main():
                     st.text_area("Process Output", f.read(), height=300)
             else:
                 st.warning("⚠️ process.log not found (yet)")
+
+        if st.checkbox("Show API Server Log"):
+            api_log = project_root / "api_server.log"
+            if api_log.exists():
+                with open(api_log, "r") as f:
+                    st.text_area("API Server Output", f.read(), height=300)
+            else:
+                st.warning("⚠️ api_server.log not found (yet)")
                 
         # Debug Storage Path
         if isinstance(storage, JsonFileStorage):
@@ -845,6 +853,34 @@ def main():
             if storage.state_file.exists():
                 st.code(f"Size: {storage.state_file.stat().st_size} bytes")
                 
+        if st.checkbox("Show System Inspector"):
+            st.markdown("#### 🕵️ System Inspector")
+            
+            if st.button("List Processes (ps aux)"):
+                try:
+                    import subprocess
+                    # Use 'ps aux' for more details, or 'ps -ef'
+                    res = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+                    st.code(res.stdout if res.returncode == 0 else res.stderr)
+                except Exception as e:
+                    st.error(f"Failed to run ps: {e}")
+            
+            if st.button("List Files (ls -R)"):
+                try:
+                    import subprocess
+                    res = subprocess.run(['ls', '-R'], capture_output=True, text=True)
+                    st.code(res.stdout if res.returncode == 0 else res.stderr)
+                except Exception as e:
+                    st.error(f"Failed to run ls: {e}")
+            
+            if st.button("Check Connectivity (ping google.com)"):
+                try:
+                    import subprocess
+                    res = subprocess.run(['ping', '-c', '3', 'google.com'], capture_output=True, text=True)
+                    st.code(res.stdout if res.returncode == 0 else res.stderr)
+                except Exception as e:
+                    st.error(f"Ping failed: {e}")
+
         st.markdown("### 🔑 API Status")
         eth_key = os.environ.get("ETHERSCAN_API_KEY")
         sol_key = os.environ.get("SOLSCAN_API_KEY")
@@ -875,60 +911,42 @@ def main():
         st.session_state.auto_refresh = st.toggle("Auto Refresh", value=st.session_state.auto_refresh)
     
     # JavaScript-based available assets check
-    if st.session_state.auto_refresh:
-        st.markdown("""
-        <script>
-            // Live streaming updates via API polling
-            const API_BASE = 'http://localhost:5001';
-            let lastTradeCount = 0;
-            
-            async function updateSidebarFromAPI() {
-                try {
-                    // Fetch current state
-                    const stateRes = await fetch(API_BASE + '/api/state');
-                    const state = await stateRes.json();
-                    
-                    if (state.balance) {
-                        // Update Portfolio Value
-                        const portfolioEl = document.querySelector('.metric-value');
-                        if (portfolioEl) portfolioEl.textContent = '$' + state.balance.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                        
-                        // Update P&L
-                        const pnl = state.realized_pnl || 0;
-                        const pnlEls = document.querySelectorAll('[class*="metric-delta"]');
-                        pnlEls.forEach(el => {
-                            if (el.textContent.includes('P&L:')) {
-                                el.textContent = 'P&L: ' + (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
-                                el.style.color = pnl >= 0 ? '#26a69a' : '#ef5350';
-                            }
-                        });
-                    }
-                    
-                    // Check for new trades
-                    const countRes = await fetch(API_BASE + '/api/trades/count');
-                    const countData = await countRes.json();
-                    
-                    if (countData.count !== lastTradeCount) {
-                        lastTradeCount = countData.count;
-                        console.log('New trade detected! Count:', countData.count);
-                        // Flash notification
-                        const notification = document.createElement('div');
-                        notification.style.cssText = 'position:fixed;top:20px;right:20px;background:#26a69a;color:white;padding:15px;border-radius:8px;z-index:9999;animation:fadeIn 0.3s;';
-                        notification.textContent = '🔔 New trade executed!';
-                        document.body.appendChild(notification);
-                        setTimeout(() => notification.remove(), 3000);
-                    }
-                } catch (e) {
-                    console.log('API polling error:', e);
-                }
-            }
-            
-            // Poll every 5 seconds
-            if (!window.apiPoller) {
-                window.apiPoller = setInterval(updateSidebarFromAPI, 5000);
-                updateSidebarFromAPI(); // Initial call
-            }
-        </script>
+    # Server-side data fetching (resolves 'offline' issues in HF Spaces)
+    import requests
+    try:
+        # Fetch State
+        try:
+            state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+            if state_resp.status_code == 200:
+                api_state = state_resp.json()
+                # Update session state with API data
+                if 'balance' in api_state:
+                     st.session_state.portfolio_balance = api_state.get('balance', 0)
+                     st.session_state.realized_pnl = api_state.get('realized_pnl', 0)
+        except Exception as e:
+            pass # API might be starting up
+
+        # Fetch Market Analysis for current asset
+        try:
+            market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={st.session_state.selected_asset}', timeout=2)
+            if market_resp.status_code == 200:
+                st.session_state.market_analysis = market_resp.json()
+        except Exception as e:
+             pass
+
+    except Exception as e:
+        logger.error(f"Data fetch error: {e}")
+    
+    # Render Sidebar Metrics using Server-Side Data
+    with st.sidebar:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">Portfolio Value</div>
+            <div class="metric-value">${st.session_state.get('portfolio_balance', 10000):,.2f}</div>
+            <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('realized_pnl', 0) >= 0 else '#ef5350'}">
+                P&L: {'+' if st.session_state.get('realized_pnl', 0) >= 0 else ''}${st.session_state.get('realized_pnl', 0):,.2f}
+            </div>
+        </div>
         """, unsafe_allow_html=True)
     
     st.divider()
@@ -1123,7 +1141,7 @@ def main():
             m1.metric("Total Portfolio Value", f"${total_balance:,.2f}")
             m2.metric("Total Realized P&L", f"${total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
             m3.metric("Active Assets", active_assets_count)
-            m4.metric("System Status", "🟢 Online" if check_pid_running(31524) or check_pid_running_by_name("live_trading") else "🔴 Offline")
+            m4.metric("System Status", "🟢 Online" if check_pid_running_by_name("live_trading") or check_pid_running_by_name("live_trading_multi.py") else "🔴 Offline")
 
             st.divider()
             
@@ -1326,12 +1344,20 @@ def main():
         # Market Analysis Panel
         st.markdown("### 📊 Market Analysis")
         
-        # Try to fetch live market analysis
-        try:
-            import requests
-            # Pass selected asset to API
-            api_symbol = st.session_state.selected_asset.replace('/', '').upper()
-            market_data = requests.get(f'http://localhost:5001/api/market?symbol={api_symbol}', timeout=30).json()
+        # Try to use cached market analysis or fetch live
+        market_data = st.session_state.get('market_analysis', {})
+        
+        if not market_data:
+            try:
+                import requests
+                # Pass selected asset to API
+                api_symbol = st.session_state.selected_asset.replace('/', '').upper()
+                # Use 127.0.0.1 to avoid localhost resolution issues in some containers
+                market_data = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5).json()
+                st.session_state.market_analysis = market_data
+            except Exception as e:
+                # Keep silent, the error block below will handle empty data
+                pass
             
             # Whale Tracker
             whale = market_data.get('whale', {})
@@ -1432,7 +1458,8 @@ def main():
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">📊 Market Analysis</div>
-                <div style="color: #888; font-size: 12px;">Unable to load (API server offline?)</div>
+                <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
+                <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
             </div>
             """, unsafe_allow_html=True)
         

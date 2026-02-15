@@ -164,23 +164,39 @@ class MultiAssetTradingBot:
         """Load the trained model for this asset."""
         asset_name = self.symbol.replace("USDT", "").lower()
         
-        # Try asset-specific model first
-        model_path = self.MODEL_DIR / f"{asset_name}_agent.zip"
+        # Try asset-specific model in subdirectory
+        model_candidates = [
+            self.MODEL_DIR / asset_name / "best_model.zip",
+            self.MODEL_DIR / asset_name / "final_model.zip",
+            self.MODEL_DIR / f"{asset_name}_agent.zip"
+        ]
         
-        if not model_path.exists():
+        market_model = None
+        for path in model_candidates:
+            if path.exists():
+                logger.info(f"📥 Found model for {self.symbol}: {path}")
+                market_model = path
+                break
+        
+        if not market_model:
             # Try base BTC model
-            model_path = self.MODEL_DIR / "base_btc" / "best_model.zip"
+            btc_path = self.MODEL_DIR / "base_btc" / "best_model.zip"
+            if btc_path.exists():
+                 logger.info(f"Using base BTC model for {self.symbol}")
+                 market_model = btc_path
         
-        if not model_path.exists():
+        if not market_model:
             # Fall back to original ultimate agent
-            model_path = Path("./data/models/ultimate_agent.zip")
-        
-        if not model_path.exists():
+            ultimate_path = Path("./data/models/ultimate_agent.zip")
+            if ultimate_path.exists():
+                market_model = ultimate_path
+
+        if not market_model:
             logger.warning(f"⚠️ No model found for {self.symbol}. Running in observation mode.")
             return None
         
-        logger.info(f"📥 Loading model for {self.symbol}: {model_path}")
-        return PPO.load(str(model_path))
+        logger.info(f"📥 Loading model for {self.symbol}: {market_model}")
+        return PPO.load(str(market_model))
     
     def restore_state(self, state: Dict):
         """Restore bot state from saved dictionary."""

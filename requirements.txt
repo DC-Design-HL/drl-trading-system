@@ -24,6 +24,8 @@ plotly>=5.18.0
 # Configuration & Utilities
 pyyaml>=6.0.1
 python-dotenv>=1.0.0
+flask>=2.0.0
+flask-cors>=3.0.0
 
 # Data Processing
 # ta-lib removed to avoid build errors (pandas_ta handles this)
