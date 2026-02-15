@@ -1383,8 +1383,16 @@ def main():
                 market_data = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5).json()
                 st.session_state.market_analysis = market_data
             except Exception as e:
-                # Keep silent, the error block below will handle empty data
-                pass
+                # Show offline status
+                st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-label">📊 Market Analysis</div>
+                    <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
+                    <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                # Keep market_data empty
+                market_data = {}
             
             # Whale Tracker
             whale = market_data.get('whale', {})
@@ -1481,14 +1489,12 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
                 
-        except Exception as e:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">📊 Market Analysis</div>
-                <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
-                <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
-            </div>
-            """, unsafe_allow_html=True)
+                st.session_state.api_error = None
+                
+            # If no data and no error, show placeholder or old data
+            if not market_data:
+                # Optional: Show offline if truly empty
+                pass
         
         # Model Info - Dynamic stats
         model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
