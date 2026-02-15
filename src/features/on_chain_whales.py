@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class EthereumWhaleWatcher:
     """Track large ETH transactions using Etherscan."""
     
-    BASE_URL = "https://api.etherscan.io/api"
+    BASE_URL = "https://api.etherscan.io/v2/api"
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get("ETHERSCAN_API_KEY")
@@ -38,6 +38,7 @@ class EthereumWhaleWatcher:
         try:
             # 1. Get latest block number
             params = {
+                "chainid": "1",
                 "module": "proxy",
                 "action": "eth_blockNumber",
                 "apikey": self.api_key
@@ -55,6 +56,7 @@ class EthereumWhaleWatcher:
             
             # 2. Get block details
             params = {
+                "chainid": "1",
                 "module": "proxy",
                 "action": "eth_getBlockByNumber",
                 "tag": hex(current_block),
