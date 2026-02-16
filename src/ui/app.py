@@ -949,7 +949,7 @@ def render_position_fragment(symbol: str):
     try:
         # Try to get price from market API first (faster)
         clean_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=2)
+        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=5)
         if market_resp.status_code == 200:
             m_data = market_resp.json()
             if 'price' in m_data:
