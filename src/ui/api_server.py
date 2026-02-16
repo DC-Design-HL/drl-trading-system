@@ -10,44 +10,63 @@ from pathlib import Path
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+@app.route('/health')
+def health_check():
+    """Health check endpoint for system status."""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.data.storage import get_storage
+
+# Initialize storage
+storage = get_storage()
 
 @app.route('/api/state')
 def get_state():
     """Get current trading state."""
-    state_file = PROJECT_ROOT / 'logs' / 'trading_state.json'
-    if state_file.exists():
-        with open(state_file, 'r') as f:
-            return jsonify(json.load(f))
-    return jsonify({})
+    try:
+        state = storage.load_state()
+        # Normalize keys for frontend compatibility
+        if 'total_balance' in state and 'balance' not in state:
+            state['balance'] = state['total_balance']
+        if 'total_pnl' in state and 'realized_pnl' not in state:
+            state['realized_pnl'] = state['total_pnl']
+            
+        return jsonify(state)
+    except Exception as e:
+        logger.error(f"Failed to load state: {e}")
+        return jsonify({})
 
 @app.route('/api/trades')
 def get_trades():
     """Get recent trades."""
-    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
-    trades = []
-    if log_file.exists():
-        with open(log_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        trades.append(json.loads(line))
-                    except:
-                        pass
-    return jsonify(trades)
+    try:
+        trades = storage.get_trades(limit=100)
+        return jsonify(trades)
+    except Exception as e:
+        logger.error(f"Failed to load trades: {e}")
+        return jsonify([])
 
 @app.route('/api/trades/count')
 def get_trade_count():
     """Get trade count for change detection."""
-    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
-    count = 0
-    if log_file.exists():
-        with open(log_file, 'r') as f:
-            count = sum(1 for line in f if line.strip())
-    return jsonify({'count': count, 'timestamp': datetime.now().isoformat()})
+    try:
+        # Simple count estimation via list length
+        trades = storage.get_trades(limit=1000)
+        count = len(trades)
+        return jsonify({'count': count, 'timestamp': datetime.now().isoformat()})
+    except Exception as e:
+        logger.error(f"Failed to count trades: {e}")
+        return jsonify({'count': 0, 'timestamp': datetime.now().isoformat()})
 
 @app.route('/api/model')
 def get_model_info():
@@ -55,8 +74,6 @@ def get_model_info():
     import os
     
     model_path = PROJECT_ROOT / 'data' / 'models' / 'ultimate_agent.zip'
-    state_file = PROJECT_ROOT / 'logs' / 'trading_state.json'
-    log_file = PROJECT_ROOT / 'logs' / 'trading_log.json'
     
     # Model info
     model_exists = model_path.exists()
@@ -66,26 +83,23 @@ def get_model_info():
     else:
         model_date = "Not found"
     
-    # State info
+    # State info via storage
     state = {}
-    if state_file.exists():
-        with open(state_file, 'r') as f:
-            state = json.load(f)
+    try:
+        state = storage.load_state()
+    except Exception as e:
+        logger.error(f"Failed to load state for model info: {e}")
     
-    balance = state.get('balance', 10000)
+    # Handle multi-asset state structure
+    balance = state.get('total_balance', state.get('balance', 10000))
     total_return = ((balance - 10000) / 10000) * 100
     
-    # Trade stats
+    # Trade stats via storage
     trades = []
-    if log_file.exists():
-        with open(log_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    try:
-                        trades.append(json.loads(line))
-                    except:
-                        pass
+    try:
+        trades = storage.get_trades(limit=1000)
+    except Exception as e:
+        logger.error(f"Failed to load trades for model info: {e}")
     
     winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
     total = len(trades)
