@@ -624,10 +624,11 @@ def render_position_card(state: dict, current_price: float):
                 tp_price = entry_price * (1 - TP_PCT)
         
         # Calculate Unrealized PnL
+        units = state.get('position_size_units', state.get('position_units', 0))
         if is_long:
-            unrealized_pnl = (current_price - entry_price) * state.get('position_size_units', 0)
+            unrealized_pnl = (current_price - entry_price) * units
         else:
-            unrealized_pnl = (entry_price - current_price) * state.get('position_size_units', 0)
+            unrealized_pnl = (entry_price - current_price) * units
         
         pnl_color = "#26a69a" if unrealized_pnl >= 0 else "#ef5350"
         pnl_sign = "+" if unrealized_pnl >= 0 else ""
