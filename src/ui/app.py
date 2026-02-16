@@ -1466,8 +1466,8 @@ def main():
                     # Determine last action from trades
                     last_action = "NONE"
                     if sym_trades:
-                        # Sort by entry_time or exit_time if available
-                        sorted_trades = sorted(sym_trades, key=lambda x: x.get('entry_time', ''), reverse=True)
+                        # Sort by timestamp (preferred) or entry_time/exit_time
+                        sorted_trades = sorted(sym_trades, key=lambda x: x.get('timestamp', x.get('entry_time', x.get('exit_time', ''))), reverse=True)
                         if sorted_trades:
                             last_trade = sorted_trades[0]
                             # specific action key from live_trading_multi
