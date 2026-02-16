@@ -849,35 +849,44 @@ def render_market_analysis_fragment(symbol: str):
 
     # Whale Tracker
     whale = market_data.get('whale', {})
-    if whale and not whale.get('error'):
-        whale_color = "#26a69a" if whale.get('score', 0) > 0 else "#ef5350" if whale.get('score', 0) < 0 else "#888"
-        whale_emoji = "🟢" if whale.get('score', 0) > 0.1 else "🔴" if whale.get('score', 0) < -0.1 else "⚪"
-        
-        # Format Flow Metrics
-        flow_metrics = whale.get('flow_metrics', {})
-        net_flow = flow_metrics.get('net_flow', 0)
-        flow_color = "#26a69a" if net_flow > 0 else "#ef5350"
-        flow_sign = "+" if net_flow > 0 else "-"
-        
-        # Format to K or M
-        if abs(net_flow) > 1000000:
-            flow_str = f"{flow_sign}${abs(net_flow)/1000000:.1f}M"
-        elif abs(net_flow) > 1000:
-            flow_str = f"{flow_sign}${abs(net_flow)/1000:.0f}K"
+    if whale:
+        if whale.get('error'):
+             st.markdown(f"""
+             <div class="metric-card">
+                 <div class="metric-label">🐋 Whale Signals</div>
+                 <div style="color: #ef5350; font-size: 12px;">Data Error</div>
+                 <div style="color: #888; font-size: 10px;">{whale.get('error')}</div>
+             </div>
+             """, unsafe_allow_html=True)
         else:
-            flow_str = "$0"
-        
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">🐋 Whale Signals</div>
-            <div style="color: {whale_color}; font-size: 14px;">{whale_emoji} {whale.get('direction', 'NEUTRAL')}</div>
-            <div style="color: #888; font-size: 11px;">
-                Score: {whale.get('score', 0):.2f} | Conf: {whale.get('confidence', 0)}%<br>
-                Flow (1m): <span style="color: {flow_color}; font-weight: bold;">{flow_str}</span><br>
-                🟢{whale.get('bullish', 0)} 🔴{whale.get('bearish', 0)} ⚪{whale.get('neutral', 0)}
+            whale_color = "#26a69a" if whale.get('score', 0) > 0 else "#ef5350" if whale.get('score', 0) < 0 else "#888"
+            whale_emoji = "🟢" if whale.get('score', 0) > 0.1 else "🔴" if whale.get('score', 0) < -0.1 else "⚪"
+            
+            # Format Flow Metrics
+            flow_metrics = whale.get('flow_metrics', {})
+            net_flow = flow_metrics.get('net_flow', 0)
+            flow_color = "#26a69a" if net_flow > 0 else "#ef5350"
+            flow_sign = "+" if net_flow > 0 else "-"
+            
+            # Format to K or M
+            if abs(net_flow) > 1000000:
+                flow_str = f"{flow_sign}${abs(net_flow)/1000000:.1f}M"
+            elif abs(net_flow) > 1000:
+                flow_str = f"{flow_sign}${abs(net_flow)/1000:.0f}K"
+            else:
+                flow_str = "$0"
+            
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">🐋 Whale Signals</div>
+                <div style="color: {whale_color}; font-size: 14px;">{whale_emoji} {whale.get('direction', 'NEUTRAL')}</div>
+                <div style="color: #888; font-size: 11px;">
+                    Score: {whale.get('score', 0):.2f} | Conf: {whale.get('confidence', 0)}%<br>
+                    Flow (1m): <span style="color: {flow_color}; font-weight: bold;">{flow_str}</span><br>
+                    🟢{whale.get('bullish', 0)} 🔴{whale.get('bearish', 0)} ⚪{whale.get('neutral', 0)}
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
     
     # Funding
     funding_data = market_data.get('funding', {})
