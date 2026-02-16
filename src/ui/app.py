@@ -796,6 +796,8 @@ def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd
 def render_sidebar_metrics_fragment():
     """Render sidebar portfolio metrics with auto-refresh."""
     import requests
+    import logging
+    logger = logging.getLogger(__name__)
     try:
         # Fetch State
         try:
@@ -828,129 +830,15 @@ def render_sidebar_metrics_fragment():
 def render_market_analysis_fragment(symbol: str):
     """Render market analysis panel with auto-refresh."""
     import requests
+    import logging
+    logger = logging.getLogger(__name__)
     
-
-@st.fragment(run_every=15)
-def render_position_fragment(symbol: str):
-    """Render current position and portfolio status with auto-refresh."""
-    import requests
-    import os
-    from datetime import datetime
+    st.markdown("### 📊 Market Analysis")
     
-    # 1. Fetch Trading State
-    state = {}
-    try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
-        if state_resp.status_code == 200:
-            state = state_resp.json()
-    except Exception as e:
-        logger.error(f"State fetch error: {e}")
-
-    # 2. Fetch Live Price (Fast, from API or Fallback)
-    current_price = 0.0
-    try:
-        # Try to get price from market API first (faster)
-        clean_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=2)
-        if market_resp.status_code == 200:
-            # Market API might not return price directly, but let's check or use load_real_market_data fallback
-            # Actually, let's use the existing load_real_market_data logic but inside here
-            pass
-            
-        # Fallback to direct CCXT/Yfinance fetch (or existing utility)
-        # We need to import the utility here or use what's available globally
-        # load_real_market_data is available in global scope
-        live_data = load_real_market_data(symbol, '1m')
-        if not live_data.empty:
-            current_price = float(live_data.iloc[-1]['close'])
-        else:
-             live_1h = load_real_market_data(symbol, '1h')
-             if not live_1h.empty:
-                 current_price = float(live_1h.iloc[-1]['close'])
-    except Exception as e:
-        logger.error(f"Price fetch error: {e}")
-
-    # 3. Render Portfolio Value & P&L
-    balance = state.get('balance', 10000)
-    total_pnl = state.get('realized_pnl', 0)
-    pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
-    pnl_sign = "+" if total_pnl >= 0 else ""
-    
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Portfolio Value</div>
-        <div class="metric-value">${balance:,.2f}</div>
-        <div class="{pnl_class}">P&L: {pnl_sign}${total_pnl:,.2f}</div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # 4. Render Position Card
-    render_position_card(state, current_price)
-    
-    # 5. Render Trade History
-    render_trade_history(state.get('trades', []))
-
-
-@st.fragment(run_every=15)
-def render_agent_status_fragment():
-    """Render active agent status and model info with auto-refresh."""
-    import requests
-    import os
-    from datetime import datetime
-    
-    # Fetch State
-    state = {}
-    try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
-        if state_resp.status_code == 200:
-            state = state_resp.json()
-    except Exception as e:
-        pass
-        
-    # Model Info
-    project_root = Path(__file__).parent.parent.parent
-    model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
-    model_exists = model_path.exists()
-    
-    # Calculate actual win rate from trades
-    trades = state.get('trades', [])
-    if trades:
-        winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
-        total = len(trades)
-        win_rate = (winning / total * 100) if total > 0 else 0
-    else:
-        win_rate = 0
-    
-    # Calculate return from balance
-    balance = state.get('balance', 10000)
-    total_return = ((balance - 10000) / 10000) * 100
-    
-    # Get model last modified time
-    if model_exists:
-        try:
-            model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
-            model_date = model_mtime.strftime("%Y-%m-%d")
-        except:
-            model_date = "Unknown"
-    else:
-        model_date = "Not found"
-    
-    return_color = "#26a69a" if total_return >= 0 else "#ef5350"
-    return_sign = "+" if total_return >= 0 else ""
-    
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Active Model</div>
-        <div style="color: white; font-size: 14px; margin-top: 5px;">Ultimate Agent (PPO)</div>
-        <div style="color: {return_color}; font-size: 12px;">{return_sign}{total_return:.2f}% Return | {win_rate:.1f}% Win Rate</div>
-        <div style="color: #888; font-size: 11px;">Trades: {len(trades)} | Model: {model_date}</div>
-        <div style="color: {'#26a69a' if model_exists else '#ef5350'}; font-size: 11px;">{'✓ Model loaded' if model_exists else '✗ Model not found'}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
+    # Fetch Market Analysis for current asset
+    market_data = {}
     try:
         api_symbol = symbol.replace('/', '').upper()
-
         market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5)
         if market_resp.status_code == 200:
             market_data = market_resp.json()
@@ -1037,6 +925,130 @@ def render_agent_status_fragment():
             </div>
         </div>
         """, unsafe_allow_html=True)
+
+@st.fragment(run_every=15)
+def render_position_fragment(symbol: str):
+    """Render current position and portfolio status with auto-refresh."""
+    import requests
+    import os
+    from datetime import datetime
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 1. Fetch Trading State
+    state = {}
+    try:
+        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+        if state_resp.status_code == 200:
+            state = state_resp.json()
+    except Exception as e:
+        logger.error(f"State fetch error: {e}")
+
+    # 2. Fetch Live Price (Fast, from API or Fallback)
+    current_price = 0.0
+    try:
+        # Try to get price from market API first (faster)
+        clean_symbol = symbol.replace('/', '').upper()
+        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=2)
+        if market_resp.status_code == 200:
+            # Market API might not return price directly, but let's check or use load_real_market_data fallback
+            # Actually, let's use the existing load_real_market_data logic but inside here
+            pass
+            
+        # Fallback to direct CCXT/Yfinance fetch (or existing utility)
+        # We need to import the utility here or use what's available globally
+        # load_real_market_data is available in global scope
+        live_data = load_real_market_data(symbol, '1m')
+        if not live_data.empty:
+            current_price = float(live_data.iloc[-1]['close'])
+        else:
+             live_1h = load_real_market_data(symbol, '1h')
+             if not live_1h.empty:
+                 current_price = float(live_1h.iloc[-1]['close'])
+    except Exception as e:
+        logger.error(f"Price fetch error: {e}")
+
+    # 3. Render Portfolio Value & P&L
+    balance = state.get('balance', 10000)
+    total_pnl = state.get('realized_pnl', 0)
+    pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
+    pnl_sign = "+" if total_pnl >= 0 else ""
+    
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Portfolio Value</div>
+        <div class="metric-value">${balance:,.2f}</div>
+        <div class="{pnl_class}">P&L: {pnl_sign}${total_pnl:,.2f}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 4. Render Position Card
+    render_position_card(state, current_price)
+    
+    # 5. Render Trade History
+    render_trade_history(state.get('trades', []))
+
+
+@st.fragment(run_every=15)
+def render_agent_status_fragment():
+    """Render active agent status and model info with auto-refresh."""
+    import requests
+    import os
+    from datetime import datetime
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Fetch State
+    state = {}
+    try:
+        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+        if state_resp.status_code == 200:
+            state = state_resp.json()
+    except Exception as e:
+        pass
+        
+    # Model Info
+    project_root = Path(__file__).parent.parent.parent
+    model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
+    model_exists = model_path.exists()
+    
+    # Calculate actual win rate from trades
+    trades = state.get('trades', [])
+    if trades:
+        winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
+        total = len(trades)
+        win_rate = (winning / total * 100) if total > 0 else 0
+    else:
+        win_rate = 0
+    
+    # Calculate return from balance
+    balance = state.get('balance', 10000)
+    total_return = ((balance - 10000) / 10000) * 100
+    
+    # Get model last modified time
+    if model_exists:
+        try:
+            model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
+            model_date = model_mtime.strftime("%Y-%m-%d")
+        except:
+            model_date = "Unknown"
+    else:
+        model_date = "Not found"
+    
+    return_color = "#26a69a" if total_return >= 0 else "#ef5350"
+    return_sign = "+" if total_return >= 0 else ""
+    
+    st.markdown(f"""
+    <div class="metric-card">
+        <div class="metric-label">Active Model</div>
+        <div style="color: white; font-size: 14px; margin-top: 5px;">Ultimate Agent (PPO)</div>
+        <div style="color: {return_color}; font-size: 12px;">{return_sign}{total_return:.2f}% Return | {win_rate:.1f}% Win Rate</div>
+        <div style="color: #888; font-size: 11px;">Trades: {len(trades)} | Model: {model_date}</div>
+        <div style="color: {'#26a69a' if model_exists else '#ef5350'}; font-size: 11px;">{'✓ Model loaded' if model_exists else '✗ Model not found'}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 
 
 def on_asset_change():
