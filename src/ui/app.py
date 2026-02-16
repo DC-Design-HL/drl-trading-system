@@ -594,10 +594,11 @@ def render_position_card(state: dict, current_price: float):
     TP_PCT = 0.025  # 2.5% (matches live_trading.py)
     
     if position == 0:
-        st.markdown("""
+        st.markdown(f"""
         <div class="metric-card" style="text-align: center;">
             <div class="metric-label">Current Position</div>
-            <div style="font-size: 24px; color: #555; margin-top: 10px;">No Position</div>
+            <div style="font-size: 24px; color: #555; margin-top: 10px;">No Position (FLAT)</div>
+            <div style="font-size: 12px; color: #888; margin-top: 5px;">Current Price: ${current_price:,.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     else:
@@ -1465,23 +1466,32 @@ def main():
                     # Determine last action from trades
                     last_action = "NONE"
                     if sym_trades:
-                        # Sort by entry_time or exit_time if available, or assume order in list (usually newest last or first?)
-                        # Storage returns usually newest first or last? JsonFileStorage appends, so newest last.
-                        # Let's check timestamp.
+                        # Sort by entry_time or exit_time if available
                         sorted_trades = sorted(sym_trades, key=lambda x: x.get('entry_time', ''), reverse=True)
                         if sorted_trades:
                             last_trade = sorted_trades[0]
-                            last_action = last_trade.get('side', 'NONE').upper()
-                            if last_trade.get('pnl') is not None:
-                                last_action += " (CLOSED)"
+                            # specific action key from live_trading_multi
+                            raw_action = last_trade.get('action', last_trade.get('side', 'NONE')).upper()
+                            
+                            # Beautify
+                            if 'OPEN_LONG' in raw_action:
+                                last_action = "LONG (OPEN)"
+                            elif 'OPEN_SHORT' in raw_action:
+                                last_action = "SHORT (OPEN)"
+                            elif 'CLOSE_LONG' in raw_action:
+                                last_action = "LONG (CLOSED)"
+                            elif 'CLOSE_SHORT' in raw_action:
+                                last_action = "SHORT (CLOSED)"
+                            elif 'EXIT' in raw_action:
+                                last_action = "EXIT"
                             else:
-                                last_action += " (OPEN)"
+                                last_action = raw_action
                     
                     assets_data.append({
                         "Asset": symbol,
                         "Price": data.get('price', 0),
                         "Position": pos_str,
-                        "Equity": data.get('balance', 0), # This is actually equity per live_trading_multi.py update
+                        "Equity": data.get('balance', 0), 
                         "PnL ($)": data.get('pnl', 0),
                         "Trades": trades_count,
                         "Last Action": last_action
