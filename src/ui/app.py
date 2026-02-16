@@ -988,7 +988,6 @@ def render_position_fragment(symbol: str):
     if 'assets' in state:
         # Try exact match or cleaned match
         clean_symbol = symbol.replace('/', '').upper()
-        # Check standard symbol, cleaned, or slashed
         if symbol in state['assets']:
             asset_state = state['assets'][symbol]
         elif clean_symbol in state['assets']:
@@ -998,14 +997,29 @@ def render_position_fragment(symbol: str):
     if not asset_state and 'position' in state:
         asset_state = state
         
+    # NORMALIZE STATE: Ensure position_price is set for P&L calc
+    # Agent state usually has 'price' as entry price
+    if asset_state:
+        if 'position_price' not in asset_state and 'price' in asset_state:
+            asset_state['position_price'] = asset_state['price']
+        if 'position_price' not in asset_state and 'entry_price' in asset_state:
+            asset_state['position_price'] = asset_state['entry_price']
+            
     render_position_card(asset_state, current_price)
     
     # 5. Render Trade History
-    # Filter trades for this symbol if they are mixed
-    trades = state.get('trades', [])
-    if not trades and asset_state:
-         trades = asset_state.get('trades', [])
-         
+    # Fetch trades from API explicitly
+    trades = []
+    try:
+        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=2)
+        if trades_resp.status_code == 200:
+            all_trades = trades_resp.json()
+            # Filter for current symbol
+            clean_symbol = symbol.replace('/', '').upper()
+            trades = [t for t in all_trades if t.get('symbol', '').replace('/', '').upper() == clean_symbol]
+    except Exception as e:
+        logger.error(f"Trades fetch error: {e}")
+        
     render_trade_history(trades)
 
 
@@ -1423,13 +1437,45 @@ def main():
                 assets_data = []
                 raw_assets = state['raw_state']['assets']
                 
+                # Fetch all trades to populate table correctly
+                all_trades = []
+                try:
+                    all_trades = storage.get_trades(limit=1000)
+                except Exception as e:
+                    logger.error(f"Failed to load trades for table: {e}")
+                
+                # Map trades to symbols
+                trades_by_symbol = {}
+                for t in all_trades:
+                    sym = t.get('symbol', '').replace('/', '').upper()
+                    if sym not in trades_by_symbol:
+                        trades_by_symbol[sym] = []
+                    trades_by_symbol[sym].append(t)
+                
                 for symbol, data in raw_assets.items():
                     # Calculate metrics
                     position_amt = data.get('position', 0)
                     pos_str = "LONG 🟢" if position_amt > 0 else "SHORT 🔴" if position_amt < 0 else "FLAT ⚪"
                     
-                    trades_count = len(data.get('trades', []))
-                    last_action = data.get('last_action', 'NONE')
+                    # Get trades for this symbol
+                    clean_sym = symbol.replace('/', '').upper()
+                    sym_trades = trades_by_symbol.get(clean_sym, [])
+                    trades_count = len(sym_trades)
+                    
+                    # Determine last action from trades
+                    last_action = "NONE"
+                    if sym_trades:
+                        # Sort by entry_time or exit_time if available, or assume order in list (usually newest last or first?)
+                        # Storage returns usually newest first or last? JsonFileStorage appends, so newest last.
+                        # Let's check timestamp.
+                        sorted_trades = sorted(sym_trades, key=lambda x: x.get('entry_time', ''), reverse=True)
+                        if sorted_trades:
+                            last_trade = sorted_trades[0]
+                            last_action = last_trade.get('side', 'NONE').upper()
+                            if last_trade.get('pnl') is not None:
+                                last_action += " (CLOSED)"
+                            else:
+                                last_action += " (OPEN)"
                     
                     assets_data.append({
                         "Asset": symbol,
