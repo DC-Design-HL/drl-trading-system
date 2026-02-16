@@ -3,9 +3,9 @@
 # Start the trading bot in the background
 # Using unbuffered output to ensure logs are visible immediately
 # Start the trading bot (pipe to file for UI access)
-python -u live_trading_multi.py --assets BTCUSDT ETHUSDT SOLUSDT XRPUSDT --balance 5000 > process.log 2>&1 &
+python -u live_trading_multi.py --assets BTCUSDT ETHUSDT --balance 5000 > process.log 2>&1 &
 
-# Start the API server
+# Start the API serverplease
 python -u src/ui/api_server.py > api_server.log 2>&1 &
 
 # Start the Streamlit dashboard
