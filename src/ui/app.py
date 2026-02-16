@@ -1416,11 +1416,17 @@ def main():
             # Metric Row
             m1, m2, m3, m4 = st.columns(4)
             total_balance = state.get('balance', 0)
+            
+            # Recalculate total_pnl from assets to ensure it matches the table sum exactly
             total_pnl = state.get('realized_pnl', 0)
+            if state.get('multi_asset') and state.get('raw_state', {}).get('assets'):
+                raw_assets = state['raw_state']['assets']
+                total_pnl = sum(d.get('pnl', 0) for d in raw_assets.values())
+            
             active_assets_count = len(state.get('available_assets', []))
             
             m1.metric("Total Portfolio Value", f"${total_balance:,.2f}")
-            m2.metric("Total Realized P&L", f"${total_pnl:,.2f}", delta=f"{total_pnl:,.2f}")
+            m2.metric("Total Realized P&L", f"${total_pnl:,.2f}", delta=None) # Start with no delta or simple color
             m3.metric("Active Assets", active_assets_count)
             is_online = check_process_running("live_trading_multi.py")
             m4.metric("System Status", "🟢 Online" if is_online else "🔴 Offline")
