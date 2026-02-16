@@ -276,55 +276,18 @@ def get_market_analysis():
                 '15m': mtf_data.get('15m', 'neutral')
             }
 
+    # API Server should NOT perform heavy analysis on the fly.
+    # It must rely on the live_trading_multi.py to populate the state.
+    # If the state is missing data, we return empty/null to indicate "System Syncing".
+    
     if not result['mtf']:
-        try:
-            # MTF Analyzer - use get_mtf_data method
-            from src.features.mtf_analyzer import MultiTimeframeAnalyzer
-            mtf = MultiTimeframeAnalyzer(symbol=clean_symbol)
-            
-            # Using get_summary() which is more robust than manual checks
-            mtf_res = mtf.get_summary()
-            
-            result['mtf'] = {
-                'bias': 'BULLISH' if mtf_res['aligned'] and mtf_res['direction'] == 'bullish' else 
-                        'BEARISH' if mtf_res['aligned'] and mtf_res['direction'] == 'bearish' else 'NEUTRAL',
-                'aligned': mtf_res['aligned'],
-                'reason': mtf_res['recommendation'],
-                '4h': mtf_res['signals'].get('4h', {}).get('direction', 'neutral'),
-                '1h': mtf_res['signals'].get('1h', {}).get('direction', 'neutral'),
-                '15m': mtf_res['signals'].get('15m', {}).get('direction', 'neutral')
-            }
-        except Exception as e:
-            result['mtf'] = {'error': str(e)}
-    
+        result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
+        
     if not result['funding']:
-        try:
-            # Funding Rate Analyzer - use get_signal method
-            from src.features.order_flow import FundingRateAnalyzer
-            funding = FundingRateAnalyzer(symbol=clean_symbol)
-            funding_signal = funding.get_signal()
-            result['funding'] = {
-                'rate': round(funding_signal.rate * 100, 4),
-                'bias': funding_signal.signal,
-                'annualized': round(funding_signal.rate * 3 * 365 * 100, 1)
-            }
-        except Exception as e:
-            result['funding'] = {'error': str(e)}
-    
+        result['funding'] = {'rate': 0, 'bias': 'neutral'}
+        
     if not result['order_flow']:
-        try:
-            # Order Flow Analyzer - use analyze_large_orders method
-            from src.features.order_flow import OrderFlowAnalyzer
-            order_flow = OrderFlowAnalyzer(symbol=clean_symbol)
-            of_result = order_flow.analyze_large_orders()
-            result['order_flow'] = {
-                'large_buys': of_result.get('large_buys', 0),
-                'large_sells': of_result.get('large_sells', 0),
-                'bias': of_result.get('bias', 'neutral'),
-                'net_flow': of_result.get('large_buy_volume', 0) - of_result.get('large_sell_volume', 0)
-            }
-        except Exception as e:
-            result['order_flow'] = {'error': str(e)}
+        result['order_flow'] = {'bias': 'neutral', 'net_flow': 0}
     
     return jsonify(result)
 

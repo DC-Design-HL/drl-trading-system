@@ -669,6 +669,10 @@ class MultiAssetOrchestrator:
                 # Save state frequently (every loop) for dashboard updates
                 self.save_state()
                 
+                # Force garbage collection to prevent OOM
+                import gc
+                gc.collect()
+                
                 # Sleep for 60s
                 time.sleep(60)
             
