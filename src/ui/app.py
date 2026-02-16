@@ -951,20 +951,19 @@ def render_position_fragment(symbol: str):
         clean_symbol = symbol.replace('/', '').upper()
         market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=2)
         if market_resp.status_code == 200:
-            # Market API might not return price directly, but let's check or use load_real_market_data fallback
-            # Actually, let's use the existing load_real_market_data logic but inside here
-            pass
-            
-        # Fallback to direct CCXT/Yfinance fetch (or existing utility)
-        # We need to import the utility here or use what's available globally
-        # load_real_market_data is available in global scope
-        live_data = load_real_market_data(symbol, '1m')
-        if not live_data.empty:
-            current_price = float(live_data.iloc[-1]['close'])
-        else:
-             live_1h = load_real_market_data(symbol, '1h')
-             if not live_1h.empty:
-                 current_price = float(live_1h.iloc[-1]['close'])
+            m_data = market_resp.json()
+            if 'price' in m_data:
+                current_price = float(m_data['price'])
+                
+        # Fallback if API didn't return price
+        if current_price == 0:
+            live_data = load_real_market_data(symbol, '1m')
+            if not live_data.empty:
+                current_price = float(live_data.iloc[-1]['close'])
+            else:
+                 live_1h = load_real_market_data(symbol, '1h')
+                 if not live_1h.empty:
+                     current_price = float(live_1h.iloc[-1]['close'])
     except Exception as e:
         logger.error(f"Price fetch error: {e}")
 

@@ -243,6 +243,10 @@ def get_market_analysis():
         ])
         for col in ['open', 'high', 'low', 'close', 'volume']:
             df[col] = df[col].astype(float)
+            
+        # Add current price to result
+        if not df.empty:
+            result['price'] = float(df.iloc[-1]['close'])
         
         # Regime Detector
         from src.features.regime_detector import MarketRegimeDetector
@@ -257,6 +261,7 @@ def get_market_analysis():
             'volatility': round(getattr(regime_result, 'volatility_multiplier', 1), 2)
         }
     except Exception as e:
+        logger.error(f"Market data fetch error: {e}")
         result['regime'] = {'error': str(e)}
     
     if not result['mtf'] and state_analysis:
