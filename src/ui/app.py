@@ -602,6 +602,10 @@ def render_position_card(state: dict, current_price: float):
         </div>
         """, unsafe_allow_html=True)
     else:
+        # DEBUG: Inspect state to find units key
+        # st.write(f"Debug State for P&L: {state}")
+        # logger.info(f"Debug State for P&L: {state}") 
+        pass
         is_long = position == 1
         color = "#26a69a" if is_long else "#ef5350"
         side = "LONG" if is_long else "SHORT"
@@ -624,7 +628,7 @@ def render_position_card(state: dict, current_price: float):
                 tp_price = entry_price * (1 - TP_PCT)
         
         # Calculate Unrealized PnL
-        units = state.get('position_size_units', state.get('position_units', 0))
+        units = state.get('position_size_units', state.get('position_units', state.get('units', 0)))
         if is_long:
             unrealized_pnl = (current_price - entry_price) * units
         else:

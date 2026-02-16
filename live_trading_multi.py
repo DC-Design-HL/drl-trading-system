@@ -711,7 +711,8 @@ class MultiAssetOrchestrator:
         state['assets'] = {}
         for symbol, bot in self.bots.items():
             state['assets'][symbol] = {
-                'price': bot.current_price if bot.current_price > 0 else bot.position_price, # Latest price
+                'price': bot.current_price if bot.current_price > 0 else bot.position_price, # Latest price for display
+                'entry_price': bot.position_price, # Explicit entry price for P&L
                 'position': bot.position,
                 'balance': bot.balance,
                 'pnl': bot.realized_pnl,
