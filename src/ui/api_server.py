@@ -121,6 +121,7 @@ def get_model_info():
 def get_market_analysis():
     """Get comprehensive market analysis from all analyzers."""
     import sys
+    import os
     from flask import request
     sys.path.insert(0, str(PROJECT_ROOT))
     

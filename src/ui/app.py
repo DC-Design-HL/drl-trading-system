@@ -969,8 +969,9 @@ def render_position_fragment(symbol: str):
         logger.error(f"Price fetch error: {e}")
 
     # 3. Render Portfolio Value & P&L
-    balance = state.get('balance', 10000)
-    total_pnl = state.get('realized_pnl', 0)
+    # Handle both top-level keys (from app.py compatibility) and nested structure
+    balance = state.get('total_balance', state.get('balance', 10000))
+    total_pnl = state.get('total_pnl', state.get('realized_pnl', 0))
     pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
     pnl_sign = "+" if total_pnl >= 0 else ""
     
@@ -983,10 +984,30 @@ def render_position_fragment(symbol: str):
     """, unsafe_allow_html=True)
     
     # 4. Render Position Card
-    render_position_card(state, current_price)
+    # Extract specific asset state from global state
+    asset_state = {}
+    if 'assets' in state:
+        # Try exact match or cleaned match
+        clean_symbol = symbol.replace('/', '').upper()
+        # Check standard symbol, cleaned, or slashed
+        if symbol in state['assets']:
+            asset_state = state['assets'][symbol]
+        elif clean_symbol in state['assets']:
+            asset_state = state['assets'][clean_symbol]
+    
+    # If not found, fall back to global state (in case API returns single asset state)
+    if not asset_state and 'position' in state:
+        asset_state = state
+        
+    render_position_card(asset_state, current_price)
     
     # 5. Render Trade History
-    render_trade_history(state.get('trades', []))
+    # Filter trades for this symbol if they are mixed
+    trades = state.get('trades', [])
+    if not trades and asset_state:
+         trades = asset_state.get('trades', [])
+         
+    render_trade_history(trades)
 
 
 @st.fragment(run_every=15)
