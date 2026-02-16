@@ -791,6 +791,134 @@ def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd
         return pd.DataFrame()
 
 
+@st.fragment(run_every=5)
+def render_sidebar_metrics_fragment():
+    """Render sidebar portfolio metrics with auto-refresh."""
+    import requests
+    try:
+        # Fetch State
+        try:
+            state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+            if state_resp.status_code == 200:
+                api_state = state_resp.json()
+                # Update session state with API data (optional, but good for other parts)
+                if 'balance' in api_state:
+                     st.session_state.portfolio_balance = api_state.get('balance', 0)
+                     st.session_state.realized_pnl = api_state.get('realized_pnl', 0)
+            
+            # Render
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">Portfolio Value</div>
+                <div class="metric-value">${st.session_state.get('portfolio_balance', 10000):,.2f}</div>
+                <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('realized_pnl', 0) >= 0 else '#ef5350'}">
+                    P&L: {'+' if st.session_state.get('realized_pnl', 0) >= 0 else ''}${st.session_state.get('realized_pnl', 0):,.2f}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        except Exception as e:
+            st.markdown(f"<div style='color: #ef5350'>Connection Error</div>", unsafe_allow_html=True)
+
+    except Exception as e:
+        logger.error(f"Sidebar data fetch error: {e}")
+
+@st.fragment(run_every=5)
+def render_market_analysis_fragment(symbol: str):
+    """Render market analysis panel with auto-refresh."""
+    import requests
+    
+    st.markdown("### 📊 Market Analysis")
+    
+    # Fetch Market Analysis for current asset
+    market_data = {}
+    try:
+        api_symbol = symbol.replace('/', '').upper()
+        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5)
+        if market_resp.status_code == 200:
+            market_data = market_resp.json()
+    except Exception as e:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">📊 Market Analysis</div>
+            <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
+            <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    # Whale Tracker
+    whale = market_data.get('whale', {})
+    if whale and not whale.get('error'):
+        whale_color = "#26a69a" if whale.get('score', 0) > 0 else "#ef5350" if whale.get('score', 0) < 0 else "#888"
+        whale_emoji = "🟢" if whale.get('score', 0) > 0.1 else "🔴" if whale.get('score', 0) < -0.1 else "⚪"
+        
+        # Format Flow Metrics
+        flow_metrics = whale.get('flow_metrics', {})
+        net_flow = flow_metrics.get('net_flow', 0)
+        flow_color = "#26a69a" if net_flow > 0 else "#ef5350"
+        flow_sign = "+" if net_flow > 0 else "-"
+        
+        # Format to K or M
+        if abs(net_flow) > 1000000:
+            flow_str = f"{flow_sign}${abs(net_flow)/1000000:.1f}M"
+        elif abs(net_flow) > 1000:
+            flow_str = f"{flow_sign}${abs(net_flow)/1000:.0f}K"
+        else:
+            flow_str = "$0"
+        
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">🐋 Whale Signals</div>
+            <div style="color: {whale_color}; font-size: 14px;">{whale_emoji} {whale.get('direction', 'NEUTRAL')}</div>
+            <div style="color: #888; font-size: 11px;">
+                Score: {whale.get('score', 0):.2f} | Conf: {whale.get('confidence', 0)}%<br>
+                Flow (1m): <span style="color: {flow_color}; font-weight: bold;">{flow_str}</span><br>
+                🟢{whale.get('bullish', 0)} 🔴{whale.get('bearish', 0)} ⚪{whale.get('neutral', 0)}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Funding
+    funding_data = market_data.get('funding', {})
+    funding = funding_data.get('data', {}) # structure varies, being safe
+    if funding_data and not funding_data.get('error'):
+         # Extract funding rate
+         rate = funding_data.get('rate', 0)
+         funding_color = "#26a69a" if rate > 0.0001 else "#ef5350" if rate < -0.0001 else "#888"
+         
+         st.markdown(f"""
+         <div class="metric-card">
+             <div class="metric-label">💰 Funding Rate</div>
+             <div style="color: {funding_color}; font-size: 14px;">{rate:.4f}%</div>
+             <div style="color: #888; font-size: 11px;">
+                 Bias: {funding_data.get('bias', 'neutral')} | APR: {funding_data.get('annualized', 0):.1f}%
+             </div>
+         </div>
+         """, unsafe_allow_html=True)
+    
+    # Order Flow
+    order_flow = market_data.get('order_flow', {})
+    if order_flow and not order_flow.get('error'):
+        of_bias = order_flow.get('bias', 'neutral')
+        of_color = "#26a69a" if of_bias == 'bullish' else "#ef5350" if of_bias == 'bearish' else "#888"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">📊 Order Flow</div>
+            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()}</div>
+            <div style="color: #888; font-size: 11px;">
+                Buys: {order_flow.get('large_buys', 0)} | Sells: {order_flow.get('large_sells', 0)}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def on_asset_change():
+    """Callback for asset selection change."""
+    # Clear stale market analysis to trigger fresh fetch in fragments
+    st.session_state.market_analysis = None
+    # Optional: Reset other asset-specific state if needed
+
 def main():
     """Main application entry point."""
     
@@ -806,18 +934,9 @@ def main():
     state_preview = get_trading_state()
     available_assets = state_preview.get('available_assets', ['BTCUSDT'])
     
-    # Initialize auto-refresh state
+    # Initialize session state for auto-refresh (kept for toggle state only)
     if 'auto_refresh' not in st.session_state:
         st.session_state.auto_refresh = True
-    if 'last_refresh' not in st.session_state:
-        st.session_state.last_refresh = time.time()
-    
-    # Auto-refresh logic (every 10 seconds for live updates)
-    if st.session_state.auto_refresh:
-        current_time = time.time()
-        if current_time - st.session_state.last_refresh > 10:
-            st.session_state.last_refresh = current_time
-            st.rerun()
     
     # Sidebar
     with st.sidebar:
@@ -828,7 +947,8 @@ def main():
             st.session_state.selected_asset = st.selectbox(
                 "Select Asset",
                 available_assets,
-                index=available_assets.index(st.session_state.selected_asset) if st.session_state.selected_asset in available_assets else 0
+                index=available_assets.index(st.session_state.selected_asset) if st.session_state.selected_asset in available_assets else 0,
+                on_change=on_asset_change
             )
         else:
             st.markdown(f"**Asset:** {st.session_state.selected_asset}")
@@ -925,44 +1045,12 @@ def main():
         # Auto-refresh toggle
         st.session_state.auto_refresh = st.toggle("Auto Refresh", value=st.session_state.auto_refresh)
     
-    # JavaScript-based available assets check
-    # Server-side data fetching (resolves 'offline' issues in HF Spaces)
-    import requests
-    try:
-        # Fetch State
-        try:
-            state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
-            if state_resp.status_code == 200:
-                api_state = state_resp.json()
-                # Update session state with API data
-                if 'balance' in api_state:
-                     st.session_state.portfolio_balance = api_state.get('balance', 0)
-                     st.session_state.realized_pnl = api_state.get('realized_pnl', 0)
-        except Exception as e:
-            pass # API might be starting up
-
-        # Fetch Market Analysis for current asset
-        try:
-            market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={st.session_state.selected_asset}', timeout=2)
-            if market_resp.status_code == 200:
-                st.session_state.market_analysis = market_resp.json()
-        except Exception as e:
-             pass
-
-    except Exception as e:
-        logger.error(f"Data fetch error: {e}")
+    # Data fetching is now handled inside fragments (render_sidebar_metrics_fragment, render_market_analysis_fragment)
+    pass
     
-    # Render Sidebar Metrics using Server-Side Data
+    # Render Sidebar Metrics using Fragment
     with st.sidebar:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">Portfolio Value</div>
-            <div class="metric-value">${st.session_state.get('portfolio_balance', 10000):,.2f}</div>
-            <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('realized_pnl', 0) >= 0 else '#ef5350'}">
-                P&L: {'+' if st.session_state.get('realized_pnl', 0) >= 0 else ''}${st.session_state.get('realized_pnl', 0):,.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        render_sidebar_metrics_fragment()
     
     st.divider()
     
@@ -1369,132 +1457,7 @@ def main():
         render_trade_history(state.get('trades', []))
         
         # Market Analysis Panel
-        st.markdown("### 📊 Market Analysis")
-        
-        # Try to use cached market analysis or fetch live
-        market_data = st.session_state.get('market_analysis', {})
-        
-        if not market_data:
-            try:
-                import requests
-                # Pass selected asset to API
-                api_symbol = st.session_state.selected_asset.replace('/', '').upper()
-                # Use 127.0.0.1 to avoid localhost resolution issues in some containers
-                market_data = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5).json()
-                st.session_state.market_analysis = market_data
-            except Exception as e:
-                # Show offline status
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">📊 Market Analysis</div>
-                    <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
-                    <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
-                </div>
-                """, unsafe_allow_html=True)
-                # Keep market_data empty
-                market_data = {}
-            
-            # Whale Tracker
-            whale = market_data.get('whale', {})
-            if whale and not whale.get('error'):
-                whale_color = "#26a69a" if whale.get('score', 0) > 0 else "#ef5350" if whale.get('score', 0) < 0 else "#888"
-                whale_emoji = "🟢" if whale.get('score', 0) > 0.1 else "🔴" if whale.get('score', 0) < -0.1 else "⚪"
-                
-                # Format Flow Metrics
-                flow_metrics = whale.get('flow_metrics', {})
-                net_flow = flow_metrics.get('net_flow', 0)
-                flow_color = "#26a69a" if net_flow > 0 else "#ef5350"
-                flow_sign = "+" if net_flow > 0 else "-"
-                
-                # Format to K or M
-                if abs(net_flow) > 1000000:
-                    flow_str = f"{flow_sign}${abs(net_flow)/1000000:.1f}M"
-                elif abs(net_flow) > 1000:
-                    flow_str = f"{flow_sign}${abs(net_flow)/1000:.0f}K"
-                else:
-                    flow_str = "$0"
-                
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">🐋 Whale Signals</div>
-                    <div style="color: {whale_color}; font-size: 14px;">{whale_emoji} {whale.get('direction', 'NEUTRAL')}</div>
-                    <div style="color: #888; font-size: 11px;">
-                        Score: {whale.get('score', 0):.2f} | Conf: {whale.get('confidence', 0)}%<br>
-                        Flow (1m): <span style="color: {flow_color}; font-weight: bold;">{flow_str}</span><br>
-                        🟢{whale.get('bullish', 0)} 🔴{whale.get('bearish', 0)} ⚪{whale.get('neutral', 0)}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Market Regime
-            regime = market_data.get('regime', {})
-            if regime and not regime.get('error'):
-                regime_color = "#26a69a" if 'UP' in regime.get('type', '') else "#ef5350" if 'DOWN' in regime.get('type', '') else "#f59e0b"
-                regime_icon = "📈" if 'UP' in regime.get('type', '') else "📉" if 'DOWN' in regime.get('type', '') else "📊"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">{regime_icon} Market Regime</div>
-                    <div style="color: {regime_color}; font-size: 14px;">{regime.get('type', 'UNKNOWN')}</div>
-                    <div style="color: #888; font-size: 11px;">
-                        ADX: {regime.get('adx', 0)} | Vol: {regime.get('volatility', 1)}x
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # MTF Confluence
-            mtf = market_data.get('mtf', {})
-            if mtf and not mtf.get('error'):
-                aligned = mtf.get('aligned', False)
-                mtf_color = "#26a69a" if aligned else "#f59e0b"
-                tf_4h = "🟢" if mtf.get('4h') == 'bullish' else "🔴" if mtf.get('4h') == 'bearish' else "⚪"
-                tf_1h = "🟢" if mtf.get('1h') == 'bullish' else "🔴" if mtf.get('1h') == 'bearish' else "⚪"
-                tf_15m = "🟢" if mtf.get('15m') == 'bullish' else "🔴" if mtf.get('15m') == 'bearish' else "⚪"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">📊 MTF Confluence</div>
-                    <div style="color: {mtf_color}; font-size: 14px;">{'✓ ALIGNED' if aligned else '⚠️ CONFLICTING'}</div>
-                    <div style="color: #888; font-size: 11px;">
-                        4H: {tf_4h} | 1H: {tf_1h} | 15m: {tf_15m}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Funding Rate
-            funding = market_data.get('funding', {})
-            if funding and not funding.get('error'):
-                rate = funding.get('rate', 0)
-                funding_color = "#26a69a" if rate < 0 else "#ef5350" if rate > 0.02 else "#888"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">💰 Funding Rate</div>
-                    <div style="color: {funding_color}; font-size: 14px;">{rate:.4f}%</div>
-                    <div style="color: #888; font-size: 11px;">
-                        Bias: {funding.get('bias', 'neutral')} | APR: {funding.get('annualized', 0):.1f}%
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Order Flow
-            order_flow = market_data.get('order_flow', {})
-            if order_flow and not order_flow.get('error'):
-                of_bias = order_flow.get('bias', 'neutral')
-                of_color = "#26a69a" if of_bias == 'bullish' else "#ef5350" if of_bias == 'bearish' else "#888"
-                st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-label">📊 Order Flow</div>
-                    <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()}</div>
-                    <div style="color: #888; font-size: 11px;">
-                        Buys: {order_flow.get('large_buys', 0)} | Sells: {order_flow.get('large_sells', 0)}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.session_state.api_error = None
-                
-            # If no data and no error, show placeholder or old data
-            if not market_data:
-                # Optional: Show offline if truly empty
-                pass
+        render_market_analysis_fragment(st.session_state.selected_asset)
         
         # Model Info - Dynamic stats
         model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
