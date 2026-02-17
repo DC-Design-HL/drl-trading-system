@@ -565,6 +565,9 @@ class MultiAssetOrchestrator:
                 dry_run=dry_run,
                 initial_balance=balance_per_asset,
             )
+            # Force GC after each heavy model load
+            import gc
+            gc.collect()
         
         self.storage = get_storage()
         self.load_state()
