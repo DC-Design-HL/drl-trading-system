@@ -1418,15 +1418,45 @@ def main():
             total_balance = state.get('balance', 0)
             
             # Recalculate total_pnl from assets to ensure it matches the table sum exactly
-            total_pnl = state.get('realized_pnl', 0)
+            total_realized_pnl = state.get('realized_pnl', 0)
+            total_unrealized_pnl = 0
+            
             if state.get('multi_asset') and state.get('raw_state', {}).get('assets'):
                 raw_assets = state['raw_state']['assets']
-                total_pnl = sum(d.get('pnl', 0) for d in raw_assets.values())
+                total_realized_pnl = sum(d.get('pnl', 0) for d in raw_assets.values())
+                
+                # Calculate Unrealized PnL for all assets
+                for sym, data in raw_assets.items():
+                    pos = data.get('position', 0)
+                    if pos != 0:
+                        entry = data.get('price', 0) # price in state is entry price
+                         # Use explicit entry_price if available, otherwise 'price'
+                        if 'entry_price' in data:
+                             entry = data['entry_price']
+                             
+                        units = data.get('units', 0)
+                        # We need current price. 
+                        # Use data['price'] if it's updated, but state usually stores entry price.
+                        # live_trading_multi updates 'price' to current price in 'assets' dict?
+                        # Let's check live_trading_multi.py:
+                        # state['assets'][symbol] = { 'price': bot.current_price ... }
+                        # YES! 'price' in assets state IS current price.
+                        # 'entry_price' is bot.position_price.
+                        
+                        current_price = data.get('price', 0)
+                        entry_price = data.get('entry_price', 0)
+                        
+                        if pos > 0:
+                            total_unrealized_pnl += (current_price - entry_price) * units
+                        elif pos < 0:
+                            total_unrealized_pnl += (entry_price - current_price) * units
+            
+            grand_total_pnl = total_realized_pnl + total_unrealized_pnl
             
             active_assets_count = len(state.get('available_assets', []))
             
             m1.metric("Total Portfolio Value", f"${total_balance:,.2f}")
-            m2.metric("Total Realized P&L", f"${total_pnl:,.2f}", delta=None) # Start with no delta or simple color
+            m2.metric("Total P&L", f"${grand_total_pnl:,.2f}", delta=f"${grand_total_pnl:,.2f}")
             m3.metric("Active Assets", active_assets_count)
             is_online = check_process_running("live_trading_multi.py")
             m4.metric("System Status", "🟢 Online" if is_online else "🔴 Offline")
