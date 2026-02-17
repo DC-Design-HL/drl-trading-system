@@ -29,6 +29,7 @@ from src.data.storage import get_storage
 
 # Initialize storage
 storage = get_storage()
+WHALE_TRACKERS = {}
 
 @app.route('/api/state')
 def get_state():
@@ -201,11 +202,9 @@ def get_market_analysis():
             # Whale Tracker - Use persistent instance for WebSocket
             from src.features.whale_tracker import WhaleTracker
             
-            # Global store for active trackers
+            # Global store for active trackers (defined at module level)
             global WHALE_TRACKERS
-            if 'WHALE_TRACKERS' not in globals():
-                WHALE_TRACKERS = {}
-                
+            
             if clean_symbol not in WHALE_TRACKERS:
                 logger.info(f"Initializing new WhaleTracker for {clean_symbol}")
                 tracker = WhaleTracker(symbol=clean_symbol)
