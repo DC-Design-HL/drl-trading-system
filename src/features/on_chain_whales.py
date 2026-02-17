@@ -66,7 +66,11 @@ class EthereumWhaleWatcher:
             resp = requests.get(self.BASE_URL, params=params, timeout=5)
             data = resp.json()
             
-            transactions = data.get("result", {}).get("transactions", [])
+            result = data.get("result")
+            if not result:
+                return []
+                
+            transactions = result.get("transactions", [])
             whales = []
             
             for tx in transactions:

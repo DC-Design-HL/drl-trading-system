@@ -202,16 +202,17 @@ def get_market_analysis():
             from src.features.whale_tracker import WhaleTracker
             
             # Global store for active trackers
-            if not hasattr(app, 'whale_trackers'):
-                app.whale_trackers = {}
+            global WHALE_TRACKERS
+            if 'WHALE_TRACKERS' not in globals():
+                WHALE_TRACKERS = {}
                 
-            if clean_symbol not in app.whale_trackers:
+            if clean_symbol not in WHALE_TRACKERS:
                 logger.info(f"Initializing new WhaleTracker for {clean_symbol}")
                 tracker = WhaleTracker(symbol=clean_symbol)
                 tracker.start_stream()
-                app.whale_trackers[clean_symbol] = tracker
+                WHALE_TRACKERS[clean_symbol] = tracker
             
-            whale = app.whale_trackers[clean_symbol]
+            whale = WHALE_TRACKERS[clean_symbol]
             signals = whale.get_whale_signals() 
             
             result['whale'] = {
