@@ -1290,14 +1290,15 @@ def main():
             import subprocess
             bot_running = False
             try:
-                result = subprocess.run(['pgrep', '-f', 'live_trading.py'], capture_output=True, text=True)
+                # Check for either script
+                result = subprocess.run(['pgrep', '-f', 'live_trading'], capture_output=True, text=True)
                 bot_running = result.returncode == 0
             except:
                 pass
             
             # Status indicator
             if bot_running:
-                st.success("🟢 **Trading Bot is RUNNING** (Dry-Run Mode)")
+                st.success("🟢 **Trading Bot is RUNNING** (Multi-Asset Mode)")
             else:
                 st.warning("🟠 **Trading Bot is STOPPED**")
             
@@ -1308,21 +1309,27 @@ def main():
                 if not bot_running:
                     if st.button("▶️ Start Trading", key="start_trading", use_container_width=True, type="primary"):
                         try:
-                            subprocess.Popen(
-                                ['./venv/bin/python', 'live_trading.py', '--dry-run', '--interval', '5'],
-                                cwd=str(project_root),
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                            )
-                            st.success("✓ Trading bot started!")
-                            time.sleep(1)
+                            # Start Multi-Asset Bot
+                            # Log to process.log for UI visibility
+                            with open(project_root / "process.log", "a") as log_file:
+                                subprocess.Popen(
+                                    ['./venv/bin/python', '-u', 'live_trading_multi.py', 
+                                     '--assets', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 
+                                     '--balance', '5000'],
+                                    cwd=str(project_root),
+                                    stdout=log_file,
+                                    stderr=log_file,
+                                )
+                            st.success("✓ Multi-Asset Bot started!")
+                            time.sleep(2) # Give it time to start
                             st.rerun()
                         except Exception as e:
                             st.error(f"Failed to start: {e}")
                 else:
                     if st.button("⏹️ Stop Trading", key="stop_trading", use_container_width=True, type="secondary"):
                         try:
-                            subprocess.run(['pkill', '-f', 'live_trading.py'], check=False)
+                            # Kill any trading script
+                            subprocess.run(['pkill', '-f', 'live_trading'], check=False)
                             st.info("✓ Trading bot stopped")
                             time.sleep(1)
                             st.rerun()
