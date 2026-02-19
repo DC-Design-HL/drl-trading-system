@@ -101,9 +101,13 @@ class FundingRateAnalyzer:
             if response.status_code == 200:
                 data = response.json().get('data', [])
                 if data:
-                    return float(data[0].get('fundingRate', 0))
+                    rate = float(data[0].get('fundingRate', 0))
+                    logger.info(f"✅ OKX Funding Rate: {rate:.4%} (Fallback success)")
+                    return rate
+            logger.warning(f"OKX Funding failed: {response.text[:100]}")
             return 0.0
-        except Exception:
+        except Exception as e:
+            logger.warning(f"OKX Funding error: {e}")
             return 0.0
 
     def _fetch_funding_rate(self) -> Dict:
@@ -128,7 +132,7 @@ class FundingRateAnalyzer:
                 self._cached_data = {
                     'rate': funding_rate,
                     'predicted': funding_rate,
-                    'mark_price': 0, # Not critical for simply tracking rate sentiment
+                    'mark_price': 0, 
                     'index_price': 0,
                     'next_funding_time': 0,
                     'history': [],
@@ -158,7 +162,6 @@ class FundingRateAnalyzer:
             hist_response.raise_for_status()
             history = hist_response.json()
             
-            # Calculate average recent funding
             recent_rates = [float(h['fundingRate']) for h in history]
             predicted_rate = np.mean(recent_rates) if recent_rates else funding_rate
             
@@ -175,8 +178,95 @@ class FundingRateAnalyzer:
             return self._cached_data
             
         except Exception as e:
-            logger.warning(f"Failed to fetch funding rate (proxy={bool(os.environ.get('BINANCE_PROXY'))}): {e}")
+            logger.warning(f"Failed to fetch funding rate: {e}")
             return {'rate': 0, 'predicted': 0, 'history': []}
+    
+    # ... (get_signal, should_trade unchanged) ...
+
+class OrderFlowAnalyzer:
+    # ... (__init__, _get_request_config unchanged) ...
+    
+    def __init__(
+        self,
+        symbol: str = "BTCUSDT",
+        large_order_threshold: float = 50000,
+        lookback_minutes: int = 60,
+    ):
+        self.symbol = symbol
+        self.large_order_threshold = large_order_threshold
+        self.lookback_minutes = lookback_minutes
+        self.recent_trades: deque = deque(maxlen=10000)
+        logger.info(f"📊 OrderFlowAnalyzer initialized (large orders > ${large_order_threshold:,.0f})")
+
+    def _get_request_config(self) -> Tuple[str, Optional[Dict]]:
+        """Get URL and proxy config."""
+        proxy = os.environ.get("BINANCE_PROXY")
+        
+        if proxy:
+            # Use Futures API (fapi) with Proxy
+            return "https://fapi.binance.com/fapi/v1/trades", {
+                "http": proxy, 
+                "https": proxy
+            }
+        else:
+            # Fallback to Spot API (api/v3) without Proxy
+            return "https://data-api.binance.vision/api/v3/trades", None
+
+    def _get_okx_trades(self) -> List[Dict]:
+        """Fetch trades from OKX as fallback."""
+        try:
+            okx_symbol = self.symbol.replace("USDT", "-USDT-SWAP")
+            url = "https://www.okx.com/api/v5/market/trades"
+            response = requests.get(url, params={"instId": okx_symbol, "limit": 100}, timeout=5)
+            
+            trades = []
+            if response.status_code == 200:
+                data = response.json().get('data', [])
+                for t in data:
+                    trades.append({
+                        'price': t.get('px'),
+                        'qty': t.get('sz'),
+                        'isBuyerMaker': t.get('side') == 'sell', # Sell = Maker? No. Side=sell means taker sold?
+                        # OKX 'side' is taker side. 'buy' = taker buy. 'sell' = taker sell.
+                        # Binance 'isBuyerMaker': True = Taker SELL. False = Taker BUY.
+                        'isBuyerMaker': t.get('side') == 'sell',
+                        'time': int(t.get('ts'))
+                    })
+                if trades:
+                    logger.info(f"✅ Fetched {len(trades)} trades from OKX fallback")
+            return trades
+        except Exception as e:
+            logger.warning(f"OKX Trades error: {e}")
+            return []
+
+    def _fetch_recent_trades(self) -> List[Dict]:
+        """Fetch recent trades with fallback."""
+        try:
+            url, proxies = self._get_request_config()
+            
+            # If data-api (Spot), try it first, but fallback to OKX if empty or fails
+            # Spot usually has trades, but volume might be low?
+            
+            response = requests.get(
+                url,
+                params={"symbol": self.symbol, "limit": 1000},
+                proxies=proxies,
+                timeout=10
+            )
+            response.raise_for_status()
+            trades = response.json()
+            
+            if not trades and not proxies:
+                 # Try OKX fallback
+                 return self._get_okx_trades()
+                 
+            return trades
+            
+        except Exception as e:
+            logger.warning(f"Failed to fetch Binance trades: {e}. Trying fallback...")
+            if not os.environ.get("BINANCE_PROXY"):
+                return self._get_okx_trades()
+            return []
     
     def get_signal(self) -> FundingSignal:
         """
