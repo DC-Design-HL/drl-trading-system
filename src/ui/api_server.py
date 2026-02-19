@@ -31,6 +31,11 @@ from src.data.storage import get_storage
 storage = get_storage()
 WHALE_TRACKERS = {}
 
+# Cache for /api/market to limit proxy bandwidth usage (60s TTL per symbol)
+_MARKET_CACHE: dict = {}
+MARKET_CACHE_TTL = 60  # seconds
+
+
 @app.route('/api/state')
 def get_state():
     """Get current trading state."""
@@ -123,17 +128,21 @@ def get_market_analysis():
     """Get comprehensive market analysis from all analyzers."""
     import sys
     import os
+    import time
     from flask import request
     sys.path.insert(0, str(PROJECT_ROOT))
     
     # Get symbol from query params, default to BTC/USDT
     symbol = request.args.get('symbol', 'BTCUSDT')
-    # Clean symbol for analyzers that expect just the pair name (e.g. BTCUSDT)
     clean_symbol = symbol.replace('/', '').upper()
-    # Symbol with slash for some analyzers if needed (though most seem to take clean)
-    # Checking usage in analyzers... usually standardizing to clean is safest or passing as is
-    # Let's use the clean symbol for everything to be consistent with live_trading logic
-    
+
+    # ── 60-second cache to limit proxy bandwidth ──────────────────────────
+    global _MARKET_CACHE
+    cached = _MARKET_CACHE.get(clean_symbol)
+    if cached and (time.time() - cached['_fetched_at']) < MARKET_CACHE_TTL:
+        return jsonify(cached)
+    # ─────────────────────────────────────────────────────────────────────
+
     result = {
         'timestamp': datetime.now().isoformat(),
         'symbol': symbol,
@@ -311,8 +320,12 @@ def get_market_analysis():
         except Exception as e:
             logger.error(f"OrderFlow fallback error: {e}")
             result['order_flow'] = {'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0}
-    
-    return jsonify(result)
+    # Store result in 60s cache before returning
+    result['_fetched_at'] = time.time()
+    _MARKET_CACHE[clean_symbol] = result
+    response = {k: v for k, v in result.items() if k != '_fetched_at'}
+    return jsonify(response)
+
 
 @app.route('/api/debug/log')
 def get_crash_log():
