@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
 
+from src.models.ensemble_orchestrator import EnsembleOrchestrator
+from src.env.mtf_env import resample_to_higher_tf, compute_mtf_features_at
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher, SUPPORTED_ASSETS
 from src.features.multi_asset_features import MultiAssetFeatureEngine
 from src.features.whale_tracker import WhaleTracker
@@ -40,6 +42,7 @@ from src.features.order_flow import FundingRateAnalyzer, OrderFlowAnalyzer
 from src.features.on_chain_whales import OnChainWhaleWatcher
 from src.data.storage import get_storage
 from src.models.price_forecaster import TFTForecaster
+from src.models.confidence_engine import ConfidenceEngine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,15 +89,9 @@ class MultiAssetTradingBot:
         # Load model
         self.model = self._load_model()
         
-        # Initialize feature engine (cross-asset enabled to match training)
-        # Note: This requires fetching BTC data even if trading other assets
-        self.feature_engine = MultiAssetFeatureEngine(include_cross_asset=True)
-        
-        # If not BTC, we need to provide BTC data to the engine for cross-asset features
-        # The fetcher handles this, but we need to ensure it's set in the engine
-        if symbol != "BTCUSDT":
-             # We'll handle this in get_action by fetching BTC data if needed
-             pass
+        # Initialize feature engine (using same engine as training env)
+        from src.env.advanced_features import AdvancedFeatureEngine
+        self.feature_engine = AdvancedFeatureEngine()
         
         # Initialize filters
         self.whale_tracker = WhaleTracker(symbol=symbol)
@@ -109,6 +106,8 @@ class MultiAssetTradingBot:
                 logger.warning(f"MTF analyzer init failed: {e}")
 
         self.risk_manager = AdaptiveRiskManager()
+        self.confidence_engine = ConfidenceEngine()
+        self.last_confidence = 0.5  # Neutral default
         
         # TFT Price Forecaster (Phase 11.1)
         self.tft_forecaster = TFTForecaster(device='cpu')
@@ -163,49 +162,26 @@ class MultiAssetTradingBot:
                 'whale': whale,
                 'funding': funding_data,
                 'order_flow': of,
-                'mtf': mtf_data
+                'mtf': mtf_data,
+                'forecast': getattr(self, 'last_forecast', None),
+                'confidence': getattr(self, 'last_confidence', 0.5),
+                'regime': getattr(self.model.classifier, 'last_regime_info', None) if hasattr(self, 'model') and hasattr(self.model, 'classifier') else None
             }
         except Exception as e:
             logger.error(f"Error getting analysis for state: {e}")
             return {}
 
-    def _load_model(self) -> PPO:
-        """Load the trained model for this asset."""
-        asset_name = self.symbol.replace("USDT", "").lower()
+    def _load_model(self) -> Optional[EnsembleOrchestrator]:
+        """Load the regime-specialized ensemble orchestrator."""
+        orchestrator = EnsembleOrchestrator(self.symbol)
         
-        # Try asset-specific model in subdirectory
-        model_candidates = [
-            self.MODEL_DIR / asset_name / "best_model.zip",
-            self.MODEL_DIR / asset_name / "final_model.zip",
-            self.MODEL_DIR / f"{asset_name}_agent.zip"
-        ]
-        
-        market_model = None
-        for path in model_candidates:
-            if path.exists():
-                logger.info(f"📥 Found model for {self.symbol}: {path}")
-                market_model = path
-                break
-        
-        if not market_model:
-            # Try base BTC model
-            btc_path = self.MODEL_DIR / "base_btc" / "best_model.zip"
-            if btc_path.exists():
-                 logger.info(f"Using base BTC model for {self.symbol}")
-                 market_model = btc_path
-        
-        if not market_model:
-            # Fall back to original ultimate agent
-            ultimate_path = Path("./data/models/ultimate_agent.zip")
-            if ultimate_path.exists():
-                market_model = ultimate_path
-
-        if not market_model:
-            logger.warning(f"⚠️ No model found for {self.symbol}. Running in observation mode.")
-            return None
-        
-        logger.info(f"📥 Loading model for {self.symbol}: {market_model}")
-        return PPO.load(str(market_model))
+        if orchestrator.load():
+            logger.info(f"✅ Ensemble Orchestrator loaded for {self.symbol}")
+            return orchestrator
+            
+        logger.warning(f"⚠️ Failed to load complete ensemble for {self.symbol}. Bot will still run, but actions may degrade.")
+        # We return it anyway so it can fallback to whatever agents it loaded
+        return orchestrator
     
     def restore_state(self, state: Dict):
         """Restore bot state from saved dictionary."""
@@ -235,17 +211,27 @@ class MultiAssetTradingBot:
     
     def get_action(self, df: pd.DataFrame) -> int:
         """Get trading action from model (0=HOLD, 1=BUY, 2=SELL)."""
-        lookback = 30  # Must match training config
+        lookback = 48  # Must match AdvancedTradingEnv (48h)
         
-        if len(df) < lookback:
-            logger.warning(f"Not enough data for {self.symbol}: {len(df)} < {lookback}")
+        if len(df) < lookback + 200:
+            logger.warning(f"Not enough data for {self.symbol}: {len(df)} < {lookback + 200}")
             return 0
             
-        # Optimization: batch compute
-        all_features = self.feature_engine.compute_features_batch(df, self.symbol)
+        # Compute features using AdvancedFeatureEngine
+        feature_df = self.feature_engine.compute_all(df)
+        feature_df = feature_df.replace([np.inf, -np.inf], np.nan)
+        feature_df = feature_df.ffill().fillna(0)
         
-        # Take last 'lookback' rows
-        window_features = all_features[-lookback:]
+        # Extract the same feature columns as training env
+        available_features = [f for f in self.feature_engine.get_feature_columns() if f in feature_df.columns]
+        
+        # Take last 'lookback' rows of specific columns + OHLCV
+        window_df = feature_df.tail(lookback)
+        
+        # The training env observation flattens [features + OHLCV] together for each timestep
+        ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+        cols = available_features + ohlcv_cols
+        window_features = window_df[cols].values
         
         flat_history = window_features.flatten()
         
@@ -271,17 +257,38 @@ class MultiAssetTradingBot:
             unrealized_pnl_ratio,
             balance_ratio,
             drawdown,
-            trade_count_norm
+            trade_count_norm,
+            0.0, # Placeholder for step_count_norm
+            0.0, # Placeholder for current_drawdown
+            0.0  # Placeholder for high_water_mark ratio
         ], dtype=np.float32)
         
-        # Concatenate
-        observation = np.concatenate([flat_history, agent_state])
+        # 4. Multi-Timeframe Features (Phase 11.2)
+        try:
+            df_4h = resample_to_higher_tf(df, '4h')
+            mtf_features = compute_mtf_features_at(df_4h, df.index[-1])
+        except Exception as e:
+            logger.error(f"Failed to compute MTF features: {e}")
+            from src.env.mtf_env import N_MTF_TOTAL
+            mtf_features = np.zeros(N_MTF_TOTAL, dtype=np.float32)
+        
+        # Concatenate: [flat_history | agent_state | mtf_features]
+        observation = np.concatenate([flat_history, agent_state, mtf_features]).astype(np.float32)
         
         # If model is missing, return HOLD (0)
-        if self.model is None:
-            return 0
+        if self.model is None or getattr(self.model, 'is_ready', False) == False:
+            if getattr(self.model, 'agents', None):
+                 # We have at least some agents, so predict anyway
+                 pass
+            else:
+                 return 0
             
-        action, _ = self.model.predict(observation, deterministic=True)
+        action, confidence = self.model.predict(observation, df)
+        
+        # We can store the confidence in state if we want, for now we just return action
+        # The adaptive position sizing (Phase 11.6) will use confidence later
+        self.last_confidence = confidence
+        
         return int(action)
     
     def apply_filters(self, action: int) -> tuple:
@@ -354,6 +361,9 @@ class MultiAssetTradingBot:
                     conf_4h = forecast.get('confidence_4h', 0.0)
                     ret_4h = forecast.get('return_4h', 0.0)
                     
+                    # Save for dashboard
+                    self.last_forecast = forecast
+                    
                     # Strong veto: TFT predicts opposite with high confidence
                     if action == 1 and consensus < -0.5 and conf_4h > 0.6:
                         return 0, f"🔮 TFT bearish consensus={consensus:.2f} (veto BUY)"
@@ -389,14 +399,17 @@ class MultiAssetTradingBot:
                 self.position = 0
                 self.position_units = 0
             elif self.position == 0:
-                # Open long
-                trade_value = self.balance * self.position_size
-                self.position_units = trade_value / current_price
+                # Open long (Phase 11.6 Confidence Scaling)
+                base_trade_value = self.balance * self.position_size
+                scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
+                
+                self.position_units = scaled_trade_value / current_price
                 self.position_price = current_price
                 self.position = 1
-                self.balance -= trade_value
+                self.balance -= scaled_trade_value
                 trade["action"] = "OPEN_LONG"
                 trade["units"] = self.position_units
+                trade["confidence"] = self.last_confidence
                 
                 # Calculate SL/TP
                 try:
@@ -426,14 +439,17 @@ class MultiAssetTradingBot:
                 self.position = 0
                 self.position_units = 0
             elif self.position == 0:
-                # Open short
-                trade_value = self.balance * self.position_size
-                self.position_units = trade_value / current_price
+                # Open short (Phase 11.6 Confidence Scaling)
+                base_trade_value = self.balance * self.position_size
+                scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
+                
+                self.position_units = scaled_trade_value / current_price
                 self.position_price = current_price
                 self.position = -1
-                self.balance -= trade_value
+                self.balance -= scaled_trade_value
                 trade["action"] = "OPEN_SHORT"
                 trade["units"] = self.position_units
+                trade["confidence"] = self.last_confidence
                 
                 # Calculate SL/TP
                 try:

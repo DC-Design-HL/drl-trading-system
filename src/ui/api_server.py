@@ -197,13 +197,36 @@ def get_market_analysis():
         # Order Flow
         of_data = state_analysis.get('order_flow', {})
         if of_data:
-             result['order_flow'] = {
+            result['order_flow'] = {
                 'large_buys': of_data.get('large_buys', 0),
                 'large_sells': of_data.get('large_sells', 0),
                 'bias': of_data.get('bias', 'neutral'),
                 'net_flow': of_data.get('large_buy_volume', 0) - of_data.get('large_sell_volume', 0)
             }
             
+        # Forecast
+        forecast_data = state_analysis.get('forecast')
+        if forecast_data:
+            result['forecast'] = {
+                'return_1h': round(forecast_data.get('return_1h', 0) * 100, 3),
+                'return_4h': round(forecast_data.get('return_4h', 0) * 100, 3),
+                'return_12h': round(forecast_data.get('return_12h', 0) * 100, 3),
+                'return_24h': round(forecast_data.get('return_24h', 0) * 100, 3),
+                'confidence': round(forecast_data.get('confidence_4h', 0), 2),
+                'consensus': round(forecast_data.get('direction_consensus', 0), 2),
+            }
+            
+        # Confidence Engine
+        confidence = state_analysis.get('confidence')
+        if confidence is not None:
+             # Adding at root since it applies to the whole ensemble
+             result['ensemble_confidence'] = round(confidence, 2)
+            
+        # Regime (New Phase 11.3 addition, HMM model)
+        regime_data = state_analysis.get('regime')
+        if regime_data:
+             result['regime'] = regime_data
+
     # Fallbacks and Regime (Regime is not in state yet, calculate it)
     # ... (Keep existing regime calculation as it's fast) ...
     

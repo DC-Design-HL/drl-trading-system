@@ -48,6 +48,14 @@ class MultiAssetFeatureEngine:
         'correlation_regime',  # Current correlation regime
     ]
     
+    # Alternative Data Features (Phase 11.4)
+    ALT_DATA_FEATURES = [
+        'fear_greed_value',
+        'fear_greed_class',
+        'btc_dominance',
+        'altcoin_season_index',
+    ]
+    
     def __init__(
         self,
         include_cross_asset: bool = True,
@@ -64,15 +72,20 @@ class MultiAssetFeatureEngine:
         self.include_cross_asset = include_cross_asset
         self.btc_data = btc_data
         
+        from src.features.alternative_data import AlternativeDataCollector
+        self.alt_collector = AlternativeDataCollector()
+        self.current_alt_features = None
+        
         # Calculate feature count
         self.n_asset_features = len(self.ASSET_FEATURES)
         self.n_cross_features = len(self.CROSS_ASSET_FEATURES) if include_cross_asset else 0
+        self.n_alt_features = len(self.ALT_DATA_FEATURES)
         self.n_base_features = 94  # From UltimateFeatureEngine
-        self.n_total_features = self.n_base_features + self.n_asset_features + self.n_cross_features
+        self.n_total_features = self.n_base_features + self.n_asset_features + self.n_cross_features + self.n_alt_features
         
         logger.info(
             f"📊 MultiAssetFeatureEngine: {self.n_total_features} features "
-            f"(base={self.n_base_features}, asset={self.n_asset_features}, cross={self.n_cross_features})"
+            f"(base={self.n_base_features}, asset={self.n_asset_features}, cross={self.n_cross_features}, alt={self.n_alt_features})"
         )
     
     def set_btc_data(self, btc_data: pd.DataFrame):
@@ -219,9 +232,20 @@ class MultiAssetFeatureEngine:
             cross_features = self.compute_cross_asset_features(df, symbol, idx)
         else:
             cross_features = np.array([])
+            
+        # 4. Alternative Data features (4)
+        if self.current_alt_features is None:
+            raw_alt = self.alt_collector.get_current_features()
+            self.current_alt_features = np.array([
+                raw_alt['fear_greed_value'],
+                raw_alt['fear_greed_class'],
+                raw_alt['btc_dominance'],
+                raw_alt['altcoin_season_index']
+            ], dtype=np.float32)
+        alt_features = self.current_alt_features
         
         # Combine all features
-        all_features = np.concatenate([base_features, asset_features, cross_features])
+        all_features = np.concatenate([base_features, asset_features, cross_features, alt_features])
         
         return all_features.astype(np.float32)
     
@@ -254,8 +278,20 @@ class MultiAssetFeatureEngine:
         else:
             cross_batch = np.zeros((n_rows, 0))
             
+        # 4. Alternative Data features (N x 4)
+        if self.current_alt_features is None:
+            raw_alt = self.alt_collector.get_current_features()
+            self.current_alt_features = np.array([
+                raw_alt['fear_greed_value'],
+                raw_alt['fear_greed_class'],
+                raw_alt['btc_dominance'],
+                raw_alt['altcoin_season_index']
+            ], dtype=np.float32)
+            
+        alt_batch = np.tile(self.current_alt_features, (n_rows, 1))
+            
         # Combine
-        combined = np.hstack([base_batch, asset_batch, cross_batch])
+        combined = np.hstack([base_batch, asset_batch, cross_batch, alt_batch])
         
         return combined.astype(np.float32)
     

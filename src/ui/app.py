@@ -931,6 +931,61 @@ def render_market_analysis_fragment(symbol: str):
             </div>
         </div>
         """, unsafe_allow_html=True)
+        
+    # HMM Regime
+    regime_data = market_data.get('regime', {})
+    if regime_data and not regime_data.get('error'):
+        r_type = regime_data.get('type', 'UNKNOWN')
+        # Colors: Green for Bull, Red for Bear, Orange for Breakout, Blue for Range
+        r_color = "#26a69a" if "BULL" in r_type else "#ef5350" if "BEAR" in r_type else "#ffa726" if "BREAKOUT" in r_type else "#42a5f5"
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">👑 Market Regime (HMM)</div>
+            <div style="color: {r_color}; font-size: 14px; font-weight: bold;">{r_type.replace('_', ' ')}</div>
+            <div style="color: #888; font-size: 11px;">
+                ADX: {regime_data.get('adx', 0)} | Volatility: {regime_data.get('volatility', 1.0)}x
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # TFT Forecast
+    forecast = market_data.get('forecast')
+    if forecast:
+        ret_4h = forecast.get('return_4h', 0)
+        fc_color = "#26a69a" if ret_4h > 0 else "#ef5350" if ret_4h < 0 else "#888"
+        fc_sign = "+" if ret_4h > 0 else ""
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">🚀 AI Price Forecast (TFT)</div>
+            <div style="color: {fc_color}; font-size: 14px;">4h: {fc_sign}{ret_4h}% | 12h: {forecast.get('return_12h', 0)}%</div>
+            <div style="color: #888; font-size: 11px;">
+                Consensus: {forecast.get('consensus', 0):.2f} | Confidence: {forecast.get('confidence', 0):.2f}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Ensemble Confidence Engine
+    confidence = market_data.get('ensemble_confidence')
+    if confidence is not None:
+        conf_pct = min(100, max(0, int(confidence * 100)))
+        # Map 0-1.0 to 0.25x - 2.0x for UI display (matching the ConfidenceEngine logic roughly)
+        mult = 0.25 + 1.75 * confidence if confidence < 0.5 else 1.0 + 1.0 * (confidence - 0.5) * 2  # Approximate for UI
+        c_color = "#26a69a" if confidence > 0.6 else "#ffa726" if confidence > 0.35 else "#ef5350"
+        
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">🧠 Ensemble Agreement</div>
+            <div style="color: {c_color}; font-size: 14px;">{conf_pct}% Alignment</div>
+            <div style="color: #888; font-size: 11px;">
+                Position Size Multiplier: ~{mult:.1f}x
+            </div>
+            
+            <!-- Progress Bar -->
+            <div style="width: 100%; background-color: #333; height: 4px; border-radius: 2px; margin-top: 5px;">
+                <div style="width: {conf_pct}%; background-color: {c_color}; height: 100%; border-radius: 2px;"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 @st.fragment(run_every=15)
 def render_position_fragment(symbol: str):
