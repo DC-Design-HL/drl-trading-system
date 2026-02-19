@@ -284,10 +284,33 @@ def get_market_analysis():
         result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
         
     if not result['funding']:
-        result['funding'] = {'rate': 0, 'bias': 'neutral'}
+        try:
+            from src.features.order_flow import FundingRateAnalyzer
+            fa = FundingRateAnalyzer(symbol=clean_symbol)
+            sig = fa.get_signal()
+            result['funding'] = {
+                'rate': round(sig.rate * 100, 4),
+                'bias': sig.signal,
+                'annualized': round(sig.rate * 3 * 365 * 100, 1)
+            }
+        except Exception as e:
+            logger.error(f"Funding fallback error: {e}")
+            result['funding'] = {'rate': 0, 'bias': 'neutral', 'annualized': 0}
         
     if not result['order_flow']:
-        result['order_flow'] = {'bias': 'neutral', 'net_flow': 0}
+        try:
+            from src.features.order_flow import OrderFlowAnalyzer
+            oa = OrderFlowAnalyzer(symbol=clean_symbol)
+            of = oa.analyze_large_orders()
+            result['order_flow'] = {
+                'large_buys': of.get('large_buys', 0),
+                'large_sells': of.get('large_sells', 0),
+                'bias': of.get('bias', 'neutral'),
+                'net_flow': of.get('large_buy_volume', 0) - of.get('large_sell_volume', 0)
+            }
+        except Exception as e:
+            logger.error(f"OrderFlow fallback error: {e}")
+            result['order_flow'] = {'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0}
     
     return jsonify(result)
 

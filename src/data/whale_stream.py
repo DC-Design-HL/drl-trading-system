@@ -100,10 +100,10 @@ class BinanceWhaleStream:
             on_error=self._on_error,
             on_close=self._on_close,
             on_open=self._on_open,
-            **proxy_opts
         )
         
-        self.wst = threading.Thread(target=self.ws.run_forever)
+        # Proxy opts go to run_forever(), not WebSocketApp.__init__()
+        self.wst = threading.Thread(target=self.ws.run_forever, kwargs=proxy_opts)
         self.wst.daemon = True
         self.wst.start()
 
