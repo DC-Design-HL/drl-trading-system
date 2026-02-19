@@ -1,0 +1,30 @@
+{
+  "symbol": "XRPUSDT",
+  "epochs_trained": 23,
+  "best_val_loss": 0.004813784605357796,
+  "test_results": {
+    "1h": {
+      "directional_accuracy": 51.36932707355243,
+      "mae": 0.5285748839378357,
+      "correlation": -0.0039889043313914695
+    },
+    "4h": {
+      "directional_accuracy": 53.129890453834115,
+      "mae": 1.0920398235321045,
+      "correlation": -0.016764096169462603
+    },
+    "12h": {
+      "directional_accuracy": 53.24726134585289,
+      "mae": 1.9947696924209595,
+      "correlation": 0.07179560173503319
+    },
+    "24h": {
+      "directional_accuracy": 50.23474178403756,
+      "mae": 2.8396666049957275,
+      "correlation": 0.07910422017762074
+    }
+  },
+  "n_params": 630000,
+  "lookback": 72,
+  "hidden_dim": 64
+}

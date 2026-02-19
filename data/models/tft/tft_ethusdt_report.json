@@ -1,0 +1,30 @@
+{
+  "symbol": "ETHUSDT",
+  "epochs_trained": 32,
+  "best_val_loss": 0.00468521328875795,
+  "test_results": {
+    "1h": {
+      "directional_accuracy": 50.82159624413145,
+      "mae": 0.49309617280960083,
+      "correlation": 0.04429214866337622
+    },
+    "4h": {
+      "directional_accuracy": 53.36463223787168,
+      "mae": 1.0039348602294922,
+      "correlation": 0.08755964985696861
+    },
+    "12h": {
+      "directional_accuracy": 53.32550860719875,
+      "mae": 1.8487272262573242,
+      "correlation": 0.07462717106512938
+    },
+    "24h": {
+      "directional_accuracy": 49.45226917057903,
+      "mae": 2.601180076599121,
+      "correlation": 0.05653084783122542
+    }
+  },
+  "n_params": 630000,
+  "lookback": 72,
+  "hidden_dim": 64
+}

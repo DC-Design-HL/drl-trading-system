@@ -1,0 +1,30 @@
+{
+  "symbol": "SOLUSDT",
+  "epochs_trained": 26,
+  "best_val_loss": 0.005742188455769792,
+  "test_results": {
+    "1h": {
+      "directional_accuracy": 49.569640062597806,
+      "mae": 0.5527048707008362,
+      "correlation": -6.75942206271387e-05
+    },
+    "4h": {
+      "directional_accuracy": 50.273865414710485,
+      "mae": 1.1284966468811035,
+      "correlation": 0.052494761193503166
+    },
+    "12h": {
+      "directional_accuracy": 45.81377151799687,
+      "mae": 2.22659969329834,
+      "correlation": 0.1120020787396356
+    },
+    "24h": {
+      "directional_accuracy": 44.75743348982786,
+      "mae": 2.859386682510376,
+      "correlation": 0.08067878047252541
+    }
+  },
+  "n_params": 630000,
+  "lookback": 72,
+  "hidden_dim": 64
+}

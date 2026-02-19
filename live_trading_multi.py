@@ -39,6 +39,7 @@ from src.features.risk_manager import AdaptiveRiskManager
 from src.features.order_flow import FundingRateAnalyzer, OrderFlowAnalyzer
 from src.features.on_chain_whales import OnChainWhaleWatcher
 from src.data.storage import get_storage
+from src.models.price_forecaster import TFTForecaster
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,6 +109,14 @@ class MultiAssetTradingBot:
                 logger.warning(f"MTF analyzer init failed: {e}")
 
         self.risk_manager = AdaptiveRiskManager()
+        
+        # TFT Price Forecaster (Phase 11.1)
+        self.tft_forecaster = TFTForecaster(device='cpu')
+        if self.tft_forecaster.load_model(symbol=symbol.replace('/', '')):
+            logger.info(f"🔮 TFT forecaster loaded for {symbol}")
+        else:
+            logger.warning(f"⚠️ No TFT model for {symbol}, running without forecaster")
+            self.tft_forecaster = None
         
         logger.info(f"🤖 Bot initialized for {symbol} (dry-run={dry_run})")
     
@@ -331,6 +340,29 @@ class MultiAssetTradingBot:
                 
         except Exception as e:
             logger.warning(f"MTF filter error: {e}")
+        
+        # TFT Forecast Filter (Phase 11.1) — veto trades if TFT strongly disagrees
+        if self.tft_forecaster:
+            try:
+                from src.data.multi_asset_fetcher import MultiAssetDataFetcher
+                fetcher = MultiAssetDataFetcher()
+                df = fetcher.fetch_asset(self.symbol.replace('/', ''), '1h', days=7)
+                
+                if df is not None and len(df) >= 72:
+                    forecast = self.tft_forecaster.forecast(df)
+                    consensus = forecast.get('direction_consensus', 0.0)
+                    conf_4h = forecast.get('confidence_4h', 0.0)
+                    ret_4h = forecast.get('return_4h', 0.0)
+                    
+                    # Strong veto: TFT predicts opposite with high confidence
+                    if action == 1 and consensus < -0.5 and conf_4h > 0.6:
+                        return 0, f"🔮 TFT bearish consensus={consensus:.2f} (veto BUY)"
+                    if action == 2 and consensus > 0.5 and conf_4h > 0.6:
+                        return 0, f"🔮 TFT bullish consensus={consensus:.2f} (veto SELL)"
+                    
+                    logger.info(f"🔮 TFT: ret_4h={ret_4h:.4f}, consensus={consensus:.2f}, conf={conf_4h:.2f}")
+            except Exception as e:
+                logger.warning(f"TFT filter error: {e}")
         
         return action, f"{action_names[action]} passed all filters"
     

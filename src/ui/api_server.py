@@ -150,7 +150,8 @@ def get_market_analysis():
         'regime': None,
         'mtf': None,
         'funding': None,
-        'order_flow': None
+        'order_flow': None,
+        'forecast': None
     }
     
     # Try to load from state first (Consistency with Bot)
@@ -320,6 +321,33 @@ def get_market_analysis():
         except Exception as e:
             logger.error(f"OrderFlow fallback error: {e}")
             result['order_flow'] = {'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0}
+
+    # TFT Forecast (Phase 11.1)
+    if not result['forecast']:
+        try:
+            from src.models.price_forecaster import TFTForecaster
+            forecaster = TFTForecaster(device='cpu')
+            if forecaster.load_model(symbol=clean_symbol):
+                from src.data.multi_asset_fetcher import MultiAssetDataFetcher
+                fetcher = MultiAssetDataFetcher()
+                df = fetcher.fetch_asset(clean_symbol, '1h', days=7)
+                if df is not None and len(df) >= 72:
+                    forecast = forecaster.forecast(df)
+                    result['forecast'] = {
+                        'return_1h': round(forecast.get('return_1h', 0) * 100, 3),
+                        'return_4h': round(forecast.get('return_4h', 0) * 100, 3),
+                        'return_12h': round(forecast.get('return_12h', 0) * 100, 3),
+                        'return_24h': round(forecast.get('return_24h', 0) * 100, 3),
+                        'confidence': round(forecast.get('confidence_4h', 0), 2),
+                        'consensus': round(forecast.get('direction_consensus', 0), 2),
+                    }
+        except Exception as e:
+            logger.error(f"TFT forecast error: {e}")
+            result['forecast'] = None
+
+    if not result['mtf']:
+        result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
+
     # Store result in 60s cache before returning
     result['_fetched_at'] = time.time()
     _MARKET_CACHE[clean_symbol] = result

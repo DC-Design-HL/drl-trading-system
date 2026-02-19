@@ -1,0 +1,30 @@
+{
+  "symbol": "BTCUSDT",
+  "epochs_trained": 28,
+  "best_val_loss": 0.0024727997806621715,
+  "test_results": {
+    "1h": {
+      "directional_accuracy": 51.68231611893583,
+      "mae": 0.3492026925086975,
+      "correlation": 0.009300890586610383
+    },
+    "4h": {
+      "directional_accuracy": 49.84350547730829,
+      "mae": 0.7158857583999634,
+      "correlation": 0.029635630333301955
+    },
+    "12h": {
+      "directional_accuracy": 54.733959311424094,
+      "mae": 1.2835551500320435,
+      "correlation": 0.041102984222308035
+    },
+    "24h": {
+      "directional_accuracy": 53.87323943661971,
+      "mae": 1.7852025032043457,
+      "correlation": 0.06388435267552711
+    }
+  },
+  "n_params": 630000,
+  "lookback": 72,
+  "hidden_dim": 64
+}
