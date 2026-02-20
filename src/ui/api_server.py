@@ -33,7 +33,7 @@ WHALE_TRACKERS = {}
 
 # Cache for /api/market to limit proxy bandwidth usage (60s TTL per symbol)
 _MARKET_CACHE: dict = {}
-MARKET_CACHE_TTL = 60  # seconds
+MARKET_CACHE_TTL = 3600  # 1 hour cache to save proxy bandwidth
 
 
 @app.route('/api/state')

@@ -121,6 +121,14 @@ class MultiAssetTradingBot:
     
     def get_market_analysis(self) -> Dict:
         """Get current market analysis data for dashboard."""
+        import time
+        current_time = time.time()
+        
+        # 1-hour proxy bandwidth saver cache
+        if hasattr(self, '_last_analysis_time') and hasattr(self, '_cached_analysis'):
+            if current_time - self._last_analysis_time < 3600 and self._cached_analysis:
+                return self._cached_analysis
+                
         try:
             # Whale
             whale = self.whale_tracker.get_whale_signals() if hasattr(self, 'whale_tracker') else {}
@@ -158,7 +166,7 @@ class MultiAssetTradingBot:
                 except Exception as e:
                     logger.warning(f"MTF analysis failed for state: {e}")
             
-            return {
+            analysis = {
                 'whale': whale,
                 'funding': funding_data,
                 'order_flow': of,
@@ -167,6 +175,10 @@ class MultiAssetTradingBot:
                 'confidence': getattr(self, 'last_confidence', 0.5),
                 'regime': getattr(self.model.classifier, 'last_regime_info', None) if hasattr(self, 'model') and hasattr(self.model, 'classifier') else None
             }
+            
+            self._last_analysis_time = current_time
+            self._cached_analysis = analysis
+            return analysis
         except Exception as e:
             logger.error(f"Error getting analysis for state: {e}")
             return {}
@@ -691,8 +703,8 @@ class MultiAssetOrchestrator:
             while self._running:
                 current_time = time.time()
                 
-                # Check On-Chain Whales (every 2 minutes)
-                if current_time - self.last_whale_check > 120:
+                # Check On-Chain Whales (every 1 hour to save proxy bandwidth)
+                if current_time - self.last_whale_check > 3600:
                     try:
                         alerts = self.whale_watcher.check_all()
                         if alerts:
