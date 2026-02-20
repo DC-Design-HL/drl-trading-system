@@ -14,7 +14,7 @@ websocket-client>=1.6.0
 # Technical Analysis
 pandas>=2.1.0
 numpy>=1.24.0
-
+hmmlearn>=0.3.0
 # UI & Visualization
 streamlit>=1.42.0
 streamlit-lightweight-charts>=0.1.0
