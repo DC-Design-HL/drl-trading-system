@@ -494,7 +494,7 @@ class MultiAssetTradingBot:
     def run_iteration(self) -> Dict:
         """Run a single trading iteration."""
         # Fetch data
-        df = self.fetch_data(days=7)
+        df = self.fetch_data(days=14)
         
         if df.empty:
             return {"status": "error", "message": "No data fetched"}
