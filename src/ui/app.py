@@ -1563,6 +1563,11 @@ def main():
                                 last_action = "EXIT"
                             else:
                                 last_action = raw_action
+                                
+                            # Fix State Mismatch Bug: 
+                            # If position is exactly 0 (FLAT) but last action was an OPEN, it means the state reset but trade logs remained.
+                            if data.get('position', 0) == 0 and "(OPEN)" in last_action:
+                                last_action = "STATE RESET (FLAT)"
                     
                     assets_data.append({
                         "Asset": symbol,

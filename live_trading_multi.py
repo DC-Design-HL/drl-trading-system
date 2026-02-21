@@ -415,6 +415,10 @@ class MultiAssetTradingBot:
                 base_trade_value = self.balance * self.position_size
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
                 
+                if scaled_trade_value < 10.0:
+                    logger.info(f"🚫 LONG blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
+                    return None
+                
                 self.position_units = scaled_trade_value / current_price
                 self.position_price = current_price
                 self.position = 1
@@ -454,6 +458,10 @@ class MultiAssetTradingBot:
                 # Open short (Phase 11.6 Confidence Scaling)
                 base_trade_value = self.balance * self.position_size
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
+                
+                if scaled_trade_value < 10.0:
+                    logger.info(f"🚫 SHORT blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
+                    return None
                 
                 self.position_units = scaled_trade_value / current_price
                 self.position_price = current_price
