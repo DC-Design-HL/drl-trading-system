@@ -347,7 +347,7 @@ class BinanceLiquidationTracker:
         self.symbol = symbol
         self.window_minutes = window_minutes
         self.cache = {}
-        self.cache_ttl = 30  # 30 second cache
+        self.cache_ttl = 300  # 300 second cache (up from 30s to conserve proxy bandwidth)
         
     def start(self):
         """No-op for REST API version."""
@@ -666,7 +666,7 @@ class BinanceOITracker:
         self.symbol = symbol
         self.window_minutes = window_minutes
         self.cache = {}
-        self.cache_ttl = 60  # 1 minute cache
+        self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
     
     def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
         """Get URL and proxy config."""
@@ -791,7 +791,7 @@ class BinanceTopTraderClient:
     def __init__(self, symbol: str = "BTCUSDT"):
         self.symbol = symbol
         self.cache = {}
-        self.cache_ttl = 60  # 60 second cache
+        self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
         
     def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
         """Get URL and proxy config."""
