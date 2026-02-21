@@ -1,26 +1,32 @@
 #!/bin/bash
 set -e
 
+ASSETS=("BTCUSDT" "ETHUSDT" "SOLUSDT" "XRPUSDT")
+REGIMES=("BULL_TREND" "BEAR_TREND" "RANGE_CHOP" "HIGH_VOL_BREAKOUT")
+
 echo "Creating specialists directory..."
 mkdir -p data/models/specialists
 
-echo "Training BULL_TREND specialist..."
-./venv/bin/python3 -m src.models.train_specialist --asset BTCUSDT --regime BULL_TREND --timesteps 150000 > data/models/specialists/bull_train.log 2>&1 &
-PID1=$!
+PIDS=""
 
-echo "Training BEAR_TREND specialist..."
-./venv/bin/python3 -m src.models.train_specialist --asset BTCUSDT --regime BEAR_TREND --timesteps 150000 > data/models/specialists/bear_train.log 2>&1 &
-PID2=$!
+for ASSET in "${ASSETS[@]}"; do
+    echo "======================================"
+    echo "Launching training for $ASSET..."
+    echo "======================================"
+    
+    for REGIME in "${REGIMES[@]}"; do
+        echo "Training $REGIME specialist for $ASSET..."
+        # Lowercase the regime for the log filename
+        LOG_FILE="data/models/specialists/${ASSET}_${REGIME,,}_train.log"
+        
+        ./venv/bin/python3 -m src.models.train_specialist --asset "$ASSET" --regime "$REGIME" --timesteps 150000 > "$LOG_FILE" 2>&1 &
+        PIDS="$PIDS $!"
+    done
+done
 
-echo "Training RANGE_CHOP specialist..."
-./venv/bin/python3 -m src.models.train_specialist --asset BTCUSDT --regime RANGE_CHOP --timesteps 150000 > data/models/specialists/range_train.log 2>&1 &
-PID3=$!
+echo
+echo "All specialist training processes launched!"
+echo "Waiting for them to finish in the background..."
+wait $PIDS
 
-echo "Training HIGH_VOL_BREAKOUT specialist..."
-./venv/bin/python3 -m src.models.train_specialist --asset BTCUSDT --regime HIGH_VOL_BREAKOUT --timesteps 150000 > data/models/specialists/breakout_train.log 2>&1 &
-PID4=$!
-
-echo "All 4 training processes launched. Waiting for them to finish..."
-wait $PID1 $PID2 $PID3 $PID4
-
-echo "All specialists trained successfully!"
+echo "All specialists trained successfully for all assets!"
