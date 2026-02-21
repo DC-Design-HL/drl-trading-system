@@ -16,8 +16,9 @@ for ASSET in "${ASSETS[@]}"; do
     
     for REGIME in "${REGIMES[@]}"; do
         echo "Training $REGIME specialist for $ASSET..."
-        # Lowercase the regime for the log filename
-        LOG_FILE="data/models/specialists/${ASSET}_${REGIME,,}_train.log"
+        # Lowercase the regime for the log filename using tr for Mac compatibility
+        REGIME_LOWER=$(echo "$REGIME" | tr '[:upper:]' '[:lower:]')
+        LOG_FILE="data/models/specialists/${ASSET}_${REGIME_LOWER}_train.log"
         
         ./venv/bin/python3 -m src.models.train_specialist --asset "$ASSET" --regime "$REGIME" --timesteps 150000 > "$LOG_FILE" 2>&1 &
         PIDS="$PIDS $!"
