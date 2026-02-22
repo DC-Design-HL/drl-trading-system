@@ -168,22 +168,69 @@ class WhalePatternLearner:
             price_df.index = pd.to_datetime(price_df.index)
 
         price_df = price_df.sort_index()
-        price_df.index = price_df.index.tz_localize(None)
-        hourly_flow.index = hourly_flow.index.tz_localize(None)
+
+        # Strip timezone info from both to ensure matching
+        if price_df.index.tz is not None:
+            price_df.index = price_df.index.tz_localize(None)
+        if hourly_flow.index.tz is not None:
+            hourly_flow.index = hourly_flow.index.tz_localize(None)
+
+        # Debug: show date ranges
+        logger.info(
+            f"📊 Whale flow range: {hourly_flow.index.min()} → {hourly_flow.index.max()}"
+        )
+        logger.info(
+            f"📊 Price data range: {price_df.index.min()} → {price_df.index.max()}"
+        )
 
         # Resample price to hourly close
         price_hourly = price_df["close"].resample("1h").last().ffill()
+        logger.info(f"📊 Price hourly: {len(price_hourly)} rows")
 
         # Create target: price change 4h ahead
         price_change_4h = price_hourly.pct_change(4).shift(-4)
 
-        # Merge with whale flow data
-        merged = hourly_flow.copy()
-        merged["price"] = price_hourly
-        merged["price_change_4h"] = price_change_4h
+        # Filter whale flow to only the period covered by price data
+        overlap_start = max(hourly_flow.index.min(), price_hourly.index.min())
+        overlap_end = min(hourly_flow.index.max(), price_hourly.index.max())
+
+        logger.info(f"📊 Overlap period: {overlap_start} → {overlap_end}")
+
+        if overlap_start >= overlap_end:
+            logger.warning("No overlapping time period between whale flow and price data")
+            return pd.DataFrame(), pd.Series()
+
+        # Filter to overlap period
+        flow_overlap = hourly_flow.loc[overlap_start:overlap_end].copy()
+        logger.info(f"📊 Flow rows in overlap: {len(flow_overlap)}")
+
+        if flow_overlap.empty:
+            return pd.DataFrame(), pd.Series()
+
+        # Use merge_asof for robust join (nearest hour match)
+        flow_reset = flow_overlap.reset_index().rename(columns={"index": "timestamp"})
+        if flow_reset.columns[0] != "timestamp":
+            # The index name might differ
+            flow_reset = flow_overlap.reset_index()
+            flow_reset.columns = ["timestamp"] + list(flow_overlap.columns)
+
+        price_reset = pd.DataFrame({
+            "timestamp": price_hourly.index,
+            "price": price_hourly.values,
+            "price_change_4h": price_change_4h.values,
+        })
+
+        merged = pd.merge_asof(
+            flow_reset.sort_values("timestamp"),
+            price_reset.sort_values("timestamp"),
+            on="timestamp",
+            direction="nearest",
+            tolerance=pd.Timedelta("1h"),
+        )
 
         # Drop rows with NaN
         merged = merged.dropna()
+        logger.info(f"📊 Merged rows after dropna: {len(merged)}")
 
         if merged.empty:
             return pd.DataFrame(), pd.Series()
@@ -191,11 +238,11 @@ class WhalePatternLearner:
         # Target: +1 if price goes up, -1 if down
         target = np.sign(merged["price_change_4h"])
 
-        # Features (exclude target and price)
+        # Features (exclude target, price, and timestamp)
         feature_cols = [
             c
             for c in merged.columns
-            if c not in ["price", "price_change_4h"]
+            if c not in ["price", "price_change_4h", "timestamp"]
         ]
         features = merged[feature_cols]
 

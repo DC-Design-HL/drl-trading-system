@@ -383,22 +383,18 @@ class XRPLCollector(BaseCollector):
                 params = {
                     "account": wallet.address,
                     "limit": limit,
-                    "forward": True,  # oldest first
+                    "forward": False,  # newest first — we need recent data
                 }
 
                 # Use marker for pagination
                 if marker:
                     params["marker"] = marker
 
-                # If we have existing data, start from last known ledger
+                # If we have existing data, only get newer transactions
                 if data["transactions"] and not marker:
-                    last_ledger = max(
-                        int(tx.get("ledger", 0))
-                        for tx in data["transactions"]
-                        if "ledger" in tx
-                    )
-                    if last_ledger > 0:
-                        params["ledger_index_min"] = last_ledger + 1
+                    # With forward=False we get newest first, so we'll
+                    # just deduplicate against existing hashes
+                    pass
 
                 payload = {
                     "method": "account_tx",
@@ -538,7 +534,11 @@ class WhaleWalletCollector:
                 f"{wallet.label} ({wallet.address[:12]}...)"
             )
             try:
-                data = collector.collect_wallet(wallet, max_pages=max_pages)
+                if chain_upper == "SOL":
+                    # SOL uses max_sigs, not max_pages
+                    data = collector.collect_wallet(wallet, max_sigs=max_pages * 10)
+                else:
+                    data = collector.collect_wallet(wallet, max_pages=max_pages)
                 results[wallet.address] = data
             except Exception as e:
                 logger.error(f"Failed to collect {wallet.label}: {e}")
