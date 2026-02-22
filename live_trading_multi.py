@@ -65,7 +65,7 @@ class MultiAssetTradingBot:
         symbol: str,
         dry_run: bool = True,
         initial_balance: float = 10000,
-        position_size: float = 0.5,
+        position_size: float = 0.25,  # 25% of balance per trade (was 50%)
     ):
         self.symbol = symbol
         self.dry_run = dry_run
@@ -83,6 +83,12 @@ class MultiAssetTradingBot:
         
         self.trades: List[Dict] = []
         self.realized_pnl = 0.0
+        
+        # Anti-overtrading guards
+        self.last_loss_time = 0        # Timestamp of last SL hit
+        self.last_entry_time = 0       # Timestamp of last position open
+        self.COOLDOWN_SECONDS = 1800   # 30 min cooldown after a loss
+        self.MIN_HOLD_SECONDS = 7200   # 2 hour minimum hold time
         
         self._running = False
         
@@ -516,6 +522,8 @@ class MultiAssetTradingBot:
                 if hit_sl or hit_tp:
                     trade = self.execute_trade(2, current_price) # Sell to close
                     reason = "STOP_LOSS" if hit_sl else "TAKE_PROFIT"
+                    if hit_sl:
+                        self.last_loss_time = time.time()
                     logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
                     
                     # Return result immediately
@@ -549,6 +557,8 @@ class MultiAssetTradingBot:
                 if hit_sl or hit_tp:
                     trade = self.execute_trade(1, current_price) # Buy to close
                     reason = "STOP_LOSS" if hit_sl else "TAKE_PROFIT"
+                    if hit_sl:
+                        self.last_loss_time = time.time()
                     logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
                     
                     # Return result immediately
@@ -578,10 +588,34 @@ class MultiAssetTradingBot:
         # Apply filters
         filtered_action, reason = self.apply_filters(raw_action)
         
+        # --- Anti-overtrading guards ---
+        now = time.time()
+        
+        # Fix 2: Post-loss cooldown — block new entries for 30 min after SL hit
+        if filtered_action != 0 and self.position == 0 and self.last_loss_time > 0:
+            elapsed_since_loss = now - self.last_loss_time
+            if elapsed_since_loss < self.COOLDOWN_SECONDS:
+                remaining = int((self.COOLDOWN_SECONDS - elapsed_since_loss) / 60)
+                logger.info(f"⏸️ COOLDOWN: Blocking entry for {self.symbol} ({remaining}min remaining after SL hit)")
+                filtered_action = 0
+                reason = f"Cooldown after SL ({remaining}min left)"
+        
+        # Fix 4: Minimum hold time — don't exit via model signal within 2 hours
+        if filtered_action != 0 and self.position != 0 and self.last_entry_time > 0:
+            elapsed_since_entry = now - self.last_entry_time
+            if elapsed_since_entry < self.MIN_HOLD_SECONDS:
+                remaining = int((self.MIN_HOLD_SECONDS - elapsed_since_entry) / 60)
+                logger.info(f"⏳ HOLD: Blocking model exit for {self.symbol} ({remaining}min until min hold expires)")
+                filtered_action = 0
+                reason = f"Min hold time ({remaining}min left)"
+        
         # Execute if action changed
         trade = None
         if filtered_action != 0:
             trade = self.execute_trade(filtered_action, current_price)
+            # Track entry time for new positions
+            if trade and self.position != 0:
+                self.last_entry_time = now
         
         # Calculate unrealized P&L
         if self.position == 1:
