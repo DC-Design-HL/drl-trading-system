@@ -993,6 +993,17 @@ class WhaleTracker:
 
         self.mempool_analyzer = MempoolAnalyzer()
         
+        # Whale Pattern Predictor (Phase 12 — learned wallet patterns)
+        self.whale_pattern_predictor = None
+        try:
+            from src.features.whale_pattern_predictor import WhalePatternPredictor
+            self.whale_pattern_predictor = WhalePatternPredictor()
+            logger.info(f"🧠 Whale pattern predictor loaded for {symbol}")
+        except Exception as e:
+            logger.warning(f"⚠️ Whale pattern predictor not available: {e}")
+        
+        self.symbol = symbol  # Store for pattern predictor lookups
+        
         # High-confidence settings
         self.min_confidence = min_confidence
         self.min_signal_agreement = min_signal_agreement
@@ -1007,7 +1018,7 @@ class WhaleTracker:
         # Signal history for debugging
         self.signal_history = deque(maxlen=100)
         
-        logger.info(f"🐋 WhaleTracker initialized with 4 FREE sources (min_confidence={min_confidence}, min_agreement={min_signal_agreement})")
+        logger.info(f"🐋 WhaleTracker initialized with 4+ FREE sources (min_confidence={min_confidence}, min_agreement={min_signal_agreement})")
 
     def start_stream(self):
         """Start the real-time whale stream."""
@@ -1089,13 +1100,26 @@ class WhaleTracker:
             logger.error(f"Error getting Fear & Greed: {e}")
             signals_raw['fear_greed'] = None
             
+        # 5. Whale Pattern Predictor (Phase 12 — learned wallet patterns)
+        if self.whale_pattern_predictor:
+            try:
+                wp_data = self.whale_pattern_predictor.get_signal(self.symbol)
+                signals_raw['whale_patterns'] = wp_data.get('signal', 0)
+                logger.info(f"🧠 Whale Pattern: signal={wp_data.get('signal', 0):.3f}, confidence={wp_data.get('confidence', 0):.3f}")
+            except Exception as e:
+                logger.error(f"Error getting whale patterns: {e}")
+                signals_raw['whale_patterns'] = None
+        else:
+            signals_raw['whale_patterns'] = None
+            
         # Calculate weighted score
         weights = {
-            'flow': 0.35,        # Real-time whale buying/selling
-            'binance_ls': 0.20,  # Smart money positioning (imbalance)
-            'oi_trend': 0.15,    # Smart money interest
-            'large_txns': 0.15,  # Whale activity
-            'fear_greed': 0.15   # Market sentiment
+            'flow': 0.25,            # Real-time whale buying/selling
+            'binance_ls': 0.15,      # Smart money positioning (imbalance)
+            'oi_trend': 0.10,        # Smart money interest
+            'large_txns': 0.10,      # Whale activity
+            'fear_greed': 0.10,      # Market sentiment
+            'whale_patterns': 0.30,  # Learned whale wallet patterns
         }
         
         total_weight = 0
