@@ -71,6 +71,13 @@ ETH_WHALES: List[WhaleWallet] = [
 # ─────────────────────────────────────────────
 SOL_WHALES: List[WhaleWallet] = [
     WhaleWallet(
+        address="2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm",
+        label="Coinbase Commerce",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="Coinbase Commerce SOL wallet — active on public RPC"
+    ),
+    WhaleWallet(
         address="5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvu6Kg",
         label="Binance SOL Hot Wallet",
         chain="SOL",
@@ -83,13 +90,6 @@ SOL_WHALES: List[WhaleWallet] = [
         chain="SOL",
         wallet_type="exchange",
         notes="Binance SOL cold storage"
-    ),
-    WhaleWallet(
-        address="ASTyfSima4LLAdDgoFGkgqoKowG1LZFDr9fAQrg7iaJZ",
-        label="Solana Foundation Stake",
-        chain="SOL",
-        wallet_type="institution",
-        notes="Solana Foundation staking authority — unstaking signals selling pressure"
     ),
 ]
 

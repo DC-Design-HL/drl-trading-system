@@ -22,7 +22,7 @@ wheels/
 
 # Virtual Environment
 venv/
-env/
+/env/
 .venv/
 
 # IDE
@@ -39,6 +39,7 @@ env/
 data/historical/*.csv
 # data/models/*.zip  <-- Removed to allow LFS tracking
 data/models/*.pkl
+!data/models/whale_patterns/*.pkl
 
 # Logs
 logs/
