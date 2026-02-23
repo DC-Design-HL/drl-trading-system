@@ -114,14 +114,6 @@ class EthereumCollector(BaseCollector):
             tx["hash"] for tx in data["transactions"] if "hash" in tx
         }
 
-        # Determine start block from last known transaction
-        start_block = 0
-        if data["transactions"]:
-            last_block = max(
-                int(tx.get("block", 0)) for tx in data["transactions"]
-            )
-            start_block = last_block + 1
-
         all_new_txns = []
 
         for page in range(1, max_pages + 1):
@@ -132,11 +124,11 @@ class EthereumCollector(BaseCollector):
                     "module": "account",
                     "action": "txlist",
                     "address": wallet.address,
-                    "startblock": start_block,
+                    "startblock": 0,
                     "endblock": 99999999,
                     "page": page,
                     "offset": 1000,  # records per page
-                    "sort": "asc",
+                    "sort": "desc",  # newest first
                     "apikey": self.api_key,
                 }
 
