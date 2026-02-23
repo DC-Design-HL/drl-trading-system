@@ -105,10 +105,14 @@ class WhalePatternLearner:
         hourly["tx_count"] = df["signed_value"].resample("1h").count().fillna(0)
         hourly["avg_size"] = df["value"].resample("1h").mean().fillna(0)
         hourly["inflow_count"] = (
-            df[df["direction"] == "in"]["value"].resample("1h").count().fillna(0)
+            df[df["direction"] == "in"]["value"]
+            .resample("1h").count()
+            .reindex(hourly.index, fill_value=0)
         )
         hourly["outflow_count"] = (
-            df[df["direction"] == "out"]["value"].resample("1h").count().fillna(0)
+            df[df["direction"] == "out"]["value"]
+            .resample("1h").count()
+            .reindex(hourly.index, fill_value=0)
         )
 
         # Direction ratio: >0.5 = more inflows, <0.5 = more outflows
@@ -170,9 +174,15 @@ class WhalePatternLearner:
         price_df = price_df.sort_index()
 
         # Strip timezone info from both to ensure matching
-        if price_df.index.tz is not None:
+        try:
+            if hasattr(price_df.index, 'tz') and price_df.index.tz is not None:
+                price_df.index = price_df.index.tz_convert(None)
+        except TypeError:
             price_df.index = price_df.index.tz_localize(None)
-        if hourly_flow.index.tz is not None:
+        try:
+            if hasattr(hourly_flow.index, 'tz') and hourly_flow.index.tz is not None:
+                hourly_flow.index = hourly_flow.index.tz_convert(None)
+        except TypeError:
             hourly_flow.index = hourly_flow.index.tz_localize(None)
 
         # Debug: show date ranges
@@ -228,8 +238,11 @@ class WhalePatternLearner:
             tolerance=pd.Timedelta("1h"),
         )
 
-        # Drop rows with NaN
-        merged = merged.dropna()
+        # Fill NaN in flow features (sparse whale data is normal)
+        flow_cols = [c for c in merged.columns if c not in ["price", "price_change_4h", "timestamp"]]
+        merged[flow_cols] = merged[flow_cols].fillna(0)
+        # Drop only rows missing price/target data
+        merged = merged.dropna(subset=["price", "price_change_4h"])
         logger.info(f"📊 Merged rows after dropna: {len(merged)}")
 
         if merged.empty:

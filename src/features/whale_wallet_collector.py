@@ -206,14 +206,21 @@ class EthereumCollector(BaseCollector):
 
 
 class SolanaCollector(BaseCollector):
-    """Collect SOL whale transactions via Solana RPC."""
+    """Collect SOL whale transactions via Helius enhanced API (or fallback to public RPC)."""
 
-    RPC_URL = "https://api.mainnet-beta.solana.com"
-    RATE_LIMIT = 1.0  # 1 req/s to be safe on public RPC
+    RATE_LIMIT = 0.5  # 2 req/s for Helius free tier
 
     def __init__(self):
         super().__init__("SOL")
+        self.api_key = os.environ.get("HELIUS_API_KEY", "")
         self.last_request_time = 0
+
+        if self.api_key:
+            self.base_url = f"https://api.helius.xyz/v0"
+            logger.info("🔑 Helius API key found — using enhanced SOL data")
+        else:
+            self.base_url = None
+            logger.warning("⚠️ No HELIUS_API_KEY — SOL collection will be limited")
 
     def _rate_limit(self):
         elapsed = time.time() - self.last_request_time
@@ -221,36 +228,24 @@ class SolanaCollector(BaseCollector):
             time.sleep(self.RATE_LIMIT - elapsed)
         self.last_request_time = time.time()
 
-    def _rpc_call(self, method: str, params: list) -> Optional[Dict]:
-        """Make a JSON-RPC call to Solana."""
-        self._rate_limit()
-        try:
-            payload = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": method,
-                "params": params,
-            }
-            resp = requests.post(self.RPC_URL, json=payload, timeout=15)
-            if resp.status_code == 200:
-                result = resp.json()
-                if "error" in result:
-                    logger.warning(f"Solana RPC error: {result['error']}")
-                    return None
-                return result.get("result")
-        except Exception as e:
-            logger.error(f"Solana RPC error: {e}")
-        return None
-
     def collect_wallet(
         self, wallet: WhaleWallet, max_sigs: int = 50
     ) -> Dict:
         """
-        Fetch recent transaction signatures for a SOL wallet.
+        Fetch transaction history for a SOL wallet using Helius.
 
-        Uses getSignaturesForAddress (public, rate-limited).
-        Only gets recent data — meant to be run incrementally.
+        Helius provides parsed transactions with native SOL transfers,
+        making it much faster than raw RPC (1 call = up to 100 txns).
         """
+        if self.api_key:
+            return self._collect_via_helius(wallet, max_sigs)
+        else:
+            return self._collect_via_rpc(wallet, max_sigs)
+
+    def _collect_via_helius(
+        self, wallet: WhaleWallet, max_sigs: int = 100
+    ) -> Dict:
+        """Fetch transactions using Helius enhanced transactions API."""
         data = self._load_wallet_data(wallet.address)
         data["label"] = wallet.label
         data["wallet_type"] = wallet.wallet_type
@@ -258,78 +253,156 @@ class SolanaCollector(BaseCollector):
             tx["hash"] for tx in data["transactions"] if "hash" in tx
         }
 
-        # Get recent signatures
-        sigs_result = self._rpc_call(
-            "getSignaturesForAddress",
-            [wallet.address, {"limit": max_sigs}],
-        )
+        all_new_txns = []
+        before_sig = ""  # pagination cursor
 
-        if not sigs_result:
-            self._save_wallet_data(wallet.address, data)
-            return data
+        # Helius /addresses/{address}/transactions returns parsed data
+        pages = 0
+        max_pages = max(1, max_sigs // 100)
 
-        new_txns = []
-        for sig_info in sigs_result:
-            sig = sig_info.get("signature", "")
-            if sig in existing_hashes:
-                continue
+        while pages < max_pages:
+            self._rate_limit()
+            pages += 1
 
-            block_time = sig_info.get("blockTime", 0)
+            try:
+                url = (
+                    f"{self.base_url}/addresses/{wallet.address}/transactions"
+                    f"?api-key={self.api_key}&limit=100"
+                )
+                if before_sig:
+                    url += f"&before={before_sig}"
 
-            # Get transaction details
-            tx_result = self._rpc_call(
-                "getTransaction",
-                [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
-            )
+                resp = requests.get(url, timeout=15)
 
-            if not tx_result:
-                continue
+                if resp.status_code == 429:
+                    logger.warning("Helius rate limit hit, waiting...")
+                    time.sleep(5)
+                    continue
 
-            # Parse SOL transfers from the transaction
-            meta = tx_result.get("meta", {})
-            pre_balances = meta.get("preBalances", [])
-            post_balances = meta.get("postBalances", [])
-
-            account_keys = (
-                tx_result.get("transaction", {})
-                .get("message", {})
-                .get("accountKeys", [])
-            )
-
-            # Find our wallet's balance change
-            sol_change = 0.0
-            wallet_lower = wallet.address.lower()
-            for i, key_info in enumerate(account_keys):
-                # accountKeys can be strings or objects
-                if isinstance(key_info, dict):
-                    addr = key_info.get("pubkey", "")
-                else:
-                    addr = str(key_info)
-
-                if addr.lower() == wallet_lower:
-                    if i < len(pre_balances) and i < len(post_balances):
-                        lamport_change = post_balances[i] - pre_balances[i]
-                        sol_change = lamport_change / 1e9  # lamports to SOL
+                if resp.status_code != 200:
+                    logger.warning(
+                        f"Helius HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
                     break
 
-            direction = "in" if sol_change > 0 else "out" if sol_change < 0 else "unknown"
+                txns = resp.json()
+                if not txns or not isinstance(txns, list):
+                    break
 
-            new_txns.append(
-                {
-                    "hash": sig,
-                    "timestamp": block_time or int(time.time()),
-                    "direction": direction,
-                    "value": abs(sol_change),
-                    "counterparty": "",  # Hard to extract reliably from SOL
-                }
-            )
+                for tx in txns:
+                    tx_sig = tx.get("signature", "")
+                    if tx_sig in existing_hashes:
+                        continue
 
-        if new_txns:
-            data["transactions"].extend(new_txns)
+                    timestamp = tx.get("timestamp", 0)
+                    tx_type = tx.get("type", "UNKNOWN")
+
+                    # Parse native SOL transfers
+                    native_transfers = tx.get("nativeTransfers", [])
+                    sol_change = 0.0
+
+                    for nt in native_transfers:
+                        from_addr = nt.get("fromUserAccount", "")
+                        to_addr = nt.get("toUserAccount", "")
+                        amount_lamports = nt.get("amount", 0)
+                        amount_sol = amount_lamports / 1e9
+
+                        if to_addr == wallet.address:
+                            sol_change += amount_sol
+                        elif from_addr == wallet.address:
+                            sol_change -= amount_sol
+
+                    # Skip transactions with no SOL movement
+                    if abs(sol_change) < 0.001:
+                        continue
+
+                    direction = "in" if sol_change > 0 else "out"
+
+                    all_new_txns.append({
+                        "hash": tx_sig,
+                        "timestamp": timestamp,
+                        "direction": direction,
+                        "value": abs(sol_change),
+                        "tx_type": tx_type,
+                        "counterparty": "",
+                    })
+
+                # Pagination: use last signature as cursor
+                if len(txns) < 100:
+                    break
+                before_sig = txns[-1].get("signature", "")
+                if not before_sig:
+                    break
+
+                logger.info(
+                    f"📥 SOL page {pages}: {len(txns)} txns for "
+                    f"{wallet.label}"
+                )
+
+            except Exception as e:
+                logger.error(f"Helius collector error: {e}")
+                break
+
+        if all_new_txns:
+            data["transactions"].extend(all_new_txns)
             data["transactions"] = self._deduplicate(data["transactions"])
             logger.info(
-                f"✅ SOL: {len(new_txns)} new txns for {wallet.label}"
+                f"✅ SOL: {len(all_new_txns)} new txns for {wallet.label}"
             )
+
+        self._save_wallet_data(wallet.address, data)
+        return data
+
+    def _collect_via_rpc(
+        self, wallet: WhaleWallet, max_sigs: int = 20
+    ) -> Dict:
+        """Fallback: fetch via public Solana RPC (slow, limited)."""
+        data = self._load_wallet_data(wallet.address)
+        data["label"] = wallet.label
+        data["wallet_type"] = wallet.wallet_type
+
+        logger.warning(
+            f"SOL fallback RPC for {wallet.label} — "
+            f"set HELIUS_API_KEY for better results"
+        )
+
+        # Minimal RPC collection (just signatures + timestamps)
+        self._rate_limit()
+        try:
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getSignaturesForAddress",
+                "params": [wallet.address, {"limit": max_sigs}],
+            }
+            resp = requests.post(
+                "https://api.mainnet-beta.solana.com",
+                json=payload,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                result = resp.json().get("result", [])
+                existing = {
+                    tx["hash"] for tx in data["transactions"] if "hash" in tx
+                }
+                new_txns = []
+                for sig_info in result:
+                    sig = sig_info.get("signature", "")
+                    if sig in existing:
+                        continue
+                    new_txns.append({
+                        "hash": sig,
+                        "timestamp": sig_info.get("blockTime", 0),
+                        "direction": "unknown",
+                        "value": 0,
+                    })
+                if new_txns:
+                    data["transactions"].extend(new_txns)
+                    data["transactions"] = self._deduplicate(
+                        data["transactions"]
+                    )
+        except Exception as e:
+            logger.error(f"SOL RPC fallback error: {e}")
 
         self._save_wallet_data(wallet.address, data)
         return data
