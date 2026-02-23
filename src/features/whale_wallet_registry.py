@@ -2,12 +2,13 @@
 Whale Wallet Registry
 
 Curated list of known whale/smart-money wallet addresses per chain.
-These are non-exchange wallets that historically move markets.
+Includes exchange hot/cold wallets and known institutional wallets.
 
 Sources:
 - Etherscan labeled accounts
-- XRPL rich list (excluding Ripple escrow + exchanges)
+- XRPL rich list (excluding Ripple escrow)
 - Solana explorer known wallets
+- Arkham Intelligence labels
 """
 
 from dataclasses import dataclass, field
@@ -20,7 +21,7 @@ class WhaleWallet:
     address: str
     label: str
     chain: str          # "ETH", "SOL", "XRP"
-    wallet_type: str    # "accumulator", "trader", "institution", "fund"
+    wallet_type: str    # "exchange", "accumulator", "institution", "fund"
     notes: str = ""
 
 
@@ -63,11 +64,33 @@ ETH_WHALES: List[WhaleWallet] = [
         wallet_type="institution",
         notes="Galaxy Digital institutional wallet"
     ),
+    # --- NEW wallets ---
+    WhaleWallet(
+        address="0xA090e606E30bD747d4E6245a1517EbE430F0057e",
+        label="Coinbase Institutional",
+        chain="ETH",
+        wallet_type="exchange",
+        notes="Coinbase institutional/prime custody wallet"
+    ),
+    WhaleWallet(
+        address="0x40B38765696e3d5d8d9d834D8AaD4bB6e418E489",
+        label="Robinhood",
+        chain="ETH",
+        wallet_type="exchange",
+        notes="Robinhood ETH custody — retail flow proxy"
+    ),
+    WhaleWallet(
+        address="0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8",
+        label="Binance Cold 2",
+        chain="ETH",
+        wallet_type="exchange",
+        notes="Binance second cold wallet — large reserve movements"
+    ),
 ]
 
 
 # ─────────────────────────────────────────────
-# Solana Wallets (tracked via Solana RPC)
+# Solana Wallets (tracked via Helius/RPC)
 # ─────────────────────────────────────────────
 SOL_WHALES: List[WhaleWallet] = [
     WhaleWallet(
@@ -90,6 +113,21 @@ SOL_WHALES: List[WhaleWallet] = [
         chain="SOL",
         wallet_type="exchange",
         notes="Binance SOL cold storage"
+    ),
+    # --- NEW wallets ---
+    WhaleWallet(
+        address="GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7yVQ",
+        label="Kraken SOL",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="Kraken exchange SOL hot wallet"
+    ),
+    WhaleWallet(
+        address="FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsXAowFrgr2e",
+        label="Phantom Treasury",
+        chain="SOL",
+        wallet_type="institution",
+        notes="Phantom wallet treasury — ecosystem health signal"
     ),
 ]
 
@@ -117,7 +155,7 @@ XRP_WHALES: List[WhaleWallet] = [
         label="XRP Whale Accumulator",
         chain="XRP",
         wallet_type="accumulator",
-        notes="Non-exchange large XRP holder — movements often precede price action"
+        notes="Non-exchange large XRP holder"
     ),
     WhaleWallet(
         address="rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
@@ -125,6 +163,28 @@ XRP_WHALES: List[WhaleWallet] = [
         chain="XRP",
         wallet_type="institution",
         notes="Ripple programmatic sales wallet"
+    ),
+    # --- NEW wallets ---
+    WhaleWallet(
+        address="rN7nDp64EKhECn3uMTfWKnJYKkHo2vjrPN",
+        label="Upbit XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Upbit exchange — largest XRP exchange holder (~6B XRP)"
+    ),
+    WhaleWallet(
+        address="rKRDibMbAaMMoUGRyNFabRboMFWEvFciJR",
+        label="Bitstamp XRP",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Bitstamp XRP hot wallet — European exchange flow signal"
+    ),
+    WhaleWallet(
+        address="rU2mEJSLqBRkYLVTv55rFTgQajkLTnT6mA",
+        label="Bithumb XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Bithumb exchange — 2nd largest XRP exchange holder (~1.7B XRP)"
     ),
 ]
 

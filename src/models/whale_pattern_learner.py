@@ -1,14 +1,15 @@
 """
-Whale Pattern Learner
+Whale Pattern Learner v2
 
-Learns buy/sell patterns from whale wallet transaction history
-and correlates them with price movements to generate predictive signals.
+Enhanced learning engine that analyzes per-wallet transaction impact on
+price movements to generate predictive signals.
 
 Algorithm:
-1. Convert transaction history into hourly flow time-series
-2. Compute rolling features (24h net flow, 7d accumulation, flow acceleration)
-3. Cross-correlate with OHLCV price data
-4. Train a lightweight model (sklearn) to predict price direction
+1. Convert per-wallet transaction history into hourly flow time-series
+2. Compute per-wallet price impact features (1h, 4h, 24h after large txns)
+3. Add transaction size classification (large vs small)
+4. Cross-correlate with OHLCV price data
+5. Train GradientBoosting classifier to predict price direction
 """
 
 import json
@@ -32,16 +33,11 @@ class WhalePatternLearner:
     """
     Learns whale trading patterns and their correlation with price.
 
-    Features extracted per hourly bucket:
-    - net_flow: net inflow/outflow in native units
-    - tx_count: number of transactions
-    - avg_size: average transaction size
-    - direction_ratio: ratio of in vs out transactions
-    - flow_24h: rolling 24h net flow
-    - flow_7d: rolling 7d net flow
-    - flow_acceleration: rate of change of flow
-    - hour_of_day: cyclical time feature
-    - day_of_week: cyclical time feature
+    v2 features:
+    - Per-wallet flow features (not just aggregate)
+    - Per-transaction price impact analysis
+    - Transaction size classification (large vs small)
+    - GradientBoosting with multi-horizon targets
     """
 
     def __init__(self, chain: str):
@@ -64,16 +60,22 @@ class WhalePatternLearner:
                     pass
         return wallets
 
+    # ─────────────────────────────────────────────
+    # Feature Engineering
+    # ─────────────────────────────────────────────
+
     def _transactions_to_hourly(
         self, wallets: List[Dict]
     ) -> pd.DataFrame:
         """
         Convert all wallet transactions into an hourly flow time-series.
 
-        Each row = 1 hour, columns = aggregate flow metrics.
+        Includes aggregate features + per-wallet features +
+        transaction size classification.
         """
         all_txns = []
-        for w in wallets:
+        for w_idx, w in enumerate(wallets):
+            wallet_label = w.get("label", f"wallet_{w_idx}")
             for tx in w.get("transactions", []):
                 ts = tx.get("timestamp", 0)
                 if ts <= 0:
@@ -84,14 +86,14 @@ class WhalePatternLearner:
                 # Signed flow: positive = inflow, negative = outflow
                 signed_value = value if direction == "in" else -value
 
-                all_txns.append(
-                    {
-                        "timestamp": pd.Timestamp.utcfromtimestamp(ts),
-                        "value": value,
-                        "signed_value": signed_value,
-                        "direction": direction,
-                    }
-                )
+                all_txns.append({
+                    "timestamp": pd.Timestamp.utcfromtimestamp(ts),
+                    "value": value,
+                    "signed_value": signed_value,
+                    "direction": direction,
+                    "wallet_idx": w_idx,
+                    "wallet_label": wallet_label,
+                })
 
         if not all_txns:
             return pd.DataFrame()
@@ -99,11 +101,12 @@ class WhalePatternLearner:
         df = pd.DataFrame(all_txns)
         df = df.set_index("timestamp").sort_index()
 
-        # Resample to hourly buckets
+        # ── Aggregate flow features ──
         hourly = pd.DataFrame()
         hourly["net_flow"] = df["signed_value"].resample("1h").sum().fillna(0)
         hourly["tx_count"] = df["signed_value"].resample("1h").count().fillna(0)
         hourly["avg_size"] = df["value"].resample("1h").mean().fillna(0)
+
         hourly["inflow_count"] = (
             df[df["direction"] == "in"]["value"]
             .resample("1h").count()
@@ -115,7 +118,6 @@ class WhalePatternLearner:
             .reindex(hourly.index, fill_value=0)
         )
 
-        # Direction ratio: >0.5 = more inflows, <0.5 = more outflows
         total_count = hourly["inflow_count"] + hourly["outflow_count"]
         hourly["direction_ratio"] = np.where(
             total_count > 0,
@@ -128,13 +130,196 @@ class WhalePatternLearner:
         hourly["flow_7d"] = hourly["net_flow"].rolling(168, min_periods=1).sum()
         hourly["flow_acceleration"] = hourly["flow_24h"].diff(6).fillna(0)
 
-        # Time features (cyclical encoding)
+        # ── Transaction size classification ──
+        if len(df) > 10:
+            value_75th = df["value"].quantile(0.75)
+            large_mask = df["value"] >= value_75th
+
+            hourly["large_tx_flow"] = (
+                df.loc[large_mask, "signed_value"]
+                .resample("1h").sum()
+                .reindex(hourly.index, fill_value=0)
+            )
+            hourly["large_tx_count"] = (
+                df.loc[large_mask, "value"]
+                .resample("1h").count()
+                .reindex(hourly.index, fill_value=0)
+            )
+            # Large tx ratio
+            hourly["large_tx_ratio"] = np.where(
+                hourly["tx_count"] > 0,
+                hourly["large_tx_count"] / hourly["tx_count"],
+                0,
+            )
+        else:
+            hourly["large_tx_flow"] = 0
+            hourly["large_tx_count"] = 0
+            hourly["large_tx_ratio"] = 0
+
+        # ── Per-wallet flow features (top 5 wallets) ──
+        unique_wallets = sorted(df["wallet_idx"].unique())[:5]
+        for w_idx in unique_wallets:
+            w_df = df[df["wallet_idx"] == w_idx]
+            prefix = f"w{w_idx}"
+
+            hourly[f"{prefix}_flow"] = (
+                w_df["signed_value"].resample("1h").sum()
+                .reindex(hourly.index, fill_value=0)
+            )
+            hourly[f"{prefix}_count"] = (
+                w_df["value"].resample("1h").count()
+                .reindex(hourly.index, fill_value=0)
+            )
+            hourly[f"{prefix}_flow_24h"] = (
+                hourly[f"{prefix}_flow"].rolling(24, min_periods=1).sum()
+            )
+
+        # ── Whale consensus ──
+        # What % of wallets are flowing in the same direction?
+        if len(unique_wallets) > 1:
+            wallet_directions = []
+            for w_idx in unique_wallets:
+                col = f"w{w_idx}_flow_24h"
+                if col in hourly.columns:
+                    wallet_directions.append(
+                        np.sign(hourly[col]).fillna(0)
+                    )
+            if wallet_directions:
+                direction_df = pd.concat(wallet_directions, axis=1)
+                # Consensus: fraction of wallets agreeing on direction
+                hourly["whale_consensus"] = (
+                    direction_df.apply(
+                        lambda row: abs(row.sum()) / max(len(row), 1),
+                        axis=1
+                    )
+                )
+            else:
+                hourly["whale_consensus"] = 0
+        else:
+            hourly["whale_consensus"] = 0
+
+        # ── Time features (cyclical) ──
         hourly["hour_sin"] = np.sin(2 * np.pi * hourly.index.hour / 24)
         hourly["hour_cos"] = np.cos(2 * np.pi * hourly.index.hour / 24)
         hourly["dow_sin"] = np.sin(2 * np.pi * hourly.index.dayofweek / 7)
         hourly["dow_cos"] = np.cos(2 * np.pi * hourly.index.dayofweek / 7)
 
         return hourly
+
+    def _compute_price_impact_features(
+        self,
+        wallets: List[Dict],
+        price_hourly: pd.Series,
+    ) -> Dict[str, float]:
+        """
+        Compute per-wallet price impact statistics.
+
+        For each wallet's large transactions, measure what the price
+        did at +1h, +4h, +24h. This tells us which wallets are
+        predictive and in which direction.
+
+        Returns a dict of per-wallet impact stats to be used as
+        static features during training (added to every row).
+        """
+        impact_features = {}
+
+        for w_idx, w in enumerate(wallets[:5]):
+            txns = w.get("transactions", [])
+            if len(txns) < 5:
+                continue
+
+            # Find large transactions (top 25%)
+            values = [tx.get("value", 0) for tx in txns]
+            if not values:
+                continue
+            threshold = np.percentile(values, 75)
+
+            impacts_1h = []
+            impacts_4h = []
+            impacts_24h = []
+            correct_predictions = 0
+            total_predictions = 0
+
+            for tx in txns:
+                value = tx.get("value", 0)
+                if value < threshold:
+                    continue
+
+                ts = tx.get("timestamp", 0)
+                if ts <= 0:
+                    continue
+
+                try:
+                    tx_time = pd.Timestamp.utcfromtimestamp(ts)
+                    if tx_time.tzinfo is not None:
+                        tx_time = tx_time.tz_convert(None)
+                except Exception:
+                    continue
+
+                direction = tx.get("direction", "unknown")
+
+                # Find price at transaction time and after
+                try:
+                    # Find nearest price
+                    idx = price_hourly.index.get_indexer(
+                        [tx_time], method="nearest"
+                    )[0]
+                    if idx < 0 or idx >= len(price_hourly):
+                        continue
+
+                    price_at_tx = price_hourly.iloc[idx]
+                    if price_at_tx <= 0:
+                        continue
+
+                    # Price change at +1h, +4h, +24h
+                    for offset, impacts_list in [
+                        (1, impacts_1h),
+                        (4, impacts_4h),
+                        (24, impacts_24h),
+                    ]:
+                        future_idx = idx + offset
+                        if future_idx < len(price_hourly):
+                            pct_change = (
+                                (price_hourly.iloc[future_idx] - price_at_tx)
+                                / price_at_tx
+                            )
+                            impacts_list.append(pct_change)
+
+                    # Hit rate: did inflow precede price increase?
+                    if idx + 4 < len(price_hourly):
+                        price_4h = price_hourly.iloc[idx + 4]
+                        price_went_up = price_4h > price_at_tx
+                        total_predictions += 1
+                        if direction == "in" and price_went_up:
+                            correct_predictions += 1
+                        elif direction == "out" and not price_went_up:
+                            correct_predictions += 1
+
+                except Exception:
+                    continue
+
+            prefix = f"w{w_idx}"
+            impact_features[f"{prefix}_impact_1h"] = (
+                float(np.mean(impacts_1h)) if impacts_1h else 0
+            )
+            impact_features[f"{prefix}_impact_4h"] = (
+                float(np.mean(impacts_4h)) if impacts_4h else 0
+            )
+            impact_features[f"{prefix}_impact_24h"] = (
+                float(np.mean(impacts_24h)) if impacts_24h else 0
+            )
+            impact_features[f"{prefix}_hit_rate"] = (
+                correct_predictions / max(total_predictions, 1)
+            )
+            impact_features[f"{prefix}_predictive"] = (
+                1.0 if impact_features[f"{prefix}_hit_rate"] > 0.55 else 0.0
+            )
+
+        return impact_features
+
+    # ─────────────────────────────────────────────
+    # Price Data
+    # ─────────────────────────────────────────────
 
     def _fetch_price_data(self, days: int = 90) -> Optional[pd.DataFrame]:
         """Fetch OHLCV price data for the corresponding asset."""
@@ -157,8 +342,15 @@ class WhalePatternLearner:
             logger.error(f"Failed to fetch price data: {e}")
         return None
 
+    # ─────────────────────────────────────────────
+    # Training Data Construction
+    # ─────────────────────────────────────────────
+
     def _build_training_data(
-        self, hourly_flow: pd.DataFrame, price_df: pd.DataFrame
+        self,
+        hourly_flow: pd.DataFrame,
+        price_df: pd.DataFrame,
+        impact_features: Dict[str, float],
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         Merge whale flow features with price data and create targets.
@@ -218,11 +410,11 @@ class WhalePatternLearner:
             return pd.DataFrame(), pd.Series()
 
         # Use merge_asof for robust join (nearest hour match)
-        flow_reset = flow_overlap.reset_index().rename(columns={"index": "timestamp"})
+        flow_reset = flow_overlap.reset_index()
         if flow_reset.columns[0] != "timestamp":
-            # The index name might differ
-            flow_reset = flow_overlap.reset_index()
-            flow_reset.columns = ["timestamp"] + list(flow_overlap.columns)
+            flow_reset = flow_reset.rename(
+                columns={flow_reset.columns[0]: "timestamp"}
+            )
 
         price_reset = pd.DataFrame({
             "timestamp": price_hourly.index,
@@ -238,9 +430,30 @@ class WhalePatternLearner:
             tolerance=pd.Timedelta("1h"),
         )
 
+        # Use per-wallet impact features to create weighted flow signals
+        # Instead of static features, weight each wallet's flow by its hit rate
+        if impact_features:
+            weighted_flow = pd.Series(0.0, index=merged.index)
+            for w_idx in range(5):
+                flow_col = f"w{w_idx}_flow"
+                hit_rate_key = f"w{w_idx}_hit_rate"
+                if flow_col in merged.columns and hit_rate_key in impact_features:
+                    hit_rate = impact_features[hit_rate_key]
+                    # Weight: center around 0.5 (no-info), scale by deviation
+                    weight = (hit_rate - 0.5) * 2  # range: -1 to +1
+                    weighted_flow += merged[flow_col].fillna(0) * weight
+            merged["weighted_smart_flow"] = weighted_flow
+            merged["weighted_smart_flow_24h"] = (
+                merged["weighted_smart_flow"].rolling(24, min_periods=1).sum()
+            )
+
         # Fill NaN in flow features (sparse whale data is normal)
-        flow_cols = [c for c in merged.columns if c not in ["price", "price_change_4h", "timestamp"]]
+        flow_cols = [
+            c for c in merged.columns
+            if c not in ["price", "price_change_4h", "timestamp"]
+        ]
         merged[flow_cols] = merged[flow_cols].fillna(0)
+
         # Drop only rows missing price/target data
         merged = merged.dropna(subset=["price", "price_change_4h"])
         logger.info(f"📊 Merged rows after dropna: {len(merged)}")
@@ -261,6 +474,10 @@ class WhalePatternLearner:
 
         return features, target
 
+    # ─────────────────────────────────────────────
+    # Training
+    # ─────────────────────────────────────────────
+
     def train(self, days: int = 90) -> bool:
         """
         Train the whale pattern model.
@@ -268,8 +485,9 @@ class WhalePatternLearner:
         1. Load wallet transaction data
         2. Convert to hourly flow features
         3. Fetch price data
-        4. Build training data
-        5. Train a Random Forest
+        4. Compute per-wallet price impact
+        5. Build training data
+        6. Train GradientBoosting + RandomForest ensemble
         """
         logger.info(f"🧠 Training whale pattern model for {self.chain}...")
 
@@ -289,13 +507,16 @@ class WhalePatternLearner:
             )
             return False
 
-        # Step 2: Convert to hourly flow
+        # Step 2: Convert to hourly flow (with per-wallet features)
         hourly = self._transactions_to_hourly(wallets)
         if hourly.empty:
             logger.warning("No hourly flow data generated")
             return False
 
-        logger.info(f"📊 Hourly flow: {len(hourly)} rows, {hourly.columns.tolist()}")
+        logger.info(
+            f"📊 Hourly flow: {len(hourly)} rows, "
+            f"{len(hourly.columns)} features"
+        )
 
         # Step 3: Fetch price data
         price_df = self._fetch_price_data(days=days)
@@ -303,23 +524,66 @@ class WhalePatternLearner:
             logger.warning("No price data available")
             return False
 
-        # Step 4: Build training data
-        features, target = self._build_training_data(hourly, price_df)
+        # Step 4: Compute per-wallet price impact features
+        # Need price as hourly series for impact computation
+        _price = price_df.copy()
+        if "timestamp" in _price.columns:
+            _price = _price.set_index("timestamp")
+        if not isinstance(_price.index, pd.DatetimeIndex):
+            _price.index = pd.to_datetime(_price.index)
+        _price = _price.sort_index()
+        try:
+            if hasattr(_price.index, 'tz') and _price.index.tz is not None:
+                _price.index = _price.index.tz_convert(None)
+        except TypeError:
+            pass
+
+        price_hourly_series = _price["close"].resample("1h").last().ffill()
+        impact_features = self._compute_price_impact_features(
+            wallets, price_hourly_series
+        )
+        if impact_features:
+            logger.info(f"📊 Price impact features: {len(impact_features)}")
+            for k, v in impact_features.items():
+                if "hit_rate" in k:
+                    logger.info(f"   {k}: {v:.2%}")
+
+        # Step 5: Build training data
+        features, target = self._build_training_data(
+            hourly, price_df, impact_features
+        )
         if features.empty:
             logger.warning("No valid training samples after merge")
             return False
 
-        logger.info(f"📊 Training data: {len(features)} samples, {features.shape[1]} features")
+        logger.info(
+            f"📊 Training data: {len(features)} samples, "
+            f"{features.shape[1]} features"
+        )
 
-        # Step 5: Train model
+        # Step 6: Train model
         try:
-            from sklearn.ensemble import RandomForestClassifier
+            from sklearn.ensemble import (
+                GradientBoostingClassifier,
+                RandomForestClassifier,
+                VotingClassifier,
+            )
             from sklearn.model_selection import cross_val_score
 
             self.feature_names = features.columns.tolist()
 
-            # Handle class imbalance
-            model = RandomForestClassifier(
+            # GradientBoosting — better at learning patterns
+            gb_model = GradientBoostingClassifier(
+                n_estimators=150,
+                max_depth=4,
+                learning_rate=0.1,
+                min_samples_leaf=10,
+                subsample=0.8,
+                random_state=42,
+            )
+
+            # RandomForest — robust baseline
+            rf_model = RandomForestClassifier(
                 n_estimators=100,
                 max_depth=6,
                 min_samples_leaf=10,
@@ -328,12 +592,23 @@ class WhalePatternLearner:
                 n_jobs=-1,
             )
 
+            # Ensemble via soft voting
+            model = VotingClassifier(
+                estimators=[
+                    ("gb", gb_model),
+                    ("rf", rf_model),
+                ],
+                voting="soft",
+                weights=[0.6, 0.4],  # GB weighted higher
+            )
+
             # Cross-validate
             if len(features) >= 20:
                 cv_folds = min(5, len(features) // 4)
                 if cv_folds >= 2:
                     scores = cross_val_score(
-                        model, features, target, cv=cv_folds, scoring="accuracy"
+                        model, features, target,
+                        cv=cv_folds, scoring="accuracy"
                     )
                     logger.info(
                         f"📊 CV Accuracy: {scores.mean():.3f} "
@@ -353,6 +628,9 @@ class WhalePatternLearner:
                 "n_samples": len(features),
                 "n_wallets": len(wallets),
                 "n_transactions": total_txns,
+                "n_features": features.shape[1],
+                "impact_features": impact_features,
+                "version": "v2",
             }
 
             with open(self.model_path, "wb") as f:
@@ -360,20 +638,26 @@ class WhalePatternLearner:
 
             logger.info(
                 f"✅ Whale pattern model saved: {self.model_path} "
-                f"({len(features)} samples)"
+                f"({len(features)} samples, {features.shape[1]} features)"
             )
 
-            # Feature importance
-            if hasattr(model, "feature_importances_"):
-                importances = dict(
-                    zip(self.feature_names, model.feature_importances_)
-                )
-                top_features = sorted(
-                    importances.items(), key=lambda x: x[1], reverse=True
-                )[:5]
-                logger.info("📊 Top features:")
-                for name, imp in top_features:
-                    logger.info(f"   {name}: {imp:.3f}")
+            # Feature importance from the GB model
+            try:
+                gb_fitted = model.named_estimators_["gb"]
+                if hasattr(gb_fitted, "feature_importances_"):
+                    importances = dict(
+                        zip(self.feature_names, gb_fitted.feature_importances_)
+                    )
+                    top_features = sorted(
+                        importances.items(),
+                        key=lambda x: x[1],
+                        reverse=True,
+                    )[:8]
+                    logger.info("📊 Top features (GradientBoosting):")
+                    for name, imp in top_features:
+                        logger.info(f"   {name}: {imp:.3f}")
+            except Exception:
+                pass
 
             return True
 
@@ -384,6 +668,8 @@ class WhalePatternLearner:
             return False
         except Exception as e:
             logger.error(f"Training failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def load_model(self) -> bool:
@@ -394,9 +680,11 @@ class WhalePatternLearner:
                     model_data = pickle.load(f)
                 self.model = model_data["model"]
                 self.feature_names = model_data.get("feature_names", [])
+                version = model_data.get("version", "v1")
                 logger.info(
                     f"✅ Loaded whale pattern model: {self.chain} "
-                    f"(trained on {model_data.get('n_samples', '?')} samples)"
+                    f"({version}, {model_data.get('n_samples', '?')} samples, "
+                    f"{model_data.get('n_features', '?')} features)"
                 )
                 return True
             except Exception as e:
@@ -419,8 +707,12 @@ class WhalePatternLearner:
         try:
             # Use only the feature columns the model was trained on
             available = [c for c in self.feature_names if c in hourly_flow.columns]
-            if len(available) < len(self.feature_names) * 0.5:
-                return {"signal": 0.0, "confidence": 0.0, "status": "missing_features"}
+            if len(available) < len(self.feature_names) * 0.3:
+                return {
+                    "signal": 0.0,
+                    "confidence": 0.0,
+                    "status": "missing_features",
+                }
 
             # Fill missing features with 0
             features = pd.DataFrame()
@@ -449,7 +741,9 @@ class WhalePatternLearner:
                 "signal": np.clip(signal, -1.0, 1.0),
                 "confidence": confidence,
                 "status": "ok",
-                "probabilities": dict(zip([str(c) for c in classes], proba.tolist())),
+                "probabilities": dict(
+                    zip([str(c) for c in classes], proba.tolist())
+                ),
             }
 
         except Exception as e:

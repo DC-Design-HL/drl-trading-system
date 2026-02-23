@@ -95,8 +95,8 @@ def main():
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=5,
-        help="Max pagination pages per wallet (default: 5)",
+        default=20,
+        help="Max pagination pages per wallet (default: 20)",
     )
     parser.add_argument(
         "--collect-only",
