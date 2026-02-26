@@ -86,6 +86,30 @@ class FundingRateAnalyzer:
         self._last_fetch = now
         return self._cached_data
 
+    def _get_okx_funding(self) -> float:
+        """Fetch funding rate from OKX (no geo-blocking)."""
+        try:
+            # Map symbol to OKX format (e.g. BTCUSDT -> BTC-USDT-SWAP)
+            base = self.symbol.replace('USDT', '')
+            okx_inst = f"{base}-USDT-SWAP"
+            url = "https://www.okx.com/api/v5/public/funding-rate"
+            response = requests.get(
+                url,
+                params={"instId": okx_inst},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('data'):
+                rate = float(data['data'][0].get('fundingRate', 0))
+                logger.info(f"💰 OKX Funding Rate for {okx_inst}: {rate:.6f}")
+                return rate
+        except Exception as e:
+            logger.warning(f"OKX funding rate fetch failed: {e}")
+        
+        return 0.0
+
     def get_signal(self) -> FundingSignal:
         """
         Get funding rate signal for trade filtering.
@@ -206,6 +230,36 @@ class OrderFlowAnalyzer:
         except Exception as e:
             logger.warning(f"Failed to fetch Binance Spot trades: {e}. Trying OKX fallback...")
             return self._get_okx_trades()
+
+    def _get_okx_trades(self) -> List[Dict]:
+        """Fetch recent trades from OKX (no geo-blocking)."""
+        try:
+            base = self.symbol.replace('USDT', '')
+            okx_inst = f"{base}-USDT"
+            url = "https://www.okx.com/api/v5/market/trades"
+            response = requests.get(
+                url,
+                params={"instId": okx_inst, "limit": "500"},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('data'):
+                # Convert OKX format to Binance-compatible format
+                trades = []
+                for t in data['data']:
+                    trades.append({
+                        'price': t.get('px', '0'),
+                        'qty': t.get('sz', '0'),
+                        'isBuyerMaker': t.get('side', 'buy') == 'sell',
+                    })
+                logger.info(f"📊 OKX trades fetched: {len(trades)} trades for {okx_inst}")
+                return trades
+        except Exception as e:
+            logger.warning(f"OKX trades fetch failed: {e}")
+        
+        return []
 
     def calculate_cvd(self, df: pd.DataFrame = None) -> float:
         """

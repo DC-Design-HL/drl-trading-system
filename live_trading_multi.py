@@ -134,9 +134,9 @@ class MultiAssetTradingBot:
         import time
         current_time = time.time()
         
-        # 1-hour proxy bandwidth saver cache
+        # 2-minute cache (was 1 hour — too stale for dashboard)
         if hasattr(self, '_last_analysis_time') and hasattr(self, '_cached_analysis'):
-            if current_time - self._last_analysis_time < 3600 and self._cached_analysis:
+            if current_time - self._last_analysis_time < 120 and self._cached_analysis:
                 return self._cached_analysis
                 
         try:
