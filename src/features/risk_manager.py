@@ -39,15 +39,15 @@ class AdaptiveRiskManager:
     
     def __init__(
         self,
-    base_sl_pct: float = 0.02,   # 2.0% base stop loss (was 1.5%)
-    base_tp_pct: float = 0.05,   # 5.0% base take profit (was 2.5%) → 1:2.5 R:R
-    base_position_size: float = 0.5,  # 50% base position
-    min_sl_pct: float = 0.012,  # Minimum 1.2% SL (was 0.8%)
-    max_sl_pct: float = 0.04,   # Maximum 4% SL (was 3%)
-    min_tp_pct: float = 0.03,   # Minimum 3% TP (was 1.5%)
-    max_tp_pct: float = 0.10,   # Maximum 10% TP (was 6%)
-        min_position_size: float = 0.1,  # Minimum 10% position
-        max_position_size: float = 0.75,  # Maximum 75% position
+        base_sl_pct: float = 0.05,   # 5.0% base stop loss (increased from 2%)
+        base_tp_pct: float = 0.10,   # 10.0% base take profit (increased from 5%)
+        base_position_size: float = 0.5,
+        min_sl_pct: float = 0.02,    # Minimum 2% SL
+        max_sl_pct: float = 0.10,    # Maximum 10% SL
+        min_tp_pct: float = 0.04,    # Minimum 4% TP
+        max_tp_pct: float = 0.20,    # Maximum 20% TP
+        min_position_size: float = 0.1,
+        max_position_size: float = 0.75,
         atr_period: int = 14,
         use_kelly: bool = True,
         use_trailing: bool = True,
@@ -89,43 +89,35 @@ class AdaptiveRiskManager:
     
     def get_adaptive_sl_tp(self, df: pd.DataFrame, trade_type: str = "long") -> Tuple[float, float]:
         """
-        Calculate adaptive SL/TP based on current volatility (ATR).
+        Calculate adaptive SL/TP using direct ATR multipliers.
         
-        Higher volatility = wider stops
-        Lower volatility = tighter stops
+        Provides robust stops that sit outside normal market noise.
+        SL: 2.5x ATR
+        TP: 4.0x ATR
         """
         current_price = df['close'].iloc[-1]
-        atr = self.calculate_atr(df)
         
-        # ATR as percentage of price
-        atr_pct = atr / current_price
-        
-        # Calculate "normal" ATR (average over last 50 periods)
-        historical_atrs = []
-        for i in range(50, len(df), 10):
-            historical_atrs.append(self.calculate_atr(df.iloc[:i]))
-        
-        if historical_atrs:
-            avg_atr = np.mean(historical_atrs)
-            volatility_ratio = atr / (avg_atr + 1e-10)
-        else:
-            volatility_ratio = 1.0
-        
-        # Adjust SL/TP based on volatility
-        # Higher volatility = wider stops (multiply by ratio)
-        adjusted_sl = self.base_sl_pct * volatility_ratio
-        adjusted_tp = self.base_tp_pct * volatility_ratio
-        
-        # Clamp to min/max
-        sl_pct = np.clip(adjusted_sl, self.min_sl_pct, self.max_sl_pct)
-        tp_pct = np.clip(adjusted_tp, self.min_tp_pct, self.max_tp_pct)
-        
-        logger.info(
-            f"📊 Adaptive SL/TP: ATR={atr:.2f} ({atr_pct:.2%}), "
-            f"Vol Ratio={volatility_ratio:.2f} → SL={sl_pct:.2%}, TP={tp_pct:.2%}"
-        )
-        
-        return sl_pct, tp_pct
+        try:
+            atr = self.calculate_atr(df)
+            atr_pct = atr / current_price
+            
+            # Use direct ATR multipliers for robust crypto stops
+            sl_pct = atr_pct * 2.5
+            tp_pct = atr_pct * 4.0
+            
+            # Clamp to min/max safety rails
+            sl_pct = np.clip(sl_pct, self.min_sl_pct, self.max_sl_pct)
+            tp_pct = np.clip(tp_pct, self.min_tp_pct, self.max_tp_pct)
+            
+            logger.info(
+                f"📊 Adaptive SL/TP: ATR={atr:.2f} ({atr_pct:.2%}) "
+                f"→ SL={sl_pct:.2%}, TP={tp_pct:.2%}"
+            )
+            return sl_pct, tp_pct
+            
+        except Exception as e:
+            logger.warning(f"Failed to calc ATR-based SL/TP: {e}. Using base defaults.")
+            return self.base_sl_pct, self.base_tp_pct
     
     def calculate_kelly_fraction(self) -> float:
         """

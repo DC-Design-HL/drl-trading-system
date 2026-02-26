@@ -80,6 +80,9 @@ class MultiAssetTradingBot:
         self.position_units = 0.0
         self.sl_price = 0.0
         self.tp_price = 0.0
+        self.highest_price = 0.0
+        self.lowest_price = 0.0
+        self.base_trailing_pct = 0.0
         
         self.trades: List[Dict] = []
         self.realized_pnl = 0.0
@@ -435,13 +438,15 @@ class MultiAssetTradingBot:
                 
                 # Calculate SL/TP
                 try:
-                    df = self.fetch_data(days=3) # Need some history for ATR
-                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "long")
-                    self.sl_price = current_price * (1 - sl_pct)
-                    self.tp_price = current_price * (1 + tp_pct)
+                    df = self.fetch_data(days=3)
+                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "short")
+                    self.sl_price = current_price * (1 + sl_pct)
+                    self.tp_price = current_price * (1 - tp_pct)
+                    self.lowest_price = current_price
+                    self.base_trailing_pct = sl_pct
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
-                    logger.info(f"🛡️ LONG SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
+                    logger.info(f"🛡️ SHORT SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
                 except Exception as e:
                     logger.error(f"Failed to calc SL/TP: {e}")
                     self.sl_price = current_price * 0.98
@@ -512,16 +517,36 @@ class MultiAssetTradingBot:
         if self.position != 0:
             hit_sl = False
             hit_tp = False
+            hit_trailing = False
+            reason = ""
             
             if self.position == 1: # LONG
+                self.highest_price = max(self.highest_price, current_price)
+                
+                # Check normal SL/TP
                 if current_price <= self.sl_price and self.sl_price > 0:
                     hit_sl = True
+                    reason = "STOP_LOSS"
                 elif current_price >= self.tp_price and self.tp_price > 0:
                     hit_tp = True
-                    
-                if hit_sl or hit_tp:
+                    reason = "TAKE_PROFIT"
+                else:
+                    # Check Trailing Stop
+                    trailing_stop = self.highest_price * (1 - self.base_trailing_pct)
+                    if trailing_stop > self.sl_price: # Trailing Stop only moves UP
+                        if current_price <= trailing_stop:
+                            hit_trailing = True
+                            reason = "TRAILING_STOP"
+                            
+                    # Break-Even Stop (moved halfway to TP)
+                    tp_distance = self.tp_price - self.position_price
+                    if current_price >= self.position_price + (tp_distance * 0.5):
+                        if self.sl_price < self.position_price:
+                            self.sl_price = self.position_price # Move SL to Break-Even
+                            logger.info(f"🛡️ Moved SL to Break-Even for {self.symbol} @ ${self.sl_price:.2f}")
+
+                if hit_sl or hit_tp or hit_trailing:
                     trade = self.execute_trade(2, current_price) # Sell to close
-                    reason = "STOP_LOSS" if hit_sl else "TAKE_PROFIT"
                     if hit_sl:
                         self.last_loss_time = time.time()
                     logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
@@ -537,6 +562,57 @@ class MultiAssetTradingBot:
                         "price": current_price,
                         "raw_action": "HOLD",
                         "filtered_action": "CLOSE_LONG",
+                        "reason": reason,
+                        "position": 0,
+                        "balance": self.balance,
+                        "equity": total_equity,
+                        "realized_pnl": self.realized_pnl,
+                        "unrealized_pnl": 0,
+                        "trade": trade,
+                        "sl": 0,
+                        "tp": 0
+                    }
+
+            elif self.position == -1: # SHORT
+                self.lowest_price = min(self.lowest_price, current_price) if self.lowest_price > 0 else current_price
+                
+                if current_price >= self.sl_price and self.sl_price > 0:
+                    hit_sl = True
+                    reason = "STOP_LOSS"
+                elif current_price <= self.tp_price and self.tp_price > 0:
+                    hit_tp = True
+                    reason = "TAKE_PROFIT"
+                else:
+                    # Check Trailing Stop
+                    trailing_stop = self.lowest_price * (1 + self.base_trailing_pct)
+                    if trailing_stop < self.sl_price and self.sl_price > 0: # Trailing Stop only moves DOWN
+                        if current_price >= trailing_stop:
+                            hit_trailing = True
+                            reason = "TRAILING_STOP"
+                            
+                    # Break-Even Stop (moved halfway to TP)
+                    tp_distance = self.position_price - self.tp_price
+                    if current_price <= self.position_price - (tp_distance * 0.5):
+                        if self.sl_price > self.position_price:
+                            self.sl_price = self.position_price # Move SL to Break-Even
+                            logger.info(f"🛡️ Moved SL to Break-Even for {self.symbol} @ ${self.sl_price:.2f}")
+                    
+                if hit_sl or hit_tp or hit_trailing:
+                    trade = self.execute_trade(1, current_price) # Buy to close
+                    if hit_sl:
+                        self.last_loss_time = time.time()
+                    logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
+                    
+                    # Return result immediately
+                    total_equity = self.balance
+                    self.last_equity = total_equity
+                    
+                    return {
+                        "symbol": self.symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "price": current_price,
+                        "raw_action": "HOLD",
+                        "filtered_action": "CLOSE_SHORT",
                         "reason": reason,
                         "position": 0,
                         "balance": self.balance,
