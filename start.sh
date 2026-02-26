@@ -4,7 +4,7 @@
 # Using unbuffered output to ensure logs are visible immediately
 # Start the trading bot (pipe to file for UI access)
 # Start the trading bot (pipe to file for UI access and stdout for debugging)
-python -u live_trading.py --model ./data/models/ultimate_agent.zip --symbol BTC/USDT 2>&1 | tee process.log &
+python -u live_trading_multi.py --assets BTCUSDT ETHUSDT SOLUSDT XRPUSDT --balance 5000 2>&1 | tee process.log &
 
 # Start the API serverplease
 python -u src/ui/api_server.py 2>&1 | tee api_server.log &

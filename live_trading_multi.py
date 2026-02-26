@@ -28,8 +28,7 @@ import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
 
-from src.models.ensemble_orchestrator import EnsembleOrchestrator
-from src.env.mtf_env import resample_to_higher_tf, compute_mtf_features_at
+# Old imports removed: EnsembleOrchestrator, resample_to_higher_tf, compute_mtf_features_at
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher, SUPPORTED_ASSETS
 from src.features.multi_asset_features import MultiAssetFeatureEngine
 from src.features.whale_tracker import WhaleTracker
@@ -95,12 +94,14 @@ class MultiAssetTradingBot:
         
         self._running = False
         
-        # Load model
+        # Load model (Ultimate Agent - whale-fused PPO)
         self.model = self._load_model()
         
-        # Initialize feature engine (using same engine as training env)
-        from src.env.advanced_features import AdvancedFeatureEngine
-        self.feature_engine = AdvancedFeatureEngine()
+        # Initialize feature engine (MUST match UltimateTradingEnv)
+        from src.features.ultimate_features import UltimateFeatureEngine
+        from src.features.correlation_engine import SimulatedDominanceEngine
+        self.feature_engine = UltimateFeatureEngine()
+        self.dominance_engine = SimulatedDominanceEngine()
         
         # Initialize filters
         self.whale_tracker = WhaleTracker(symbol=symbol)
@@ -192,17 +193,21 @@ class MultiAssetTradingBot:
             logger.error(f"Error getting analysis for state: {e}")
             return {}
 
-    def _load_model(self) -> Optional[EnsembleOrchestrator]:
-        """Load the regime-specialized ensemble orchestrator."""
-        orchestrator = EnsembleOrchestrator(self.symbol)
+    def _load_model(self) -> Optional[PPO]:
+        """Load the ultimate whale-fused PPO agent."""
+        model_path = Path('./data/models/ultimate_agent.zip')
         
-        if orchestrator.load():
-            logger.info(f"✅ Ensemble Orchestrator loaded for {self.symbol}")
-            return orchestrator
-            
-        logger.warning(f"⚠️ Failed to load complete ensemble for {self.symbol}. Bot will still run, but actions may degrade.")
-        # We return it anyway so it can fallback to whatever agents it loaded
-        return orchestrator
+        if model_path.exists():
+            try:
+                model = PPO.load(str(model_path))
+                logger.info(f"✅ Ultimate Agent loaded for {self.symbol} from {model_path}")
+                return model
+            except Exception as e:
+                logger.error(f"Failed to load Ultimate Agent: {e}")
+                return None
+        
+        logger.warning(f"⚠️ Ultimate Agent not found at {model_path}. Bot will HOLD.")
+        return None
     
     def restore_state(self, state: Dict):
         """Restore bot state from saved dictionary."""
@@ -231,86 +236,71 @@ class MultiAssetTradingBot:
         return fetcher.fetch_asset(self.symbol, interval, days)
     
     def get_action(self, df: pd.DataFrame) -> int:
-        """Get trading action from model (0=HOLD, 1=BUY, 2=SELL)."""
-        lookback = 48  # Must match AdvancedTradingEnv (48h)
+        """Get trading action from model (0=HOLD, 1=BUY, 2=SELL).
         
-        if len(df) < lookback + 200:
-            logger.warning(f"Not enough data for {self.symbol}: {len(df)} < {lookback + 200}")
+        MUST match UltimateTradingEnv._get_observation() exactly:
+        observation = [features_row (99 values) | position_info (3 values)] = 102 total
+        """
+        if len(df) < 200:
+            logger.warning(f"Not enough data for {self.symbol}: {len(df)} < 200")
+            return 0
+        
+        if self.model is None:
             return 0
             
-        # Compute features using AdvancedFeatureEngine
-        feature_df = self.feature_engine.compute_all(df)
-        feature_df = feature_df.replace([np.inf, -np.inf], np.nan)
-        feature_df = feature_df.ffill().fillna(0)
+        # Compute features using UltimateFeatureEngine (same as training env)
+        all_features = self.feature_engine.get_all_features(df)
         
-        # Extract the same feature columns as training env
-        available_features = [f for f in self.feature_engine.get_feature_columns() if f in feature_df.columns]
+        # Add simulated dominance features
+        dominance_features = self.dominance_engine.compute_simulated_dominance(df)
+        all_features.update(dominance_features)
         
-        # Take last 'lookback' rows of specific columns + OHLCV
-        window_df = feature_df.tail(lookback)
+        # Convert to DataFrame
+        features_df = pd.DataFrame(all_features)
+        features_df = features_df.fillna(0)
+        features_df = features_df.replace([np.inf, -np.inf], 0)
         
-        # The training env observation flattens [features + OHLCV] together for each timestep
-        ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
-        cols = available_features + ohlcv_cols
-        window_features = window_df[cols].values
+        # Clip extreme values
+        for col in features_df.columns:
+            if features_df[col].dtype in [np.float64, np.float32]:
+                features_df[col] = features_df[col].clip(-10, 10)
         
-        flat_history = window_features.flatten()
+        features = features_df.values.astype(np.float32)
         
-        # 3. Agent State
-        unrealized_pnl_ratio = 0.0
-        if self.position != 0:
-            current_price = df.iloc[-1]['close']
+        if len(features) < 1:
+            return 0
+        
+        # Get LAST ROW only (matches UltimateTradingEnv._get_observation)
+        last_features = features[-1].copy()
+        
+        # Position info (EXACTLY matches UltimateTradingEnv)
+        current_price = df.iloc[-1]['close']
+        if self.position != 0 and self.position_price > 0:
             if self.position == 1:
-                u_pnl = (current_price - self.position_price) * self.position_units
+                unrealized_pnl = (current_price - self.position_price) / self.position_price
             else:
-                u_pnl = (self.position_price - current_price) * self.position_units
-            unrealized_pnl_ratio = u_pnl / self.initial_balance
-            
-        balance_ratio = self.balance / self.initial_balance
+                unrealized_pnl = (self.position_price - current_price) / self.position_price
+        else:
+            unrealized_pnl = 0.0
         
-        # Drawdown (simplified)
-        drawdown = 0.0 # for now
+        balance_ratio = (self.balance - self.initial_balance) / self.initial_balance
         
-        trade_count_norm = min(len(self.trades) / 100, 1.0)
-        
-        agent_state = np.array([
+        position_info = np.array([
             float(self.position),
-            unrealized_pnl_ratio,
-            balance_ratio,
-            drawdown,
-            trade_count_norm,
-            0.0, # Placeholder for step_count_norm
-            0.0, # Placeholder for current_drawdown
-            0.0  # Placeholder for high_water_mark ratio
+            np.clip(unrealized_pnl, -0.5, 0.5),
+            np.clip(balance_ratio, -0.5, 0.5),
         ], dtype=np.float32)
         
-        # 4. Multi-Timeframe Features (Phase 11.2)
-        try:
-            df_4h = resample_to_higher_tf(df, '4h')
-            mtf_features = compute_mtf_features_at(df_4h, df.index[-1])
-        except Exception as e:
-            logger.error(f"Failed to compute MTF features: {e}")
-            from src.env.mtf_env import N_MTF_TOTAL
-            mtf_features = np.zeros(N_MTF_TOTAL, dtype=np.float32)
+        # Combine: [99 features | 3 position] = 102 total
+        observation = np.concatenate([last_features, position_info]).astype(np.float32)
         
-        # Concatenate: [flat_history | agent_state | mtf_features]
-        observation = np.concatenate([flat_history, agent_state, mtf_features]).astype(np.float32)
+        # PPO.predict returns (action, state)
+        action, _ = self.model.predict(observation, deterministic=True)
+        action = int(action.item() if hasattr(action, 'item') else action)
         
-        # If model is missing, return HOLD (0)
-        if self.model is None or getattr(self.model, 'is_ready', False) == False:
-            if getattr(self.model, 'agents', None):
-                 # We have at least some agents, so predict anyway
-                 pass
-            else:
-                 return 0
-            
-        action, confidence = self.model.predict(observation, df)
+        self.last_confidence = 0.7  # Default confidence for ultimate model
         
-        # We can store the confidence in state if we want, for now we just return action
-        # The adaptive position sizing (Phase 11.6) will use confidence later
-        self.last_confidence = confidence
-        
-        return int(action)
+        return action
     
     def apply_filters(self, action: int) -> tuple:
         """Apply trading filters (whale, funding, order flow)."""
