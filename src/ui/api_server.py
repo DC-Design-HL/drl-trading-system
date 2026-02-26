@@ -31,9 +31,9 @@ from src.data.storage import get_storage
 storage = get_storage()
 WHALE_TRACKERS = {}
 
-# Cache for /api/market to limit proxy bandwidth usage (60s TTL per symbol)
+# Cache for /api/market
 _MARKET_CACHE: dict = {}
-MARKET_CACHE_TTL = 3600  # 1 hour cache to save proxy bandwidth
+MARKET_CACHE_TTL = 30  # 30 seconds cache (restored from 1 hour since we removed proxy)
 
 
 @app.route('/api/state')

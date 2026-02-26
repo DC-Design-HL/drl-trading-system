@@ -65,109 +65,26 @@ class FundingRateAnalyzer:
 
         logger.info(f"💰 FundingRateAnalyzer initialized for {symbol}")
 
-    def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
-        """
-        Get URL and proxy config based on environment.
-
-        Returns:
-            Tuple of (url, proxies)
-        """
-        proxy = os.environ.get("BINANCE_PROXY")
-
-        if proxy:
-            base_url = "https://fapi.binance.com"
-            proxies = {"http": proxy, "https": proxy}
-            return f"{base_url}{endpoint}", proxies
-        else:
-            # Futures endpoints not available on data-api, use OKX fallback
-            base_url = "https://data-api.binance.vision"
-            return f"{base_url}{endpoint}", None
-
-    def _get_okx_funding(self) -> float:
-        """Fetch funding rate from OKX as fallback."""
-        try:
-            okx_symbol = self.symbol.replace("USDT", "-USDT-SWAP")
-            url = "https://www.okx.com/api/v5/public/funding-rate"
-            response = requests.get(url, params={"instId": okx_symbol}, timeout=5)
-
-            if response.status_code == 200:
-                data = response.json().get('data', [])
-                if data:
-                    rate = float(data[0].get('fundingRate', 0))
-                    logger.info(f"✅ OKX Funding Rate: {rate:.6%} (Fallback success)")
-                    return rate
-            logger.warning(f"OKX Funding failed: status={response.status_code}")
-            return 0.0
-        except Exception as e:
-            logger.warning(f"OKX Funding error: {e}")
-            return 0.0
-
     def _fetch_funding_rate(self) -> Dict:
-        """Fetch current and predicted funding rate from Binance or OKX."""
+        """Fetch current funding rate exclusively from OKX (no proxy needed)."""
         now = time.time()
 
         # Use cache if fresh
         if self._cached_data and (now - self._last_fetch) < self.cache_duration:
             return self._cached_data
 
-        try:
-            endpoint = "/fapi/v1/premiumIndex"
-            url, proxies = self._get_request_config(endpoint)
+        rate = self._get_okx_funding()
 
-            # No proxy → Futures API unavailable → use OKX fallback
-            if not proxies and "data-api" in url:
-                funding_rate = self._get_okx_funding()
-                self._cached_data = {
-                    'rate': funding_rate,
-                    'predicted': funding_rate,
-                    'mark_price': 0,
-                    'index_price': 0,
-                    'next_funding_time': 0,
-                    'history': [],
-                }
-                self._last_fetch = now
-                return self._cached_data
-
-            response = requests.get(url, params={"symbol": self.symbol}, proxies=proxies, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            funding_rate = float(data.get('lastFundingRate', 0))
-            mark_price = float(data.get('markPrice', 0))
-            index_price = float(data.get('indexPrice', 0))
-            next_funding_time = int(data.get('nextFundingTime', 0))
-
-            # Funding rate history for prediction
-            hist_endpoint = "/fapi/v1/fundingRate"
-            hist_url, _ = self._get_request_config(hist_endpoint)
-
-            hist_response = requests.get(
-                hist_url,
-                params={"symbol": self.symbol, "limit": 10},
-                proxies=proxies,
-                timeout=10
-            )
-            hist_response.raise_for_status()
-            history = hist_response.json()
-
-            recent_rates = [float(h['fundingRate']) for h in history]
-            predicted_rate = np.mean(recent_rates) if recent_rates else funding_rate
-
-            self._cached_data = {
-                'rate': funding_rate,
-                'predicted': predicted_rate,
-                'mark_price': mark_price,
-                'index_price': index_price,
-                'next_funding_time': next_funding_time,
-                'history': recent_rates,
-            }
-            self._last_fetch = now
-            logger.info(f"✅ Binance Funding Rate: {funding_rate:.6%}")
-            return self._cached_data
-
-        except Exception as e:
-            logger.warning(f"Failed to fetch funding rate (proxy={bool(os.environ.get('BINANCE_PROXY'))}): {e}")
-            return {'rate': 0, 'predicted': 0, 'history': []}
+        self._cached_data = {
+            'rate': rate,
+            'predicted': rate,
+            'mark_price': 0,
+            'index_price': 0,
+            'next_funding_time': 0,
+            'history': [rate],
+        }
+        self._last_fetch = now
+        return self._cached_data
 
     def get_signal(self) -> FundingSignal:
         """
@@ -268,71 +185,27 @@ class OrderFlowAnalyzer:
 
         logger.info(f"📊 OrderFlowAnalyzer initialized (large orders > ${large_order_threshold:,.0f})")
 
-    def _get_request_config(self) -> Tuple[str, Optional[Dict]]:
-        """Get URL and proxy config."""
-        proxy = os.environ.get("BINANCE_PROXY")
-
-        if proxy:
-            # Use Futures API (fapi) with Proxy
-            return "https://fapi.binance.com/fapi/v1/trades", {
-                "http": proxy,
-                "https": proxy
-            }
-        else:
-            # Fallback to Spot API (api/v3) without Proxy
-            return "https://data-api.binance.vision/api/v3/trades", None
-
-    def _get_okx_trades(self) -> List[Dict]:
-        """Fetch trades from OKX as fallback."""
-        try:
-            okx_symbol = self.symbol.replace("USDT", "-USDT-SWAP")
-            url = "https://www.okx.com/api/v5/market/trades"
-            response = requests.get(url, params={"instId": okx_symbol, "limit": 100}, timeout=5)
-
-            trades = []
-            if response.status_code == 200:
-                data = response.json().get('data', [])
-                for t in data:
-                    # OKX 'side' is taker side: 'buy' = taker buy, 'sell' = taker sell
-                    # Binance 'isBuyerMaker': True = taker sold (seller was taker)
-                    trades.append({
-                        'price': t.get('px'),
-                        'qty': t.get('sz'),
-                        'isBuyerMaker': t.get('side') == 'sell',
-                        'time': int(t.get('ts', 0))
-                    })
-                if trades:
-                    logger.info(f"✅ Fetched {len(trades)} trades from OKX fallback")
-            return trades
-        except Exception as e:
-            logger.warning(f"OKX Trades error: {e}")
-            return []
-
     def _fetch_recent_trades(self) -> List[Dict]:
-        """Fetch recent trades from Binance (with OKX fallback)."""
+        """Fetch recent trades from Binance Spot API (with OKX fallback)."""
         try:
-            url, proxies = self._get_request_config()
+            url = "https://data-api.binance.vision/api/v3/trades"
 
             response = requests.get(
                 url,
                 params={"symbol": self.symbol, "limit": 1000},
-                proxies=proxies,
                 timeout=10
             )
             response.raise_for_status()
             trades = response.json()
 
-            # If returned empty and no proxy configured, try OKX
-            if not trades and not proxies:
+            if not trades:
                 return self._get_okx_trades()
 
             return trades
 
         except Exception as e:
-            logger.warning(f"Failed to fetch Binance trades: {e}. Trying OKX fallback...")
-            if not os.environ.get("BINANCE_PROXY"):
-                return self._get_okx_trades()
-            return []
+            logger.warning(f"Failed to fetch Binance Spot trades: {e}. Trying OKX fallback...")
+            return self._get_okx_trades()
 
     def calculate_cvd(self, df: pd.DataFrame = None) -> float:
         """

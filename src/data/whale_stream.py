@@ -68,28 +68,6 @@ class BinanceWhaleStream:
 
         self.running = True
         
-        # Check for proxy
-        proxy = os.environ.get("BINANCE_PROXY")
-        proxy_opts = {}
-        
-        if proxy:
-            # Parse proxy string (e.g., http://user:pass@host:port)
-            from urllib.parse import urlparse
-            p = urlparse(proxy)
-            
-            # websocket-client expects explicit host/port
-            proxy_opts = {
-                "http_proxy_host": p.hostname,
-                "http_proxy_port": p.port,
-                "proxy_type": "http"
-            }
-            if p.username:
-                proxy_opts["http_proxy_auth"] = (p.username, p.password)
-                
-            # If proxy, prefer Futures stream (more accurate for whales)
-            self.BASE_URL = "wss://fstream.binance.com/ws"
-            logger.info(f"🐳 Using Proxy for Whale Stream: {p.hostname}")
-        
         stream_url = f"{self.BASE_URL}/{self.symbol}@aggTrade"
         
         logger.info(f"🐳 Starting Whale Stream for {self.symbol} (Threshold: ${self.min_value_usd:,.0f})")
@@ -102,8 +80,7 @@ class BinanceWhaleStream:
             on_open=self._on_open,
         )
         
-        # Proxy opts go to run_forever(), not WebSocketApp.__init__()
-        self.wst = threading.Thread(target=self.ws.run_forever, kwargs=proxy_opts)
+        self.wst = threading.Thread(target=self.ws.run_forever)
         self.wst.daemon = True
         self.wst.start()
 
@@ -128,7 +105,7 @@ class BinanceWhaleStream:
     def _on_error(self, ws, error):
         logger.error(f"Whale Stream Error: {error}")
         if "451" in str(error) or "403" in str(error):
-             logger.warning("❌ WSS Geo-Blocked! Please configure BINANCE_PROXY or rely on OKX Fallback.")
+             logger.warning("❌ WSS Geo-Blocked! Relying on alternative indicators.")
 
     def _on_message(self, ws, message):
         """Process incoming trade message."""

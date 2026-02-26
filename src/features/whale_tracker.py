@@ -357,23 +357,6 @@ class BinanceLiquidationTracker:
         """No-op for REST API version."""
         pass
         
-    def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
-        """Get URL and proxy config."""
-        proxy = os.environ.get("BINANCE_PROXY")
-        
-        if proxy:
-            # Use Futures API with Proxy
-            base_url = "https://fapi.binance.com"
-            proxies = {
-                "http": proxy, 
-                "https": proxy
-            }
-            return f"{base_url}{endpoint}", proxies
-        else:
-            # Fallback to Public Data API
-            base_url = "https://data-api.binance.vision" 
-            return f"{base_url}{endpoint}", None
-
     def _get_okx_data(self) -> Dict:
         """Fetch fallback data from OKX."""
         try:
@@ -422,126 +405,35 @@ class BinanceLiquidationTracker:
             }
 
     def get_liquidation_stats(self) -> Dict:
-        """
-        Get liquidation statistics using funding rate and open interest as proxy.
-        """
-        # Check cache
+        """Get liquidation statistics using funding rate and open interest as proxy (from OKX fallback)."""
         if 'stats' in self.cache:
             cached_time, cached_data = self.cache['stats']
             if time.time() - cached_time < self.cache_ttl:
                 return cached_data
                 
         try:
-            # Check if we should use OKX Fallback
-            endpoint = "/fapi/v1/fundingRate"
-            url, proxies = self._get_request_config(endpoint)
-            
-            # If no proxy and attempting to hit Futures on data-api -> Use OKX
-            if not proxies and "data-api" in url:
-                okx_data = self._get_okx_data()
-                
-                # Calculate sentiment based on OKX data
-                funding_sentiment = -np.sign(okx_data['funding_rate']) * min(abs(okx_data['funding_rate']) * 100, 1)
-                imbalance = okx_data['imbalance']
-                
-                stats = {
-                    'long_ratio': okx_data['long_ratio'],
-                    'short_ratio': okx_data['short_ratio'],
-                    'funding_rate': okx_data['funding_rate'],
-                    'open_interest': 0,
-                    'imbalance': np.clip(imbalance + funding_sentiment * 0.3, -1, 1),
-                    'long_liquidations': 0,
-                    'short_liquidations': 0,
-                    'total_liquidations': 0,
-                    'count': 0
-                }
-                self.cache['stats'] = (time.time(), stats)
-                return stats
-
-            # ... Original Binance Logic below ...
-            # Get funding rate (positive = longs pay shorts = crowded long)
-            response = requests.get(
-                url,
-                params={"symbol": self.symbol, "limit": 1},
-                proxies=proxies,
-                timeout=10
-            )
-            
-            funding_rate = 0.0
-            if response.status_code == 200:
-                data = response.json()
-                if data:
-                    funding_rate = float(data[0].get('fundingRate', 0))
-                    
-            # Get open interest
-            oi_endpoint = "/fapi/v1/openInterest"
-            oi_url, _ = self._get_request_config(oi_endpoint)
-            
-            response = requests.get(
-                oi_url,
-                params={"symbol": self.symbol},
-                proxies=proxies,
-                timeout=10
-            )
-            
-            open_interest = 0.0
-            if response.status_code == 200:
-                data = response.json()
-                open_interest = float(data.get('openInterest', 0))
-                
-            # Get long/short ratio
-            ls_endpoint = "/futures/data/globalLongShortAccountRatio"
-            ls_url, _ = self._get_request_config(ls_endpoint)
-            
-            response = requests.get(
-                ls_url,
-                params={"symbol": self.symbol, "period": "1h", "limit": 1},
-                proxies=proxies,
-                timeout=10
-            )
-            
-            long_ratio = 0.5
-            if response.status_code == 200:
-                data = response.json()
-                if data:
-                    long_ratio = float(data[0].get('longAccount', 0.5))
-                    
-            # Calculate imbalance: positive = more shorts (bullish squeeze potential)
-            # negative = more longs (bearish squeeze potential)
-            imbalance = (0.5 - long_ratio) * 2  # Scale to -1 to 1
-            
-            # Funding rate sentiment: high positive = crowded longs (bearish)
-            # High negative = crowded shorts (bullish)
-            funding_sentiment = -np.sign(funding_rate) * min(abs(funding_rate) * 100, 1)
+            okx_data = self._get_okx_data()
+            funding_sentiment = -np.sign(okx_data['funding_rate']) * min(abs(okx_data['funding_rate']) * 100, 1)
+            imbalance = okx_data['imbalance']
             
             stats = {
-                'long_ratio': long_ratio,
-                'short_ratio': 1 - long_ratio,
-                'funding_rate': funding_rate,
-                'open_interest': open_interest,
-                'imbalance': np.clip(imbalance + funding_sentiment * 0.3, -1, 1),
-                'long_liquidations': 0,  # Not available via REST
-                'short_liquidations': 0,
-                'total_liquidations': 0,
-                'count': 0
-            }
-            
-            self.cache['stats'] = (time.time(), stats)
-            logger.info(f"Binance sentiment: L/S ratio={long_ratio:.2%}, funding={funding_rate:.4%}")
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Error fetching Binance stats: {e}")
-            return {
-                'long_ratio': 0.5,
-                'short_ratio': 0.5,
-                'funding_rate': 0,
+                'long_ratio': okx_data['long_ratio'],
+                'short_ratio': okx_data['short_ratio'],
+                'funding_rate': okx_data['funding_rate'],
                 'open_interest': 0,
-                'imbalance': 0,
+                'imbalance': np.clip(imbalance + funding_sentiment * 0.3, -1, 1),
                 'long_liquidations': 0,
                 'short_liquidations': 0,
                 'total_liquidations': 0,
                 'count': 0
+            }
+            self.cache['stats'] = (time.time(), stats)
+            return stats
+        except Exception as e:
+            return {
+                'long_ratio': 0.5, 'short_ratio': 0.5, 'funding_rate': 0,
+                'open_interest': 0, 'imbalance': 0, 'long_liquidations': 0,
+                'short_liquidations': 0, 'total_liquidations': 0, 'count': 0
             }
 
 
@@ -668,115 +560,50 @@ class BinanceOITracker:
         self.cache = {}
         self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
     
-    def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
-        """Get URL and proxy config."""
-        proxy = os.environ.get("BINANCE_PROXY")
-        
-        if proxy:
-            # Use Futures API with Proxy
-            base_url = "https://fapi.binance.com"
-            proxies = {
-                "http": proxy, 
-                "https": proxy
-            }
-            return f"{base_url}{endpoint}", proxies
-        else:
-            # Fallback to Public Data API
-            base_url = "https://data-api.binance.vision" 
-            return f"{base_url}{endpoint}", None
-
     def get_oi_signal(self) -> Dict:
-        """
-        Get Open Interest trend signal.
-        
-        Returns:
-            Dictionary with OI analysis
-        """
-        # Check cache
+        """Get Open Interest trend signal using OKX."""
         if 'signal' in self.cache:
             cached_time, cached_data = self.cache['signal']
             if time.time() - cached_time < self.cache_ttl:
                 return cached_data
                 
         try:
-            # Get current OI
-            endpoint = "/fapi/v1/openInterest"
-            url, proxies = self._get_request_config(endpoint)
-            
-            # If no proxy and trying to hit futures endpoint on data-api, fail fast
-            if not proxies and "data-api" in url:
-                return {'oi': 0, 'price': 0, 'signal': 0}
-
-            response = requests.get(
-                url,
-                params={"symbol": self.symbol},
-                proxies=proxies,
-                timeout=10
-            )
+            okx_symbol = self.symbol.replace("USDT", "-USDT-SWAP")
+            url = "https://www.okx.com/api/v5/public/open-interest"
+            response = requests.get(url, params={"instId": okx_symbol, "instType": "SWAP"}, timeout=5)
             
             current_oi = 0.0
             if response.status_code == 200:
-                data = response.json()
-                current_oi = float(data.get('openInterest', 0))
-                
-            # Get current price
-            # data-api supports ticker/price, so we can try it even without proxy
-            price_endpoint = "/fapi/v1/ticker/price"
-            price_url, _ = self._get_request_config(price_endpoint)
-            
-            # If data-api, fallback to spot ticker if fapi ticker fails?
-            # Actually data-api DOES have /api/v3/ticker/price.
-            if not proxies and "data-api" in price_url:
-                 price_url = "https://data-api.binance.vision/api/v3/ticker/price"
-            
-            response = requests.get(
-                price_url,
-                params={"symbol": self.symbol},
-                proxies=proxies,
-                timeout=10
-            )
+                data = response.json().get('data', [])
+                if data:
+                    current_oi = float(data[0].get('oi', 0))
+                    
+            price_url = "https://www.okx.com/api/v5/market/ticker"
+            response = requests.get(price_url, params={"instId": okx_symbol}, timeout=5)
             
             current_price = 0.0
             if response.status_code == 200:
-                data = response.json()
-                current_price = float(data.get('price', 0))
-                
-            # Store in history
-            self.oi_history.append({
-                'oi': current_oi,
-                'price': current_price,
-                'time': time.time()
-            })
+                data = response.json().get('data', [])
+                if data:
+                    current_price = float(data[0].get('last', 0))
+                    
+            self.oi_history.append({'oi': current_oi, 'price': current_price, 'time': time.time()})
             
-            # Calculate signal based on OI change vs price change
             signal = 0.0
             if len(self.oi_history) >= 2:
                 prev = self.oi_history[-2]
                 oi_change = (current_oi - prev['oi']) / prev['oi'] if prev['oi'] > 0 else 0
                 price_change = (current_price - prev['price']) / prev['price'] if prev['price'] > 0 else 0
-                
-                # OI up + Price up = bullish (smart money long)
-                # OI up + Price down = bearish (smart money short)
-                # OI down = neutral (taking profits)
-                if oi_change > 0.001:  # OI increased >0.1%
+                if oi_change > 0.001:
                     signal = 1.0 if price_change > 0 else -1.0
-                elif oi_change < -0.001:  # OI decreased
-                    signal = 0.0  # Neutral - profit taking
-                else:
+                elif oi_change < -0.001:
                     signal = 0.0
                     
-            result = {
-                'oi': current_oi,
-                'price': current_price,
-                'signal': np.clip(signal, -1, 1)
-            }
-            
+            result = {'oi': current_oi, 'price': current_price, 'signal': np.clip(signal, -1, 1)}
             self.cache['signal'] = (time.time(), result)
-            logger.info(f"📊 OI Tracker: OI={current_oi:,.0f}, signal={signal:.2f}")
             return result
             
         except Exception as e:
-            logger.error(f"OI Tracker error: {e}")
             return {'oi': 0, 'price': 0, 'signal': 0}
 
 
@@ -793,85 +620,50 @@ class BinanceTopTraderClient:
         self.cache = {}
         self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
         
-    def _get_request_config(self, endpoint: str) -> Tuple[str, Optional[Dict]]:
-        """Get URL and proxy config."""
-        proxy = os.environ.get("BINANCE_PROXY")
-        
-        if proxy:
-            # Use Futures API with Proxy
-            base_url = "https://fapi.binance.com"
-            proxies = {
-                "http": proxy, 
-                "https": proxy
-            }
-            return f"{base_url}{endpoint}", proxies
-        else:
-            # Fallback to Public Data API
-            base_url = "https://data-api.binance.vision" 
-            return f"{base_url}{endpoint}", None
-        
     def get_large_transactions(self, min_btc: float = 100) -> Dict:
-        """
-        Get top trader positioning signal.
-        Uses Binance top trader long/short ratio.
-        
-        Returns:
-            Dictionary with top trader analysis
-        """
-        # Check cache
+        """Get top trader positioning signal using OKX Top Trader ratio."""
         if 'top_trader' in self.cache:
             cached_time, cached_data = self.cache['top_trader']
             if time.time() - cached_time < self.cache_ttl:
                 return cached_data
         
         try:
-            # Get top trader positions
-            endpoint = "/futures/data/topLongShortPositionRatio"
-            url, proxies = self._get_request_config(endpoint)
+            ccy = self.symbol.replace("USDT", "")
+            url = "https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio"
+            response = requests.get(url, params={"ccy": ccy, "period": "1H"}, timeout=5)
             
-            # If no proxy and trying to hit futures endpoint on data-api, fail fast
-            if not proxies and "data-api" in url:
-                 return {'signal': 0, 'long_ratio': 0.5, 'short_ratio': 0.5}
-
-            response = requests.get(
-                url,
-                params={"symbol": self.symbol, "period": "1h", "limit": 1},
-                proxies=proxies,
-                timeout=10
-            )
-            
+            long_ratio = 0.5
             if response.status_code == 200:
-                data = response.json()
+                data = response.json().get('data', [])
                 if data:
-                    latest = data[-1]
-                    long_ratio = float(latest.get('longAccount', 0.5))
-                    short_ratio = float(latest.get('shortAccount', 0.5))
-                    
-                    # Signal: more longs = bearish (crowded), more shorts = bullish (contrarian)
-                    # Top traders being long-heavy is actually bullish (smart money)
-                    # But extreme positioning is a warning sign
-                    signal = 0.0
-                    if long_ratio > 0.65:  # >65% long = very crowded
-                        signal = -0.3  # Bearish
-                    elif long_ratio > 0.55:
-                        signal = (long_ratio - 0.5) * 2  # Slight bullish (following smart money)
-                    elif short_ratio > 0.55:
-                        signal = -((short_ratio - 0.5) * 2)  # Slight bearish
-                    elif short_ratio > 0.65:
-                        signal = 0.3  # Contrarian bullish
+                    item = data[0]
+                    if isinstance(item, list):
+                        long_ratio = float(item[1])
+                    elif isinstance(item, dict):
+                        long_ratio = float(item.get('longAccount', item.get('ratio', 0.5)))
                         
-                    result = {
-                        'long_ratio': long_ratio,
-                        'short_ratio': short_ratio,
-                        'signal': np.clip(signal, -1, 1)
-                    }
-                    
-                    self.cache['top_trader'] = (time.time(), result)
-                    logger.info(f"� Top Traders: {long_ratio:.1%} long, {short_ratio:.1%} short → signal={signal:.2f}")
-                    return result
-                    
+            short_ratio = 1.0 - long_ratio
+            if long_ratio > 0.55:
+                bias = 'bullish'
+                strength = min((long_ratio - 0.5) * 2, 1.0)
+            elif short_ratio > 0.55:
+                bias = 'bearish'
+                strength = min((short_ratio - 0.5) * 2, 1.0)
+            else:
+                bias = 'neutral'
+                strength = 0.0
+                
+            result = {
+                'long_ratio': long_ratio,
+                'short_ratio': short_ratio,
+                'bias': bias,
+                'strength': strength
+            }
+            self.cache['top_trader'] = (time.time(), result)
+            return result
         except Exception as e:
-            logger.error(f"Top Trader error: {e}")
+            return {'long_ratio': 0.5, 'short_ratio': 0.5, 'bias': 'neutral', 'strength': 0.0}
+
             
         return {'long_ratio': 0.5, 'short_ratio': 0.5, 'signal': 0}
 
