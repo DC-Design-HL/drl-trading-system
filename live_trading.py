@@ -249,7 +249,12 @@ class LiveTradingAgent:
         return df
         
     def compute_observation(self, df: pd.DataFrame) -> np.ndarray:
-        """Compute observation from market data using Ultimate Feature Engine."""
+        """
+        Compute observation from market data using Ultimate Feature Engine.
+        
+        MUST match UltimateTradingEnv._get_observation() exactly:
+        observation = [features_row (99 values) | position_info (3 values)] = 102 total
+        """
         # Compute ultimate features (same as training environment)
         all_features = self.feature_engine.get_all_features(df)
         
@@ -271,39 +276,17 @@ class LiveTradingAgent:
         
         features = features_df.values.astype(np.float32)
         
-        # Get the history window
-        lookback = 48
-        if len(features) < lookback:
-            logger.warning(f"Not enough data for features. Need {lookback}, got {len(features)}")
+        # Get LAST ROW of features only (matches UltimateTradingEnv._get_observation)
+        if len(features) < 1:
+            logger.warning("Not enough data for features")
             return None
             
-        # Extract features for the lookback window
-        window_features = features[-lookback:]
-        
-        # Determine available columns from the feature engine
-        try:
-            available_cols = self.feature_engine.get_feature_columns()
-            available_idx = [features_df.columns.get_loc(c) for c in available_cols if c in features_df.columns]
-        except AttributeError:
-            # Fallback if method doesn't exist
-            available_idx = list(range(features.shape[1]))
-            
-        # OHLCV columns
-        ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
-        ohlcv_idx = [features_df.columns.get_loc(c) for c in ohlcv_cols if c in features_df.columns]
-        
-        # Extract and flatten (Matches UltimateTradingEnv)
-        cols_to_use = available_idx + ohlcv_idx
-        # Ensure we only have 2 unique columns at most if they overlap
-        cols_to_use = list(dict.fromkeys(cols_to_use))
-        
-        # Flatten the window features (48 * N cols)
-        flat_history = features_df.iloc[-lookback:, cols_to_use].values.flatten()
+        last_features = features[-1].copy()
         
         # Get current price
         current_price = df.iloc[-1]['close']
         
-        # Compute position info (same as training environment)
+        # Compute position info (EXACTLY matches UltimateTradingEnv._get_observation)
         if self.position != 0 and self.position_price > 0:
             if self.position == 1:  # Long
                 unrealized_pnl = (current_price - self.position_price) / self.position_price
@@ -316,59 +299,16 @@ class LiveTradingAgent:
         portfolio_value = self.balance + self.unrealized_pnl
         balance_ratio = (portfolio_value - self.initial_balance) / self.initial_balance
         
-        # Agent state vector (Matches UltimateTradingEnv)
-        # Position Info: [position, pnl_ratio, balance_ratio, drawdown, trade_count_norm, step_count_norm, current_drawdown, high_water_mark]
-        agent_state = np.array([
+        # Position info: [position, unrealized_pnl, balance_ratio] - EXACTLY 3 values
+        position_info = np.array([
             float(self.position),
-            unrealized_pnl,
-            balance_ratio,
-            0.0,  # drawdown
-            min(len(self.trades) / 100, 1.0),  # trade_count_norm
-            0.0,  # step_count_norm
-            0.0,  # current_drawdown
-            0.0,  # high_water_mark
+            np.clip(unrealized_pnl, -0.5, 0.5),
+            np.clip(balance_ratio, -0.5, 0.5),
         ], dtype=np.float32)
         
-        # Market regime (Matches UltimateTradingEnv: [trend_strength, volatility, is_bull, is_bear, is_chop])
-        market_regime = np.zeros(5, dtype=np.float32)
-        if self.regime_detector and hasattr(self, '_last_df'):
-            regime_info = self.regime_detector.detect_regime(self._last_df)
-            if regime_info:
-                # Map MarketRegime enum to string properly
-                reg_name = regime_info.regime.value if hasattr(regime_info.regime, 'value') else str(regime_info.regime)
-                market_regime = np.array([
-                    regime_info.trend_strength / 100.0,
-                    regime_info.volatility_ratio,
-                    1.0 if reg_name == "trending_up" else 0.0,
-                    1.0 if reg_name == "trending_down" else 0.0,
-                    1.0 if reg_name in ["ranging", "high_volatility", "low_volatility"] else 0.0,
-                ], dtype=np.float32)
-        
-        # Multi-timeframe context (Matches UltimateTradingEnv)
-        mtf_context = np.zeros(12, dtype=np.float32) # Standard length for MTF array
-        if self.mtf_analyzer and hasattr(self, '_last_df'):
-            summary = self.mtf_analyzer.get_summary()
-            if summary and 'signals' in summary:
-                s_4h = summary['signals'].get('4h', {})
-                mtf_context = np.array([
-                    s_4h.get('rsi', 50) / 100,
-                    s_4h.get('macd', 0),
-                    s_4h.get('macd_signal', 0),
-                    1.0 if s_4h.get('trend') == 'bullish' else -1.0 if s_4h.get('trend') == 'bearish' else 0.0,
-                    0, 0, 0, 0, 0, 0, 0, 0  # Padding for other MTF features
-                ], dtype=np.float32)[:12]
-        
-        # Order flow & Funding (Matches UltimateTradingEnv)
-        flow_funding = np.zeros(4, dtype=np.float32)
-        
-        # Combine everything
-        observation = np.concatenate([
-            flat_history,
-            agent_state,
-            market_regime,
-            mtf_context,
-            flow_funding
-        ]).astype(np.float32)
+        # Combine features and position info (same format as training)
+        # This produces exactly: 99 features + 3 position = 102 total
+        observation = np.concatenate([last_features, position_info]).astype(np.float32)
         
         # Get market features for logging
         market_features = {
