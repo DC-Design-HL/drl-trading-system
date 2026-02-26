@@ -524,7 +524,53 @@ class UltimateFeatureEngine:
         # 7. Whale-proxy features (approximate institutional behavior)
         all_features.update(self._get_whale_proxy_features(df))
         
+        # 8. NEW: Explicit Whale Action Vectors (On-Chain Proxies)
+        all_features.update(self._get_whale_action_vectors(df))
+        
         return all_features
+    
+    def _get_whale_action_vectors(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
+        """
+        Calculates explicit Whale Action Vectors simulating on-chain network data.
+        These directly mimic the signals from the WhalePatternPredictor model.
+        """
+        features = {}
+        
+        vol_ma = df['volume'].rolling(20).mean()
+        price_range = df['high'] - df['low']
+        
+        # 1. Stealth Accumulation (Whales buying quietly without pumping price)
+        # Condition: High volume, but very small price range and close near open
+        small_body = np.abs(df['close'] - df['open']) < (price_range * 0.2)
+        stealth_vol = df['volume'] > vol_ma
+        features['whale_stealth_accumulation'] = (small_body & stealth_vol).astype(float).rolling(10).mean()
+        
+        # 2. Capitulation Index (Retail panicking, whales absorbing)
+        # Condition: Massive downward wick (long lower shadow) on huge volume
+        lower_wick = np.minimum(df['open'], df['close']) - df['low']
+        huge_volume = df['volume'] > vol_ma * 2.5
+        capitulation = (lower_wick > (price_range * 0.5)) & huge_volume
+        features['whale_capitulation_index'] = capitulation.astype(float).rolling(5).max() # Persist signal
+        
+        # 3. FOMO Index (Retail buying top, whales distributing)
+        # Condition: Massive upward wick on huge volume
+        upper_wick = df['high'] - np.maximum(df['open'], df['close'])
+        fomo = (upper_wick > (price_range * 0.5)) & huge_volume
+        features['whale_fomo_index'] = fomo.astype(float).rolling(5).max()
+        
+        # 4. Large Tx Ratio Proxy (Percentage of volume happening in macro-moves)
+        large_move = price_range > price_range.rolling(20).mean() * 1.5
+        macro_vol = df['volume'].where(large_move, 0)
+        features['whale_large_tx_ratio'] = (macro_vol.rolling(10).sum() / (df['volume'].rolling(10).sum() + 1e-10)).clip(0, 1)
+        
+        # 5. Net Flow Proxy (Institutional Net Buying/Selling Pressure)
+        # Buy volume proxy = total volume * (close - low) / range
+        buy_vol_proxy = df['volume'] * ((df['close'] - df['low']) / (price_range + 1e-10))
+        sell_vol_proxy = df['volume'] * ((df['high'] - df['close']) / (price_range + 1e-10))
+        net_flow_raw = buy_vol_proxy - sell_vol_proxy
+        features['whale_net_flow_proxy'] = (net_flow_raw - net_flow_raw.rolling(50).mean()) / (net_flow_raw.rolling(50).std() + 1e-10)
+        
+        return features
     
     def _get_whale_proxy_features(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
         """
