@@ -103,21 +103,24 @@ class MultiAssetTradingBot:
         self.feature_engine = UltimateFeatureEngine()
         self.dominance_engine = SimulatedDominanceEngine()
         
-        # Initialize filters
+        # Initialize market analysis sources
         self.whale_tracker = WhaleTracker(symbol=symbol)
         self.funding_analyzer = FundingRateAnalyzer(symbol=symbol.replace("/", ""))
         self.order_flow = OrderFlowAnalyzer(symbol=symbol.replace("/", ""))
         try:
-             # We can use a lightweight version or just run it
-             # It caches internally for 1 min so it's safe to call often
              if not hasattr(self, 'mtf_analyzer'):
                  self.mtf_analyzer = MultiTimeframeAnalyzer(symbol=self.symbol)
         except Exception as e:
                 logger.warning(f"MTF analyzer init failed: {e}")
 
+        # Regime detector (ADX/ATR-based)
+        from src.features.regime_detector import MarketRegimeDetector
+        self.regime_detector = MarketRegimeDetector()
+
         self.risk_manager = AdaptiveRiskManager()
         self.confidence_engine = ConfidenceEngine()
-        self.last_confidence = 0.5  # Neutral default
+        self.last_confidence = 0.5  # Will be computed by compute_market_score()
+        self.last_forecast = None   # Cached TFT forecast for dashboard
         
         # TFT Price Forecaster (Phase 11.1)
         self.tft_forecaster = TFTForecaster(device='cpu')
@@ -298,94 +301,144 @@ class MultiAssetTradingBot:
         action, _ = self.model.predict(observation, deterministic=True)
         action = int(action.item() if hasattr(action, 'item') else action)
         
-        self.last_confidence = 0.7  # Default confidence for ultimate model
-        
+        # Confidence is computed by compute_market_score(), not hardcoded
         return action
     
-    def apply_filters(self, action: int) -> tuple:
-        """Apply trading filters (whale, funding, order flow)."""
+    def compute_market_score(self, action: int, df: pd.DataFrame) -> tuple:
+        """
+        Compute composite market confidence score from all analysis sources.
+        
+        Replaces the old binary apply_filters() with a unified scoring system.
+        Each source provides a directional score [-1, +1] weighted into a composite.
+        The composite score determines both trade filtering AND position sizing.
+        
+        Returns:
+            (final_action, confidence, reason)
+        """
         action_names = {0: "HOLD", 1: "BUY", 2: "SELL"}
         
         if action == 0:
-            return action, "HOLD signal"
+            return 0, 0.5, "HOLD signal"
         
-        # Whale filter
-        try:
-            whale_signals = self.whale_tracker.get_whale_signals()
-            if action == 1 and whale_signals.get('score', 0) < -0.2:
-                return 0, f"🐋 Whale bearish (score={whale_signals.get('score', 0):.2f})"
-            if action == 2 and whale_signals.get('score', 0) > 0.2:
-                return 0, f"🐋 Whale bullish (score={whale_signals.get('score', 0):.2f})"
-        except Exception as e:
-            logger.warning(f"Whale filter error: {e}")
+        scores = {}  # name -> (directional_score, weight)
+        details = []  # Human-readable breakdown
         
-        # Funding filter
+        # ── 1. Whale Signals (30% weight) ──────────────────────────────
         try:
-            funding = self.funding_analyzer.get_signal()
-            if action == 1 and "short_favored" in funding.signal and funding.strength > 0.5:
-                return 0, f"💰 Funding short-favored ({funding.rate:.4%})"
-            if action == 2 and "long_favored" in funding.signal and funding.strength > 0.5:
-                return 0, f"💰 Funding long-favored ({funding.rate:.4%})"
+            whale = self.whale_tracker.get_whale_signals()
+            whale_score = whale.get('score', 0.0)
+            scores['whale'] = (np.clip(whale_score, -1, 1), 0.30)
+            details.append(f"🐋 Whale={whale_score:+.2f}")
         except Exception as e:
-            logger.warning(f"Funding filter error: {e}")
+            logger.warning(f"Whale score error: {e}")
+            scores['whale'] = (0, 0.30)
         
-        # Order flow filter
+        # ── 2. Market Regime / ADX (20% weight) ───────────────────────
         try:
-            of = self.order_flow.analyze_large_orders()
-            if action == 1 and of.get('bias') == 'bearish':
-                return 0, f"📊 Order flow bearish"
-            if action == 2 and of.get('bias') == 'bullish':
-                return 0, f"📊 Order flow bullish"
+            regime_info = self.regime_detector.detect_regime(df)
+            regime_score = regime_info.trend_direction  # Already [-1, +1]
+            regime_name = regime_info.regime.value.upper()
+            scores['regime'] = (regime_score, 0.20)
+            details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
+            
+            # Hard veto: strong trend opposing the trade
+            if action == 1 and regime_name == 'TRENDING_DOWN' and regime_info.confidence > 0.6:
+                return 0, 0.15, f"📉 Strong downtrend (ADX={regime_info.trend_strength:.0f}) — block LONG"
+            if action == 2 and regime_name == 'TRENDING_UP' and regime_info.confidence > 0.6:
+                return 0, 0.15, f"📈 Strong uptrend (ADX={regime_info.trend_strength:.0f}) — block SHORT"
         except Exception as e:
-            logger.warning(f"Order flow filter error: {e}")
-            
-        # MTF Trend Filter (Crucial for avoiding counter-trend losses)
-        try:
-            # Running this lightweight check every time is safe due to internal caching
-            if not hasattr(self, 'mtf_analyzer'):
-                 self.mtf_analyzer = MultiTimeframeAnalyzer(symbol=self.symbol)
-            
-            mtf_res = self.mtf_analyzer.get_summary()
-            trend_4h = mtf_res.get('signals', {}).get('4h', {}).get('direction', 'neutral')
-            
-            # Rule: Don't buy if 4H is Bearish
-            if action == 1 and trend_4h == 'bearish':
-                return 0, f"📉 MTF Filter: 4H Trend is BEARISH (Block Long)"
-            
-            # Rule: Don't sell if 4H is Bullish
-            if action == 2 and trend_4h == 'bullish':
-                return 0, f"📈 MTF Filter: 4H Trend is BULLISH (Block Short)"
-                
-        except Exception as e:
-            logger.warning(f"MTF filter error: {e}")
+            logger.warning(f"Regime score error: {e}")
+            scores['regime'] = (0, 0.20)
         
-        # TFT Forecast Filter (Phase 11.1) — veto trades if TFT strongly disagrees
+        # ── 3. TFT Forecast (20% weight) ──────────────────────────────
+        tft_score = 0.0
         if self.tft_forecaster:
             try:
-                from src.data.multi_asset_fetcher import MultiAssetDataFetcher
-                fetcher = MultiAssetDataFetcher()
-                df = fetcher.fetch_asset(self.symbol.replace('/', ''), '1h', days=7)
-                
-                if df is not None and len(df) >= 72:
+                # Use cached forecast if available, else compute
+                if self.last_forecast is None:
                     forecast = self.tft_forecaster.forecast(df)
-                    consensus = forecast.get('direction_consensus', 0.0)
-                    conf_4h = forecast.get('confidence_4h', 0.0)
-                    ret_4h = forecast.get('return_4h', 0.0)
-                    
-                    # Save for dashboard
                     self.last_forecast = forecast
-                    
-                    # Strong veto: TFT predicts opposite with high confidence
-                    if action == 1 and consensus < -0.5 and conf_4h > 0.6:
-                        return 0, f"🔮 TFT bearish consensus={consensus:.2f} (veto BUY)"
-                    if action == 2 and consensus > 0.5 and conf_4h > 0.6:
-                        return 0, f"🔮 TFT bullish consensus={consensus:.2f} (veto SELL)"
-                    
-                    logger.info(f"🔮 TFT: ret_4h={ret_4h:.4f}, consensus={consensus:.2f}, conf={conf_4h:.2f}")
+                else:
+                    forecast = self.last_forecast
+                
+                consensus = forecast.get('direction_consensus', 0.0)
+                conf_4h = forecast.get('confidence_4h', 0.0)
+                ret_4h = forecast.get('return_4h', 0.0)
+                tft_score = np.clip(consensus, -1, 1)
+                scores['tft'] = (tft_score, 0.20)
+                details.append(f"🔮 TFT={consensus:+.2f}(c={conf_4h:.1f})")
+                
+                # Hard veto: TFT strongly disagrees with high confidence
+                if action == 1 and consensus < -0.5 and conf_4h > 0.7:
+                    return 0, 0.1, f"🔮 TFT strong bearish (consensus={consensus:.2f}, conf={conf_4h:.2f}) — veto BUY"
+                if action == 2 and consensus > 0.5 and conf_4h > 0.7:
+                    return 0, 0.1, f"🔮 TFT strong bullish (consensus={consensus:.2f}, conf={conf_4h:.2f}) — veto SELL"
             except Exception as e:
-                logger.warning(f"TFT filter error: {e}")
+                logger.warning(f"TFT score error: {e}")
+                scores['tft'] = (0, 0.20)
+        else:
+            scores['tft'] = (0, 0.20)
         
-        return action, f"{action_names[action]} passed all filters"
+        # ── 4. Funding Rate (15% weight) ──────────────────────────────
+        try:
+            funding = self.funding_analyzer.get_signal()
+            # Positive funding = longs pay = bearish bias; negative = bullish
+            funding_score = np.clip(-funding.rate * 1000, -1, 1)  # Scale rate to [-1,1]
+            scores['funding'] = (funding_score, 0.15)
+            details.append(f"💰 Fund={funding.rate:+.4%}")
+        except Exception as e:
+            logger.warning(f"Funding score error: {e}")
+            scores['funding'] = (0, 0.15)
+        
+        # ── 5. Order Flow (15% weight) ────────────────────────────────
+        try:
+            of = self.order_flow.analyze_large_orders()
+            buy_vol = of.get('large_buy_volume', 0)
+            sell_vol = of.get('large_sell_volume', 0)
+            total_vol = buy_vol + sell_vol
+            if total_vol > 0:
+                flow_score = np.clip((buy_vol - sell_vol) / total_vol, -1, 1)
+            else:
+                flow_score = 0.0
+            scores['order_flow'] = (flow_score, 0.15)
+            details.append(f"📊 Flow={flow_score:+.2f}")
+        except Exception as e:
+            logger.warning(f"Order flow score error: {e}")
+            scores['order_flow'] = (0, 0.15)
+        
+        # ── Compute Composite Score ───────────────────────────────────
+        total_weight = sum(w for _, w in scores.values())
+        composite = sum(s * w for s, w in scores.values()) / total_weight if total_weight > 0 else 0
+        
+        # Convert composite to confidence for the ACTION direction
+        # composite > 0 = market is bullish, composite < 0 = market is bearish
+        if action == 1:    # BUY — bullish composite helps
+            confidence = np.clip((composite + 1) / 2, 0, 1)  # Map [-1,+1] -> [0,1]
+        elif action == 2:  # SELL — bearish composite helps
+            confidence = np.clip((-composite + 1) / 2, 0, 1)
+        else:
+            confidence = 0.5
+        
+        # Log detailed breakdown
+        detail_str = " | ".join(details)
+        logger.info(
+            f"📈 Market Score for {action_names[action]}: "
+            f"composite={composite:+.3f}, confidence={confidence:.2f} | {detail_str}"
+        )
+        
+        # ── Decision Gate ─────────────────────────────────────────────
+        MIN_CONFIDENCE = 0.35
+        
+        if confidence < MIN_CONFIDENCE:
+            return 0, confidence, (
+                f"❌ Blocked {action_names[action]}: confidence={confidence:.2f} < {MIN_CONFIDENCE} "
+                f"(composite={composite:+.3f}) | {detail_str}"
+            )
+        
+        return action, confidence, (
+            f"✅ {action_names[action]} approved: confidence={confidence:.2f} "
+            f"(composite={composite:+.3f}) | {detail_str}"
+        )
     
     def execute_trade(self, action: int, current_price: float) -> Optional[Dict]:
         """Execute a trade (or simulate in dry-run mode)."""
@@ -619,8 +672,19 @@ class MultiAssetTradingBot:
         # Get model action
         raw_action = self.get_action(df)
         
-        # Apply filters
-        filtered_action, reason = self.apply_filters(raw_action)
+        # Refresh TFT forecast periodically (every 30 min, not every iteration)
+        if self.tft_forecaster:
+            import time as _time
+            if not hasattr(self, '_last_tft_time') or _time.time() - self._last_tft_time > 1800:
+                try:
+                    self.last_forecast = self.tft_forecaster.forecast(df)
+                    self._last_tft_time = _time.time()
+                except Exception as e:
+                    logger.warning(f"TFT forecast refresh failed: {e}")
+        
+        # Compute composite market confidence score
+        filtered_action, confidence, reason = self.compute_market_score(raw_action, df)
+        self.last_confidence = confidence  # Feeds into ConfidenceEngine for position sizing
         
         # --- Anti-overtrading guards ---
         now = time.time()
