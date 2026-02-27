@@ -426,21 +426,21 @@ class MultiAssetTradingBot:
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
                 
-                # Calculate SL/TP
+                # Calculate SL/TP for LONG position
                 try:
                     df = self.fetch_data(days=3)
-                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "short")
-                    self.sl_price = current_price * (1 + sl_pct)
-                    self.tp_price = current_price * (1 - tp_pct)
-                    self.lowest_price = current_price
+                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "long")
+                    self.sl_price = current_price * (1 - sl_pct)   # SL BELOW entry for LONG
+                    self.tp_price = current_price * (1 + tp_pct)   # TP ABOVE entry for LONG
+                    self.highest_price = current_price
                     self.base_trailing_pct = sl_pct
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
-                    logger.info(f"🛡️ SHORT SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
+                    logger.info(f"🛡️ LONG SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
                 except Exception as e:
                     logger.error(f"Failed to calc SL/TP: {e}")
-                    self.sl_price = current_price * 0.98
-                    self.tp_price = current_price * 1.04
+                    self.sl_price = current_price * 0.95   # 5% below entry
+                    self.tp_price = current_price * 1.10   # 10% above entry
             else:
                 # Already LONG - redundant
                 return None
@@ -614,39 +614,7 @@ class MultiAssetTradingBot:
                         "tp": 0
                     }
 
-            elif self.position == -1: # SHORT
-                if current_price >= self.sl_price and self.sl_price > 0:
-                    hit_sl = True
-                elif current_price <= self.tp_price and self.tp_price > 0:
-                    hit_tp = True
-                    
-                if hit_sl or hit_tp:
-                    trade = self.execute_trade(1, current_price) # Buy to close
-                    reason = "STOP_LOSS" if hit_sl else "TAKE_PROFIT"
-                    if hit_sl:
-                        self.last_loss_time = time.time()
-                    logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
-                    
-                    # Return result immediately
-                    total_equity = self.balance
-                    self.last_equity = total_equity
-                    
-                    return {
-                        "symbol": self.symbol,
-                        "timestamp": datetime.now().isoformat(),
-                        "price": current_price,
-                        "raw_action": "HOLD",
-                        "filtered_action": "CLOSE_SHORT",
-                        "reason": reason,
-                        "position": 0,
-                        "balance": self.balance,
-                        "equity": total_equity,
-                        "realized_pnl": self.realized_pnl,
-                        "unrealized_pnl": 0,
-                        "trade": trade,
-                        "sl": 0,
-                        "tp": 0
-                    }
+            # (Removed duplicate SHORT exit block — already handled above at line 566)
         
         # Get model action
         raw_action = self.get_action(df)
