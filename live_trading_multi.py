@@ -27,14 +27,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 # Old imports removed: EnsembleOrchestrator, resample_to_higher_tf, compute_mtf_features_at
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher, SUPPORTED_ASSETS
 from src.features.multi_asset_features import MultiAssetFeatureEngine
 from src.features.whale_tracker import WhaleTracker
 from src.features.regime_detector import MarketRegimeDetector
-from src.features.mtf_analyzer import MultiTimeframeAnalyzer
-from src.features.risk_manager import AdaptiveRiskManager
 from src.features.mtf_analyzer import MultiTimeframeAnalyzer
 from src.features.risk_manager import AdaptiveRiskManager
 from src.features.order_flow import FundingRateAnalyzer, OrderFlowAnalyzer
@@ -114,7 +113,6 @@ class MultiAssetTradingBot:
                 logger.warning(f"MTF analyzer init failed: {e}")
 
         # Regime detector (ADX/ATR-based)
-        from src.features.regime_detector import MarketRegimeDetector
         self.regime_detector = MarketRegimeDetector()
 
         self.risk_manager = AdaptiveRiskManager()
@@ -131,6 +129,25 @@ class MultiAssetTradingBot:
             self.tft_forecaster = None
         
         logger.info(f"🤖 Bot initialized for {symbol} (dry-run={dry_run})")
+    
+    def _load_vec_normalize(self) -> Optional[VecNormalize]:
+        """Load VecNormalize stats from training for proper observation normalization."""
+        vec_norm_path = Path('./data/models/ultimate_agent_vec_normalize.pkl')
+        if vec_norm_path.exists():
+            try:
+                import gymnasium as gym
+                # Create a dummy env for VecNormalize to wrap
+                dummy_env = DummyVecEnv([lambda: gym.make('CartPole-v1')])
+                vec_norm = VecNormalize.load(str(vec_norm_path), dummy_env)
+                vec_norm.training = False  # Don't update running stats
+                vec_norm.norm_reward = False
+                logger.info(f"✅ VecNormalize stats loaded from {vec_norm_path}")
+                return vec_norm
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load VecNormalize: {e}")
+                return None
+        logger.warning(f"⚠️ VecNormalize not found at {vec_norm_path}")
+        return None
     
     def get_market_analysis(self) -> Dict:
         """Get current market analysis data for dashboard."""
@@ -304,6 +321,64 @@ class MultiAssetTradingBot:
         # Confidence is computed by compute_market_score(), not hardcoded
         return action
     
+    def make_decision(self, composite_score: float, confidence: float, raw_action: int, df: pd.DataFrame) -> tuple:
+        """
+        3-tier decision system that overrides weak PPO model when market signals are clear.
+        
+        Tier 1 (confidence >= 0.65): Override PPO — trade based on market signals
+        Tier 2 (confidence 0.45-0.65): Only trade if PPO agrees with signals
+        Tier 3 (confidence < 0.45): Hold — insufficient signal clarity
+        
+        Returns:
+            (final_action, reason)
+        """
+        # Determine market-preferred direction from composite score
+        if composite_score > 0.10:
+            market_action = 1  # Market says BUY
+        elif composite_score < -0.10:
+            market_action = 2  # Market says SELL
+        else:
+            market_action = 0  # Market is neutral
+        
+        action_names = {0: "HOLD", 1: "BUY", 2: "SELL"}
+        
+        # --- Tier 1: SIGNAL OVERRIDE (strong signals) ---
+        if confidence >= 0.65 and market_action != 0:
+            logger.info(
+                f"🎯 SIGNAL OVERRIDE for {self.symbol}: {action_names[market_action]} "
+                f"(conf={confidence:.2f}, composite={composite_score:+.3f}, PPO={action_names[raw_action]})"
+            )
+            return market_action, f"🎯 SIGNAL OVERRIDE: {action_names[market_action]} (conf={confidence:.2f})"
+        
+        # --- Tier 2: CONSENSUS (moderate signals + PPO agrees) ---
+        if confidence >= 0.45:
+            if raw_action == market_action and market_action != 0:
+                logger.info(
+                    f"🤝 CONSENSUS for {self.symbol}: {action_names[raw_action]} "
+                    f"(PPO + signals agree, conf={confidence:.2f})"
+                )
+                return raw_action, f"🤝 PPO+Signal agree: {action_names[raw_action]} (conf={confidence:.2f})"
+            elif raw_action != 0 and market_action == 0:
+                # Market neutral, PPO has opinion — use PPO with caution
+                logger.info(
+                    f"⚖️ PPO-only for {self.symbol}: {action_names[raw_action]} "
+                    f"(market neutral, conf={confidence:.2f})"
+                )
+                return raw_action, f"⚖️ PPO signal (market neutral, conf={confidence:.2f})"
+            else:
+                # PPO disagrees with market signals
+                logger.info(
+                    f"🚫 DISAGREEMENT for {self.symbol}: PPO={action_names[raw_action]}, "
+                    f"Market={action_names[market_action]} → HOLD"
+                )
+                return 0, f"🚫 PPO ({action_names[raw_action]}) disagrees with market ({action_names[market_action]})"
+        
+        # --- Tier 3: HOLD (weak signals) ---
+        logger.info(
+            f"😶 LOW CONFIDENCE for {self.symbol}: conf={confidence:.2f}, HOLD"
+        )
+        return 0, f"😶 Low confidence ({confidence:.2f}), HOLD"
+    
     def compute_market_score(self, action: int, df: pd.DataFrame) -> tuple:
         """
         Compute composite market confidence score from all analysis sources.
@@ -409,6 +484,7 @@ class MultiAssetTradingBot:
         # ── Compute Composite Score ───────────────────────────────────
         total_weight = sum(w for _, w in scores.values())
         composite = sum(s * w for s, w in scores.values()) / total_weight if total_weight > 0 else 0
+        self._last_composite_score = composite  # Store for make_decision()
         
         # Convert composite to confidence for the ACTION direction
         # composite > 0 = market is bullish, composite < 0 = market is bearish
@@ -479,10 +555,29 @@ class MultiAssetTradingBot:
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
                 
-                # Calculate SL/TP for LONG position
+                # Calculate SL/TP for LONG position (regime-adaptive)
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "long")
+                    
+                    # Regime-adaptive adjustments
+                    try:
+                        regime_info = self.regime_detector.detect_regime(df)
+                        regime_name = regime_info.regime.value
+                        if regime_name == 'high_volatility':
+                            sl_pct *= 1.5  # Wider stops in high vol
+                            tp_pct *= 1.5
+                            logger.info(f"📊 HIGH VOL regime: widened SL/TP by 1.5x")
+                        elif regime_name == 'trending_up':
+                            tp_pct *= 1.5  # Let winners run in trend
+                            logger.info(f"📊 TRENDING_UP regime: widened TP by 1.5x")
+                        elif regime_name == 'ranging':
+                            sl_pct *= 0.8  # Tighter stops in range
+                            tp_pct *= 0.8
+                            logger.info(f"📊 RANGING regime: tightened SL/TP by 0.8x")
+                    except Exception as e:
+                        logger.warning(f"Regime-adaptive SL/TP failed: {e}")
+                    
                     self.sl_price = current_price * (1 - sl_pct)   # SL BELOW entry for LONG
                     self.tp_price = current_price * (1 + tp_pct)   # TP ABOVE entry for LONG
                     self.highest_price = current_price
@@ -525,19 +620,40 @@ class MultiAssetTradingBot:
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
                 
-                # Calculate SL/TP
+                # Calculate SL/TP for SHORT position (regime-adaptive)
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "short")
+                    
+                    # Regime-adaptive adjustments
+                    try:
+                        regime_info = self.regime_detector.detect_regime(df)
+                        regime_name = regime_info.regime.value
+                        if regime_name == 'high_volatility':
+                            sl_pct *= 1.5
+                            tp_pct *= 1.5
+                            logger.info(f"📊 HIGH VOL regime: widened SL/TP by 1.5x")
+                        elif regime_name == 'trending_down':
+                            tp_pct *= 1.5  # Let winners run in downtrend
+                            logger.info(f"📊 TRENDING_DOWN regime: widened TP by 1.5x")
+                        elif regime_name == 'ranging':
+                            sl_pct *= 0.8
+                            tp_pct *= 0.8
+                            logger.info(f"📊 RANGING regime: tightened SL/TP by 0.8x")
+                    except Exception as e:
+                        logger.warning(f"Regime-adaptive SL/TP failed: {e}")
+                    
                     self.sl_price = current_price * (1 + sl_pct)
                     self.tp_price = current_price * (1 - tp_pct)
+                    self.lowest_price = current_price
+                    self.base_trailing_pct = sl_pct
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
                     logger.info(f"🛡️ SHORT SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
                 except Exception as e:
                     logger.error(f"Failed to calc SL/TP: {e}")
-                    self.sl_price = current_price * 1.02
-                    self.tp_price = current_price * 0.96
+                    self.sl_price = current_price * 1.05  # 5% above entry
+                    self.tp_price = current_price * 0.90  # 10% below entry
             else:
                 # Already SHORT - redundant
                 return None
@@ -574,19 +690,20 @@ class MultiAssetTradingBot:
                     hit_tp = True
                     reason = "TAKE_PROFIT"
                 else:
-                    # Check Trailing Stop
-                    trailing_stop = self.highest_price * (1 - self.base_trailing_pct)
-                    if trailing_stop > self.sl_price: # Trailing Stop only moves UP
-                        if current_price <= trailing_stop:
-                            hit_trailing = True
-                            reason = "TRAILING_STOP"
-                            
-                    # Break-Even Stop (moved halfway to TP)
-                    tp_distance = self.tp_price - self.position_price
-                    if current_price >= self.position_price + (tp_distance * 0.5):
-                        if self.sl_price < self.position_price:
-                            self.sl_price = self.position_price # Move SL to Break-Even
-                            logger.info(f"🛡️ Moved SL to Break-Even for {self.symbol} @ ${self.sl_price:.2f}")
+                    # Enhanced trailing stop: protect 60% of unrealized gains
+                    if self.highest_price > self.position_price:
+                        gain = self.highest_price - self.position_price
+                        new_trailing_sl = self.position_price + gain * 0.6  # Lock in 60% of peak gain
+                        if new_trailing_sl > self.sl_price:
+                            old_sl = self.sl_price
+                            self.sl_price = new_trailing_sl
+                            if abs(new_trailing_sl - old_sl) > 1:  # Only log meaningful moves
+                                logger.info(f"📈 TRAIL UP for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
+                    
+                    # Check if trailing stop hit
+                    if current_price <= self.sl_price and self.sl_price > self.position_price * 0.99:
+                        hit_trailing = True
+                        reason = "TRAILING_STOP"
 
                 if hit_sl or hit_tp or hit_trailing:
                     trade = self.execute_trade(2, current_price) # Sell to close
@@ -626,19 +743,20 @@ class MultiAssetTradingBot:
                     hit_tp = True
                     reason = "TAKE_PROFIT"
                 else:
-                    # Check Trailing Stop
-                    trailing_stop = self.lowest_price * (1 + self.base_trailing_pct)
-                    if trailing_stop < self.sl_price and self.sl_price > 0: # Trailing Stop only moves DOWN
-                        if current_price >= trailing_stop:
-                            hit_trailing = True
-                            reason = "TRAILING_STOP"
-                            
-                    # Break-Even Stop (moved halfway to TP)
-                    tp_distance = self.position_price - self.tp_price
-                    if current_price <= self.position_price - (tp_distance * 0.5):
-                        if self.sl_price > self.position_price:
-                            self.sl_price = self.position_price # Move SL to Break-Even
-                            logger.info(f"🛡️ Moved SL to Break-Even for {self.symbol} @ ${self.sl_price:.2f}")
+                    # Enhanced trailing stop for SHORT: protect 60% of unrealized gains
+                    if self.lowest_price < self.position_price and self.lowest_price > 0:
+                        gain = self.position_price - self.lowest_price
+                        new_trailing_sl = self.position_price - gain * 0.6  # Lock in 60% of peak gain
+                        if new_trailing_sl < self.sl_price:
+                            old_sl = self.sl_price
+                            self.sl_price = new_trailing_sl
+                            if abs(new_trailing_sl - old_sl) > 0.001:
+                                logger.info(f"📉 TRAIL DOWN for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
+                    
+                    # Check if trailing stop hit
+                    if current_price >= self.sl_price and self.sl_price < self.position_price * 1.01:
+                        hit_trailing = True
+                        reason = "TRAILING_STOP"
                     
                 if hit_sl or hit_tp or hit_trailing:
                     trade = self.execute_trade(1, current_price) # Buy to close
@@ -685,6 +803,24 @@ class MultiAssetTradingBot:
         # Compute composite market confidence score
         filtered_action, confidence, reason = self.compute_market_score(raw_action, df)
         self.last_confidence = confidence  # Feeds into ConfidenceEngine for position sizing
+        
+        # 3-tier decision: signal override / consensus / hold
+        final_action, decision_reason = self.make_decision(
+            composite_score=getattr(self, '_last_composite_score', 0),
+            confidence=confidence,
+            raw_action=raw_action,
+            df=df
+        )
+        
+        # Use the decision layer's action instead of pure filter output
+        if filtered_action != 0 and final_action == 0:
+            # Decision layer overrode filter to HOLD
+            filtered_action = 0
+            reason = decision_reason
+        elif filtered_action == 0 and final_action != 0:
+            # Decision layer generated a signal override
+            filtered_action = final_action
+            reason = decision_reason
         
         # --- Anti-overtrading guards ---
         now = time.time()
