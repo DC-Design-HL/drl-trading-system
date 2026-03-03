@@ -44,8 +44,8 @@ class UltimateTradingEnv(gym.Env):
         max_position: int = 1,
         use_correlations: bool = False,
         reward_scaling: float = 1.0,
-        stop_loss_pct: float = 0.02,  # 2% stop loss
-        take_profit_pct: float = 0.04,  # 4% take profit (2:1 R:R)
+        stop_loss_pct: float = 0.025,  # 2.5% stop loss (matches live)
+        take_profit_pct: float = 0.05,  # 5% take profit (matches live, 2:1 R:R)
     ):
         super().__init__()
         
@@ -191,50 +191,50 @@ class UltimateTradingEnv(gym.Env):
         
         # Calculate minimum hold penalty (penalize flipping too fast)
         steps_in_position = self.current_step - self.position_entry_step
-        min_hold_steps = 3  # Reduced for faster trading with tighter SL/TP
+        min_hold_steps = 6  # Minimum 6 hours hold to reduce churn
         
         # Execute action
         if action == 1:  # Buy / Go Long
             if self.position == -1:  # Close short first
-                # Small penalty for closing position too early
+                # Stronger penalty for closing position too early
                 if steps_in_position < min_hold_steps:
-                    reward -= 0.005 * self.reward_scaling
+                    reward -= 0.02 * self.reward_scaling
                 pnl = self._close_position(current_price)
                 reward += pnl * self.reward_scaling
                 trade_made = True
                 
             if self.position == 0:  # Open long
-                # Small bonus for trading with trend
+                # Stronger trend alignment bonus
                 if trend == 1:  # Bullish trend - good long entry
-                    reward += 0.002 * self.reward_scaling
-                elif trend == -1:  # Bearish trend - slight penalty
-                    reward -= 0.003 * self.reward_scaling
+                    reward += 0.005 * self.reward_scaling
+                elif trend == -1:  # Bearish trend - significant penalty
+                    reward -= 0.01 * self.reward_scaling
                     
                 self._open_position(current_price, 1)
                 self.position_entry_step = self.current_step
-                reward -= 0.002 * self.reward_scaling  # Small trade cost
+                reward -= 0.003 * self.reward_scaling  # Trade cost
                 trade_made = True
                 self.steps_since_trade = 0
                 
         elif action == 2:  # Sell / Go Short
             if self.position == 1:  # Close long first
-                # Small penalty for closing position too early
+                # Stronger penalty for closing position too early
                 if steps_in_position < min_hold_steps:
-                    reward -= 0.005 * self.reward_scaling
+                    reward -= 0.02 * self.reward_scaling
                 pnl = self._close_position(current_price)
                 reward += pnl * self.reward_scaling
                 trade_made = True
                 
             if self.position == 0:  # Open short
-                # Small bonus for trading with trend
+                # Stronger trend alignment bonus
                 if trend == -1:  # Bearish trend - good short entry
-                    reward += 0.002 * self.reward_scaling
-                elif trend == 1:  # Bullish trend - slight penalty
-                    reward -= 0.003 * self.reward_scaling
+                    reward += 0.005 * self.reward_scaling
+                elif trend == 1:  # Bullish trend - significant penalty
+                    reward -= 0.01 * self.reward_scaling
                     
                 self._open_position(current_price, -1)
                 self.position_entry_step = self.current_step
-                reward -= 0.002 * self.reward_scaling  # Small trade cost
+                reward -= 0.003 * self.reward_scaling  # Trade cost
                 trade_made = True
                 self.steps_since_trade = 0
         
@@ -261,21 +261,20 @@ class UltimateTradingEnv(gym.Env):
             if pnl_pct <= -self.stop_loss_pct:
                 pnl = self._close_position(new_price)
                 reward += pnl * self.reward_scaling
-                reward -= 0.01 * self.reward_scaling  # Reduced penalty for tighter SL
+                reward -= 0.05 * self.reward_scaling  # STRONG penalty for hitting SL
                 trade_made = True
                 
             # Check Take Profit
             elif pnl_pct >= self.take_profit_pct:
                 pnl = self._close_position(new_price)
                 reward += pnl * self.reward_scaling
-                reward += 0.08 * self.reward_scaling  # Bigger bonus for hitting TP!
+                reward += 0.10 * self.reward_scaling  # Big bonus for hitting TP!
                 trade_made = True
                 
             else:
-                # Update unrealized P&L tracking
+                # Unrealized P&L tracking (encourages holding winners)
                 price_change = pnl_pct
-                # Reward for unrealized gains (encourages holding winners)
-                reward += price_change * self.position_size * 0.2 * self.reward_scaling
+                reward += price_change * self.position_size * 0.3 * self.reward_scaling
         
         # Track equity
         equity = self._calculate_equity()
@@ -284,10 +283,10 @@ class UltimateTradingEnv(gym.Env):
         if equity > self.max_balance:
             self.max_balance = equity
             
-        # Drawdown penalty (reduced)
+        # Drawdown penalty (earlier and stronger)
         drawdown = (self.max_balance - equity) / self.max_balance
-        if drawdown > 0.15:  # Only penalize >15% drawdown
-            reward -= drawdown * 0.02 * self.reward_scaling
+        if drawdown > 0.05:  # Penalize > 5% drawdown (was 15%)
+            reward -= drawdown * 0.1 * self.reward_scaling
             
         # Get observation
         obs = self._get_observation() if not done else np.zeros(self.observation_space.shape, dtype=np.float32)

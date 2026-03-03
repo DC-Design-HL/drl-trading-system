@@ -89,7 +89,7 @@ class MultiAssetTradingBot:
         self.last_loss_time = 0        # Timestamp of last SL hit
         self.last_entry_time = 0       # Timestamp of last position open
         self.COOLDOWN_SECONDS = 1800   # 30 min cooldown after a loss
-        self.MIN_HOLD_SECONDS = 7200   # 2 hour minimum hold time
+        self.MIN_HOLD_SECONDS = 14400  # 4 hour minimum hold time (was 2h)
         
         self._running = False
         
@@ -129,6 +129,9 @@ class MultiAssetTradingBot:
             self.tft_forecaster = None
         
         logger.info(f"🤖 Bot initialized for {symbol} (dry-run={dry_run})")
+        
+        # Load VecNormalize stats from training (CRITICAL for correct predictions)
+        self.vec_normalize = self._load_vec_normalize()
     
     def _load_vec_normalize(self) -> Optional[VecNormalize]:
         """Load VecNormalize stats from training for proper observation normalization."""
@@ -313,6 +316,14 @@ class MultiAssetTradingBot:
         
         # Combine: [99 features | 3 position] = 102 total
         observation = np.concatenate([last_features, position_info]).astype(np.float32)
+        
+        # Apply VecNormalize if available (CRITICAL: model was trained with normalized obs)
+        if self.vec_normalize is not None:
+            try:
+                obs_2d = observation.reshape(1, -1)
+                observation = self.vec_normalize.normalize_obs(obs_2d).flatten().astype(np.float32)
+            except Exception as e:
+                logger.warning(f"VecNormalize application failed: {e}")
         
         # PPO.predict returns (action, state)
         action, _ = self.model.predict(observation, deterministic=True)

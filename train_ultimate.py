@@ -130,20 +130,40 @@ class EarlyStoppingCallback(BaseCallback):
 
 
 def load_training_data(days: int = 365, timeframe: str = '1h') -> pd.DataFrame:
-    """Load real historical data from Binance."""
+    """Load real historical data from Binance for multiple assets."""
     loader = DataLoader()
     
     end_date = datetime.now()
     start_date = end_date - pd.Timedelta(days=days)
     
-    df = loader.load(
-        symbol='BTC/USDT',
-        timeframe=timeframe,
-        start_date=start_date.strftime('%Y-%m-%d'),
-        end_date=end_date.strftime('%Y-%m-%d'),
-    )
+    # Multi-asset training: load all assets and concatenate
+    assets = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT']
+    all_dfs = []
     
-    logger.info(f"Loaded {len(df)} candles from {df.index[0]} to {df.index[-1]}")
+    for asset in assets:
+        try:
+            asset_df = loader.load(
+                symbol=asset,
+                timeframe=timeframe,
+                start_date=start_date.strftime('%Y-%m-%d'),
+                end_date=end_date.strftime('%Y-%m-%d'),
+            )
+            if not asset_df.empty:
+                # Normalize prices to percentage changes for cross-asset training
+                # This way the model learns patterns, not absolute price levels
+                logger.info(f"Loaded {len(asset_df)} candles for {asset}")
+                all_dfs.append(asset_df)
+        except Exception as e:
+            logger.warning(f"Failed to load {asset}: {e}")
+    
+    if not all_dfs:
+        raise ValueError("No training data loaded for any asset")
+    
+    # Concatenate all assets end-to-end for training
+    # Each asset's data forms a separate "episode" during training
+    df = pd.concat(all_dfs, ignore_index=True)
+    
+    logger.info(f"Total: {len(df)} candles from {len(all_dfs)} assets")
     return df
 
 
@@ -169,10 +189,10 @@ def create_training_envs(df: pd.DataFrame, n_envs: int = 4):
             initial_balance=10000.0,
             lookback_window=48,
             trading_fee=0.0004,
-            position_size=0.75,  # Increased to 75% for higher returns
+            position_size=0.25,  # Match live (was 75%!)
             reward_scaling=1.0,
-            stop_loss_pct=0.01,  # Tighter 1% SL for more frequent trades
-            take_profit_pct=0.02,  # Tighter 2% TP (2:1 R:R maintained)
+            stop_loss_pct=0.025,  # 2.5% SL (matches live)
+            take_profit_pct=0.05,  # 5% TP (matches live, 2:1 R:R)
         )
         return Monitor(env)
     
@@ -183,10 +203,10 @@ def create_training_envs(df: pd.DataFrame, n_envs: int = 4):
             initial_balance=10000.0,
             lookback_window=48,
             trading_fee=0.0004,
-            position_size=0.75,
+            position_size=0.25,
             reward_scaling=1.0,
-            stop_loss_pct=0.01,
-            take_profit_pct=0.02,
+            stop_loss_pct=0.025,
+            take_profit_pct=0.05,
         )
         return Monitor(env)
     
@@ -217,23 +237,23 @@ def get_model_config() -> dict:
     """Get optimized PPO hyperparameters for trading."""
     return {
         'policy': 'MlpPolicy',
-        'learning_rate': 1e-5,  # Even lower LR for better convergence
-        'n_steps': 4096,  # More steps per update
-        'batch_size': 256,  # Smaller batch for more updates
-        'n_epochs': 10,  # More epochs per batch
-        'gamma': 0.99,  # Slightly lower discount for faster adaptation
+        'learning_rate': 3e-5,   # Higher LR for faster learning with more data
+        'n_steps': 4096,
+        'batch_size': 256,
+        'n_epochs': 10,
+        'gamma': 0.99,
         'gae_lambda': 0.95,
-        'clip_range': 0.15,  # Slightly larger clip
-        'clip_range_vf': 0.15,
-        'ent_coef': 0.001,  # Even lower entropy (more deterministic)
+        'clip_range': 0.2,       # Standard clip range
+        'clip_range_vf': 0.2,
+        'ent_coef': 0.005,       # More exploration (was 0.001)
         'vf_coef': 0.5,
         'max_grad_norm': 0.5,
         'policy_kwargs': {
             'net_arch': {
-                'pi': [512, 512, 256, 128],  # Even deeper policy network
-                'vf': [512, 512, 256, 128],  # Even deeper value network
+                'pi': [256, 256, 128],    # Smaller to prevent overfitting (was 512x512x256x128)
+                'vf': [256, 256, 128],
             },
-            'activation_fn': __import__('torch').nn.Mish,  # Advanced activation
+            'activation_fn': __import__('torch').nn.Mish,
         },
     }
 
@@ -346,9 +366,9 @@ def evaluate_ultimate_model(
         initial_balance=10000.0,
         lookback_window=48,
         trading_fee=0.0004,
-        position_size=0.75,  # Match training
-        stop_loss_pct=0.01,
-        take_profit_pct=0.02,
+        position_size=0.25,  # Match training
+        stop_loss_pct=0.025,
+        take_profit_pct=0.05,
     )
     
     # Load model
