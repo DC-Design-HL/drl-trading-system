@@ -919,6 +919,14 @@ class MultiAssetOrchestrator:
         self.storage = get_storage()
         self.load_state()
         
+        # Auto-reset if RESET_FLAG file exists (one-time reset trigger)
+        reset_flag = Path('logs/RESET_FLAG')
+        if reset_flag.exists():
+            logger.warning("🔄 RESET_FLAG detected — archiving old trades and resetting portfolio")
+            self.reset_portfolio()
+            reset_flag.unlink()  # Remove flag after reset
+            logger.info("✅ Portfolio reset complete, RESET_FLAG removed")
+        
         self._running = False
         
         # Initialize On-Chain Whale Watcher
@@ -927,6 +935,52 @@ class MultiAssetOrchestrator:
         self.last_whale_check = 0
         
         logger.info(f"🚀 Orchestrator initialized for {len(symbols)} assets")
+    
+    def reset_portfolio(self):
+        """Archive old trades and reset all bot states to initial values."""
+        import shutil
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # 1. Archive old trade log
+        trade_file = Path('logs/trading_log.json')
+        if trade_file.exists():
+            archive_path = Path(f'logs/trading_log_archive_{timestamp}.json')
+            shutil.copy2(trade_file, archive_path)
+            logger.info(f"📦 Archived old trades to {archive_path}")
+            
+            # Clear the trade log
+            trade_file.write_text('')
+            logger.info("🗑️ Cleared trading_log.json")
+        
+        # 2. Archive old state
+        state_file = Path('logs/multi_asset_state.json')
+        if state_file.exists():
+            archive_state = Path(f'logs/state_archive_{timestamp}.json')
+            shutil.copy2(state_file, archive_state)
+            logger.info(f"📦 Archived old state to {archive_state}")
+        
+        # 3. Reset all bots to fresh state
+        for symbol, bot in self.bots.items():
+            bot.balance = bot.initial_balance
+            bot.position = 0
+            bot.position_price = 0.0
+            bot.current_price = 0.0
+            bot.position_units = 0.0
+            bot.sl_price = 0.0
+            bot.tp_price = 0.0
+            bot.highest_price = 0.0
+            bot.lowest_price = 0.0
+            bot.realized_pnl = 0.0
+            bot.trades = []
+            bot.last_equity = bot.initial_balance
+            bot.last_loss_time = 0
+            bot.last_entry_time = 0
+            logger.info(f"🔄 Reset {symbol}: balance=${bot.initial_balance}, position=FLAT")
+        
+        # 4. Save the clean state
+        self.save_state()
+        logger.info("✅ Clean state saved")
     
     def load_state(self):
         """Load state from storage."""
