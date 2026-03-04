@@ -919,6 +919,13 @@ class MultiAssetOrchestrator:
         self.storage = get_storage()
         self.load_state()
         
+        self._running = False
+        
+        # Initialize On-Chain Whale Watcher
+        self.whale_watcher = OnChainWhaleWatcher()
+        self.last_trade_time = 0
+        self.last_whale_check = 0
+        
         # Auto-reset if RESET_FLAG file exists (one-time reset trigger)
         reset_flag = Path('logs/RESET_FLAG')
         if reset_flag.exists():
@@ -926,13 +933,6 @@ class MultiAssetOrchestrator:
             self.reset_portfolio()
             reset_flag.unlink()  # Remove flag after reset
             logger.info("✅ Portfolio reset complete, RESET_FLAG removed")
-        
-        self._running = False
-        
-        # Initialize On-Chain Whale Watcher
-        self.whale_watcher = OnChainWhaleWatcher()
-        self.last_trade_time = 0
-        self.last_whale_check = 0
         
         logger.info(f"🚀 Orchestrator initialized for {len(symbols)} assets")
     
