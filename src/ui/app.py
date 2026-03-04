@@ -121,9 +121,28 @@ TIMEFRAMES = {
 
 
 def load_trading_log(symbol: str = None) -> list:
-    """Load real trading data from updated storage."""
+    """Load real trading data from updated storage, filtered by reset timestamp."""
     try:
         all_trades = storage.get_trades(limit=500)
+        
+        # Filter by reset_timestamp if available (hide pre-reset trades)
+        try:
+            state = storage.load_state()
+            reset_ts = state.get('reset_timestamp')
+            if reset_ts:
+                reset_dt = datetime.fromisoformat(reset_ts.replace('Z', '+00:00'))
+                filtered_by_time = []
+                for trade in all_trades:
+                    try:
+                        trade_ts = trade.get('timestamp', '')
+                        trade_dt = datetime.fromisoformat(trade_ts.replace('Z', '+00:00'))
+                        if trade_dt >= reset_dt:
+                            filtered_by_time.append(trade)
+                    except:
+                        filtered_by_time.append(trade)  # Include if can't parse
+                all_trades = filtered_by_time
+        except:
+            pass
         
         if not symbol:
             return all_trades

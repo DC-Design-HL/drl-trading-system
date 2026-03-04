@@ -343,6 +343,12 @@ class MultiAssetTradingBot:
         Returns:
             (final_action, reason)
         """
+        # ── Position Guard: Don't suggest action if already in that direction ──
+        if raw_action == 1 and self.position == 1:
+            return 0, "Already LONG — ignoring BUY signal"
+        if raw_action == 2 and self.position == -1:
+            return 0, "Already SHORT — ignoring SELL signal"
+        
         # Determine market-preferred direction from composite score
         if composite_score > 0.10:
             market_action = 1  # Market says BUY
@@ -350,6 +356,12 @@ class MultiAssetTradingBot:
             market_action = 2  # Market says SELL
         else:
             market_action = 0  # Market is neutral
+        
+        # Also guard market action against current position
+        if market_action == 1 and self.position == 1:
+            market_action = 0  # Already LONG, don't suggest another BUY
+        if market_action == 2 and self.position == -1:
+            market_action = 0  # Already SHORT, don't suggest another SELL
         
         action_names = {0: "HOLD", 1: "BUY", 2: "SELL"}
         
@@ -941,6 +953,7 @@ class MultiAssetOrchestrator:
         import shutil
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.reset_timestamp = datetime.now().isoformat()
         
         # 1. Archive old trade log
         trade_file = Path('logs/trading_log.json')
@@ -952,6 +965,15 @@ class MultiAssetOrchestrator:
             # Clear the trade log
             trade_file.write_text('')
             logger.info("🗑️ Cleared trading_log.json")
+        
+        # 1b. Clear MongoDB trades if using mongo storage
+        try:
+            from src.data.storage import MongoStorage
+            if isinstance(self.storage, MongoStorage):
+                self.storage.trades_collection.delete_many({})
+                logger.info("🗑️ Cleared MongoDB trades collection")
+        except Exception as e:
+            logger.warning(f"MongoDB trades clear skipped: {e}")
         
         # 2. Archive old state
         state_file = Path('logs/multi_asset_state.json')
@@ -1114,6 +1136,7 @@ class MultiAssetOrchestrator:
         state['timestamp'] = datetime.now().isoformat()
         state['active'] = self._running
         state['whale_alerts'] = self.whale_watcher.get_latest_alerts()
+        state['reset_timestamp'] = getattr(self, 'reset_timestamp', None)
         
         # Add per-asset details
         state['assets'] = {}
