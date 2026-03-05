@@ -1,67 +1,55 @@
+
+!data/models/whale_patterns/*.pkl
+# Data
+# Environment Variables
+# IDE
+# Jupyter
+# Logs
+# OS
 # Python
-__pycache__/
-*.py[cod]
+# Testing
+# Virtual Environment
+# data/models/ <-- Removed
+# data/models/*.zip  <-- Removed to allow LFS tracking
 *$py.class
+*.egg
+*.egg-info/
+*.log
+*.py[cod]
 *.so
+*.swo
+*.swp
+.DS_Store
 .Python
+.coverage
+.eggs/
+.env
+.env.local
+.idea/
+.installed.cfg
+.ipynb_checkpoints/
+.pytest_cache/
+.venv/
+.vscode/
+/env/
+Thumbs.db
+__pycache__/
 build/
+data/checkpoints/
+data/historical/*.csv
+data/models/*.pkl
+deploy.zip
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
+htmlcov/
 lib/
 lib64/
+logs/
+logs/RESET_FLAG
 parts/
 sdist/
 var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 venv/
-/env/
-.venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment Variables
-.env
-.env.local
-
-# Data
-data/historical/*.csv
-# data/models/*.zip  <-- Removed to allow LFS tracking
-data/models/*.pkl
-!data/models/whale_patterns/*.pkl
-
-# Logs
-logs/
-*.log
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# OS
-.DS_Store
-Thumbs.db
-data/checkpoints/
-deploy.zip
-deploy.zip
-data/checkpoints/
-deploy.zip
-data/checkpoints/
-# data/models/ <-- Removed
-data/checkpoints/
-deploy.zip
+wheels/
