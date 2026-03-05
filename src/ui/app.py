@@ -936,17 +936,30 @@ def render_market_analysis_fragment(symbol: str):
          </div>
          """, unsafe_allow_html=True)
     
-    # Order Flow
+    # Order Flow (enhanced 3-layer)
     order_flow = market_data.get('order_flow', {})
     if order_flow and not order_flow.get('error'):
         of_bias = order_flow.get('bias', 'neutral')
+        of_score = order_flow.get('score', 0)
         of_color = "#26a69a" if of_bias == 'bullish' else "#ef5350" if of_bias == 'bearish' else "#888"
+        
+        # Layer details
+        cvd_data = order_flow.get('cvd', {})
+        taker_data = order_flow.get('taker', {})
+        notable_data = order_flow.get('notable', {})
+        
+        cvd_trend = cvd_data.get('trend', 'n/a')
+        taker_ratio = taker_data.get('ratio', 0.5)
+        notable_buys = notable_data.get('large_buys', order_flow.get('large_buys', 0))
+        notable_sells = notable_data.get('large_sells', order_flow.get('large_sells', 0))
+        
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-label">📊 Order Flow</div>
-            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()}</div>
+            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()} ({of_score:+.2f})</div>
             <div style="color: #888; font-size: 11px;">
-                Buys: {order_flow.get('large_buys', 0)} | Sells: {order_flow.get('large_sells', 0)}
+                CVD: {cvd_trend} | Taker Buy: {taker_ratio:.0%}<br/>
+                Notable: B:{notable_buys} / S:{notable_sells}
             </div>
         </div>
         """, unsafe_allow_html=True)

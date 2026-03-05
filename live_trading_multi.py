@@ -174,8 +174,13 @@ class MultiAssetTradingBot:
                 'strength': funding.strength if funding else 0
             }
             
-            # Order Flow
-            of = self.order_flow.analyze_large_orders() if hasattr(self, 'order_flow') else {}
+            # Order Flow (enhanced 3-layer signal)
+            try:
+                df_of = self.fetch_data(days=3) if hasattr(self, 'fetch_data') else None
+                of = self.order_flow.get_enhanced_signal(df_of) if hasattr(self, 'order_flow') else {}
+            except Exception as e:
+                logger.warning(f"Order flow for dashboard failed: {e}")
+                of = {}
             
             # MTF Analysis (Run on demand for dashboard state)
             mtf_data = {}
@@ -488,18 +493,16 @@ class MultiAssetTradingBot:
             logger.warning(f"Funding score error: {e}")
             scores['funding'] = (0, 0.15)
         
-        # ── 5. Order Flow (15% weight) ────────────────────────────────
+        # ── 5. Order Flow — Enhanced 3-layer (15% weight) ──────────────
         try:
-            of = self.order_flow.analyze_large_orders()
-            buy_vol = of.get('large_buy_volume', 0)
-            sell_vol = of.get('large_sell_volume', 0)
-            total_vol = buy_vol + sell_vol
-            if total_vol > 0:
-                flow_score = np.clip((buy_vol - sell_vol) / total_vol, -1, 1)
-            else:
-                flow_score = 0.0
+            of_signal = self.order_flow.get_enhanced_signal(df)
+            flow_score = of_signal.get('score', 0.0)
             scores['order_flow'] = (flow_score, 0.15)
-            details.append(f"📊 Flow={flow_score:+.2f}")
+            # Rich detail for logging
+            cvd_s = of_signal.get('cvd', {}).get('score', 0)
+            taker_s = of_signal.get('taker', {}).get('score', 0)
+            notable_s = of_signal.get('notable', {}).get('score', 0)
+            details.append(f"📊 Flow={flow_score:+.2f}(cvd={cvd_s:+.1f}/tk={taker_s:+.1f}/lg={notable_s:+.1f})")
         except Exception as e:
             logger.warning(f"Order flow score error: {e}")
             scores['order_flow'] = (0, 0.15)
