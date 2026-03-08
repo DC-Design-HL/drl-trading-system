@@ -860,10 +860,12 @@ class WhaleTracker:
 
 
         # 1. Binance L/S Ratio (25% weight - most reliable)
+        funding_rate = 0.0
         try:
             liq_stats = self.liquidation_tracker.get_liquidation_stats()
             signals_raw['binance_ls'] = liq_stats.get('imbalance', 0)
-            logger.info(f"📊 Binance L/S: {liq_stats.get('long_ratio', 0.5):.1%}, Funding: {liq_stats.get('funding_rate', 0):.4%}")
+            funding_rate = liq_stats.get('funding_rate', 0)
+            logger.info(f"📊 Binance L/S: {liq_stats.get('long_ratio', 0.5):.1%}, Funding: {funding_rate:.4%}")
         except Exception as e:
             logger.error(f"Error getting Binance L/S: {e}")
             signals_raw['binance_ls'] = None
@@ -960,6 +962,21 @@ class WhaleTracker:
         else:
             recommendation = 'neutral'
             
+        # Check for Smart Money Squeezes
+        squeeze_status = 'none'
+        flow_sig = signals_raw.get('flow', 0) or 0
+        oi_sig = signals_raw.get('oi_trend', 0) or 0
+        
+        # High whale buying + Rising OI + Negative Funding (Retail shorting)
+        if flow_sig > 0.4 and oi_sig > 0.4 and funding_rate < -0.005:
+            squeeze_status = 'short_squeeze'
+            logger.warning("🚨 SHORT SQUEEZE ALARM! (Whales buying + OI rising + Negative Funding)")
+            
+        # High whale selling + Rising OI + Positive Funding (Retail longing)
+        elif flow_sig < -0.4 and oi_sig > 0.4 and funding_rate > 0.005:
+            squeeze_status = 'long_squeeze'
+            logger.warning("🚨 LONG SQUEEZE ALARM! (Whales selling + OI rising + Positive Funding)")
+            
         signals = {
             # Individual signals (4 FREE sources + 1 Real-time)
             'flow': signals_raw.get('flow', 0) or 0,
@@ -976,6 +993,7 @@ class WhaleTracker:
             'bearish_signals': bearish_count,
             'high_confidence': high_confidence,
             'recommendation': recommendation,
+            'squeeze_status': squeeze_status,
             'timestamp': datetime.now().isoformat(),
             'flow_metrics': getattr(self, 'last_flow_metrics', {})  # Expose real-time flow data
         }

@@ -429,9 +429,21 @@ class MultiAssetTradingBot:
         # ── 1. Whale Signals (30% weight) ──────────────────────────────
         try:
             whale = self.whale_tracker.get_whale_signals()
-            whale_score = whale.get('score', 0.0)
+            # FIX: The key returned by whale_tracker is 'combined_score', not 'score'
+            whale_score = whale.get('combined_score', 0.0)
             scores['whale'] = (np.clip(whale_score, -1, 1), 0.30)
-            details.append(f"🐋 Whale={whale_score:+.2f}")
+            
+            # Squeeze Metric Boost
+            squeeze = whale.get('squeeze_status', 'none')
+            if squeeze == 'short_squeeze':
+                scores['squeeze'] = (1.0, 0.40)  # Massive weight to force LONG
+                details.append("🚨 SHORT SQUEEZE(+1.00)")
+            elif squeeze == 'long_squeeze':
+                scores['squeeze'] = (-1.0, 0.40) # Massive weight to force SHORT
+                details.append("🚨 LONG SQUEEZE(-1.00)")
+            else:
+                details.append(f"🐋 Whale={whale_score:+.2f}")
+                
         except Exception as e:
             logger.warning(f"Whale score error: {e}")
             scores['whale'] = (0, 0.30)
