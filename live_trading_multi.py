@@ -745,12 +745,16 @@ class MultiAssetTradingBot:
                     # Enhanced trailing stop: protect 60% of unrealized gains
                     if self.highest_price > self.position_price:
                         gain = self.highest_price - self.position_price
-                        new_trailing_sl = self.position_price + gain * 0.6  # Lock in 60% of peak gain
-                        if new_trailing_sl > self.sl_price:
-                            old_sl = self.sl_price
-                            self.sl_price = new_trailing_sl
-                            if abs(new_trailing_sl - old_sl) > 1:  # Only log meaningful moves
-                                logger.info(f"📈 TRAIL UP for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
+                        gain_pct = gain / self.position_price
+                        
+                        # Only start locking in profits if gain is over 1.5% from entry
+                        if gain_pct > 0.015:
+                            new_trailing_sl = self.position_price + gain * 0.6  # Lock in 60% of peak gain
+                            if new_trailing_sl > self.sl_price:
+                                old_sl = self.sl_price
+                                self.sl_price = new_trailing_sl
+                                if abs(new_trailing_sl - old_sl) > 1:  # Only log meaningful moves
+                                    logger.info(f"📈 TRAIL UP for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
                     
                     # Check if trailing stop hit
                     if current_price <= self.sl_price and self.sl_price > self.position_price * 0.99:
@@ -798,12 +802,16 @@ class MultiAssetTradingBot:
                     # Enhanced trailing stop for SHORT: protect 60% of unrealized gains
                     if self.lowest_price < self.position_price and self.lowest_price > 0:
                         gain = self.position_price - self.lowest_price
-                        new_trailing_sl = self.position_price - gain * 0.6  # Lock in 60% of peak gain
-                        if new_trailing_sl < self.sl_price:
-                            old_sl = self.sl_price
-                            self.sl_price = new_trailing_sl
-                            if abs(new_trailing_sl - old_sl) > 0.001:
-                                logger.info(f"📉 TRAIL DOWN for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
+                        gain_pct = gain / self.position_price
+                        
+                        # Only start locking in profits if gain is over 1.5% from entry
+                        if gain_pct > 0.015:
+                            new_trailing_sl = self.position_price - gain * 0.6  # Lock in 60% of peak gain
+                            if new_trailing_sl < self.sl_price:
+                                old_sl = self.sl_price
+                                self.sl_price = new_trailing_sl
+                                if abs(new_trailing_sl - old_sl) > 0.001:
+                                    logger.info(f"📉 TRAIL DOWN for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
                     
                     # Check if trailing stop hit
                     if current_price >= self.sl_price and self.sl_price < self.position_price * 1.01:
