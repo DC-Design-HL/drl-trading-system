@@ -444,11 +444,15 @@ class MultiAssetTradingBot:
             scores['regime'] = (regime_score, 0.20)
             details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
             
-            # Hard veto: strong trend opposing the trade
-            if action == 1 and regime_name == 'TRENDING_DOWN' and regime_info.confidence > 0.6:
-                return 0, 0.15, f"📉 Strong downtrend (ADX={regime_info.trend_strength:.0f}) — block LONG"
-            if action == 2 and regime_name == 'TRENDING_UP' and regime_info.confidence > 0.6:
-                return 0, 0.15, f"📈 Strong uptrend (ADX={regime_info.trend_strength:.0f}) — block SHORT"
+            # Hard veto: Catching falling knives/fading strong trends
+            if action == 1 and regime_name == 'TRENDING_DOWN':
+                whale_s = scores.get('whale', (0, 0))[0]
+                if regime_info.confidence > 0.6 or whale_s <= 0:
+                    return 0, 0.15, f"📉 Downtrend (ADX={regime_info.trend_strength:.0f}) without whale buying — block LONG"
+            if action == 2 and regime_name == 'TRENDING_UP':
+                whale_s = scores.get('whale', (0, 0))[0]
+                if regime_info.confidence > 0.6 or whale_s >= 0:
+                    return 0, 0.15, f"📈 Uptrend (ADX={regime_info.trend_strength:.0f}) without whale selling — block SHORT"
         except Exception as e:
             logger.warning(f"Regime score error: {e}")
             scores['regime'] = (0, 0.20)
@@ -536,6 +540,30 @@ class MultiAssetTradingBot:
                 f"❌ Blocked {action_names[action]}: confidence={confidence:.2f} < {MIN_CONFIDENCE} "
                 f"(composite={composite:+.3f}) | {detail_str}"
             )
+            
+        # ── REAL VOLUME CONFIRMATION (Prevent falling knife / dead bounce trades)
+        whale_s = scores.get('whale', (0, 0))[0]
+        flow_s = scores.get('order_flow', (0, 0))[0]
+        
+        # If confidence is moderate (Tier 2 Consensus), require volume confirmation
+        if confidence < 0.65:
+            if abs(whale_s) < 0.05 and abs(flow_s) < 0.05:
+                return 0, confidence, (
+                    f"❌ Blocked {action_names[action]}: No volume confirmation "
+                    f"(Whale={whale_s:+.2f}, Flow={flow_s:+.2f}) in Tier 2 | {detail_str}"
+                )
+            
+            # Check alignment: ensure volume isn't actively betting against the trade
+            if action == 1 and whale_s <= 0 and flow_s <= 0:
+                return 0, confidence, (
+                    f"❌ Blocked {action_names[action]}: Volume is bearish or flat "
+                    f"(Whale={whale_s:+.2f}, Flow={flow_s:+.2f}) | {detail_str}"
+                )
+            if action == 2 and whale_s >= 0 and flow_s >= 0:
+                return 0, confidence, (
+                    f"❌ Blocked {action_names[action]}: Volume is bullish or flat "
+                    f"(Whale={whale_s:+.2f}, Flow={flow_s:+.2f}) | {detail_str}"
+                )
         
         return action, confidence, (
             f"✅ {action_names[action]} approved: confidence={confidence:.2f} "
@@ -598,9 +626,8 @@ class MultiAssetTradingBot:
                             tp_pct *= 1.5  # Let winners run in trend
                             logger.info(f"📊 TRENDING_UP regime: widened TP by 1.5x")
                         elif regime_name == 'ranging':
-                            sl_pct *= 0.8  # Tighter stops in range
-                            tp_pct *= 0.8
-                            logger.info(f"📊 RANGING regime: tightened SL/TP by 0.8x")
+                            sl_pct *= 1.5  # Wider stops in range to avoid getting chopped by noise
+                            logger.info(f"📊 RANGING regime: widened SL by 1.5x to avoid chop")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
                     
@@ -663,9 +690,8 @@ class MultiAssetTradingBot:
                             tp_pct *= 1.5  # Let winners run in downtrend
                             logger.info(f"📊 TRENDING_DOWN regime: widened TP by 1.5x")
                         elif regime_name == 'ranging':
-                            sl_pct *= 0.8
-                            tp_pct *= 0.8
-                            logger.info(f"📊 RANGING regime: tightened SL/TP by 0.8x")
+                            sl_pct *= 1.5
+                            logger.info(f"📊 RANGING regime: widened SL by 1.5x to avoid chop")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
                     
