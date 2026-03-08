@@ -41,6 +41,7 @@ from src.features.on_chain_whales import OnChainWhaleWatcher
 from src.data.storage import get_storage
 from src.models.price_forecaster import TFTForecaster
 from src.models.confidence_engine import ConfidenceEngine
+from src.api.portfolio_manager import GlobalPortfolioManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +65,7 @@ class MultiAssetTradingBot:
         dry_run: bool = True,
         initial_balance: float = 10000,
         position_size: float = 0.25,  # 25% of balance per trade (was 50%)
+        portfolio_manager = None,
     ):
         self.symbol = symbol
         self.dry_run = dry_run
@@ -71,6 +73,7 @@ class MultiAssetTradingBot:
         self.balance = initial_balance
         self.last_equity = initial_balance
         self.position_size = position_size
+        self.portfolio_manager = portfolio_manager
         
         self.position = 0  # 1 = long, -1 = short, 0 = flat
         self.position_price = 0.0
@@ -81,6 +84,8 @@ class MultiAssetTradingBot:
         self.highest_price = 0.0
         self.lowest_price = 0.0
         self.base_trailing_pct = 0.0
+        
+        self.pending_orders: List[Dict] = []
         
         self.trades: List[Dict] = []
         self.realized_pnl = 0.0
@@ -604,8 +609,15 @@ class MultiAssetTradingBot:
                 trade["pnl"] = pnl
                 self.position = 0
                 self.position_units = 0
+                self.pending_orders.clear() # Cancel any pending limit orders
+                if self.portfolio_manager:
+                    self.portfolio_manager.clear_position(self.symbol)
             elif self.position == 0:
                 # Open long (Phase 11.6 Confidence Scaling)
+                if self.portfolio_manager and not self.portfolio_manager.can_open_position(self.symbol, 1):
+                    logger.info(f"🚫 LONG blocked for {self.symbol} by Global Portfolio Manager (Correlation Limit).")
+                    return None
+                    
                 base_trade_value = self.balance * self.position_size
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
                 
@@ -613,18 +625,33 @@ class MultiAssetTradingBot:
                     logger.info(f"🚫 LONG blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
                     return None
                 
-                self.position_units = scaled_trade_value / current_price
+                # Split-Entry Execution (Scale-In)
+                market_trade_value = scaled_trade_value * 0.50
+                limit_trade_value = scaled_trade_value * 0.50
+                limit_price = current_price * 0.995 # 0.5% dip
+                
+                self.position_units = market_trade_value / current_price
                 self.position_price = current_price
                 self.position = 1
-                self.balance -= scaled_trade_value
-                trade["action"] = "OPEN_LONG"
+                self.balance -= market_trade_value
+                
+                self.pending_orders.append({
+                    "type": "LIMIT_LONG",
+                    "target_price": limit_price,
+                    "value": limit_trade_value
+                })
+                
+                trade["action"] = "OPEN_LONG_SPLIT"
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
                 
-                # Calculate SL/TP for LONG position (regime-adaptive)
+                if self.portfolio_manager:
+                    self.portfolio_manager.register_position(self.symbol, 1)
+                
+                # Calculate SL/TP for LONG position (structural)
                 try:
                     df = self.fetch_data(days=3)
-                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "long")
+                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "long")
                     
                     # Regime-adaptive adjustments
                     try:
@@ -668,8 +695,15 @@ class MultiAssetTradingBot:
                 trade["pnl"] = pnl
                 self.position = 0
                 self.position_units = 0
+                self.pending_orders.clear() # Cancel pending limit orders
+                if self.portfolio_manager:
+                    self.portfolio_manager.clear_position(self.symbol)
             elif self.position == 0:
                 # Open short (Phase 11.6 Confidence Scaling)
+                if self.portfolio_manager and not self.portfolio_manager.can_open_position(self.symbol, -1):
+                    logger.info(f"🚫 SHORT blocked for {self.symbol} by Global Portfolio Manager (Correlation Limit).")
+                    return None
+                    
                 base_trade_value = self.balance * self.position_size
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
                 
@@ -677,18 +711,33 @@ class MultiAssetTradingBot:
                     logger.info(f"🚫 SHORT blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
                     return None
                 
-                self.position_units = scaled_trade_value / current_price
+                # Split-Entry Execution (Scale-In)
+                market_trade_value = scaled_trade_value * 0.50
+                limit_trade_value = scaled_trade_value * 0.50
+                limit_price = current_price * 1.005 # Catch 0.5% wick up
+                
+                self.position_units = market_trade_value / current_price
                 self.position_price = current_price
                 self.position = -1
-                self.balance -= scaled_trade_value
-                trade["action"] = "OPEN_SHORT"
+                self.balance -= market_trade_value
+                
+                self.pending_orders.append({
+                    "type": "LIMIT_SHORT",
+                    "target_price": limit_price,
+                    "value": limit_trade_value
+                })
+                
+                trade["action"] = "OPEN_SHORT_SPLIT"
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
                 
-                # Calculate SL/TP for SHORT position (regime-adaptive)
+                if self.portfolio_manager:
+                    self.portfolio_manager.register_position(self.symbol, -1)
+                
+                # Calculate SL/TP for SHORT position (structural)
                 try:
                     df = self.fetch_data(days=3)
-                    sl_pct, tp_pct = self.risk_manager.get_adaptive_sl_tp(df, "short")
+                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "short")
                     
                     # Regime-adaptive adjustments
                     try:
@@ -735,6 +784,37 @@ class MultiAssetTradingBot:
         
         current_price = float(df.iloc[-1]['close'])
         self.current_price = current_price # Update stored price
+        
+        # Check and Fill Pending Limit Orders (Split-Entry Scaling)
+        if self.pending_orders and self.position != 0:
+            filled_orders = []
+            for order in self.pending_orders:
+                is_filled = False
+                
+                if order["type"] == "LIMIT_LONG" and self.position == 1:
+                    if current_price <= order["target_price"]:
+                        is_filled = True
+                elif order["type"] == "LIMIT_SHORT" and self.position == -1:
+                    if current_price >= order["target_price"]:
+                        is_filled = True
+                        
+                if is_filled:
+                    # Execute second half of position
+                    units_added = order["value"] / current_price
+                    total_units = self.position_units + units_added
+                    
+                    # Calculate new average entry price
+                    total_value = (self.position_units * self.position_price) + (units_added * current_price)
+                    self.position_price = total_value / total_units
+                    self.position_units = total_units
+                    self.balance -= order["value"]
+                    
+                    logger.info(f"🎯 LIMIT FILLED for {self.symbol}: Added {units_added:.4f} units @ ${current_price:.2f}. New Avg Entry: ${self.position_price:.2f}")
+                    filled_orders.append(order)
+                    
+            # Remove filled orders
+            for f_order in filled_orders:
+                self.pending_orders.remove(f_order)
         
         # Check SL/TP Hits first
         if self.position != 0:
@@ -965,6 +1045,9 @@ class MultiAssetOrchestrator:
         self.symbols = symbols
         self.dry_run = dry_run
         
+        # Initialize Cross-Asset Correlation Manager
+        self.portfolio_manager = GlobalPortfolioManager()
+        
         # Create bots
         self.bots: Dict[str, MultiAssetTradingBot] = {}
         for symbol in symbols:
@@ -972,6 +1055,7 @@ class MultiAssetOrchestrator:
                 symbol=symbol,
                 dry_run=dry_run,
                 initial_balance=balance_per_asset,
+                portfolio_manager=self.portfolio_manager,
             )
             # Force GC after each heavy model load
             import gc

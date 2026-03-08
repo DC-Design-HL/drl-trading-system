@@ -118,6 +118,80 @@ class AdaptiveRiskManager:
         except Exception as e:
             logger.warning(f"Failed to calc ATR-based SL/TP: {e}. Using base defaults.")
             return self.base_sl_pct, self.base_tp_pct
+
+    def get_structural_sl_tp(self, df: pd.DataFrame, trade_type: str = "long") -> Tuple[float, float]:
+        """
+        Calculate Structural SL/TP using VWAP and recent swing highs/lows.
+        Places the stop loss just beyond the nearest structural support/resistance
+        to prevent being wicked out by noise.
+        """
+        if len(df) < 24:
+            return self.get_adaptive_sl_tp(df, trade_type)
+            
+        current_price = df['close'].iloc[-1]
+        
+        try:
+            # 1. Calculate VWAP (approximate support/resistance)
+            # typical price = (H+L+C)/3
+            tp = (df['high'] + df['low'] + df['close']) / 3
+            vwap = (tp * df['volume']).sum() / df['volume'].sum() if df['volume'].sum() > 0 else current_price
+            
+            # 2. Get local swings (last 24 periods)
+            recent_low = df['low'].tail(24).min()
+            recent_high = df['high'].tail(24).max()
+            
+            # 3. Calculate ATR for a small buffer (0.5x ATR buffer past structure)
+            atr = self.calculate_atr(df)
+            buffer = atr * 0.5
+            
+            if trade_type == "long":
+                # For LONG: SL should be slightly below the nearest structure (VWAP or Swing Low)
+                # Pick whichever is closer to the current price, but below it.
+                structures_below = [p for p in [vwap, recent_low] if p < current_price]
+                
+                if structures_below:
+                    nearest_support = max(structures_below) # highest support below us
+                    sl_price = nearest_support - buffer
+                else:
+                    sl_price = current_price - (atr * 2.5) # fallback
+                
+                # Convert price to percentage Drop
+                sl_pct = (current_price - sl_price) / current_price
+                
+                # TP: Target the recent high, or default 4x ATR
+                tp_price = max(recent_high, current_price + (atr * 4))
+                tp_pct = (tp_price - current_price) / current_price
+                
+            else: # SHORT
+                # For SHORT: SL slightly above nearest structural resistance
+                structures_above = [p for p in [vwap, recent_high] if p > current_price]
+                
+                if structures_above:
+                    nearest_resistance = min(structures_above) # lowest resistance above us
+                    sl_price = nearest_resistance + buffer
+                else:
+                    sl_price = current_price + (atr * 2.5) # fallback
+                    
+                # Convert price to percentage Rise
+                sl_pct = (sl_price - current_price) / current_price
+                
+                # TP: Target recent low, or default 4x ATR
+                tp_price = min(recent_low, current_price - (atr * 4))
+                tp_pct = (current_price - tp_price) / current_price
+                
+            # Hard safety limits (e.g. max 4%, min 1%)
+            sl_pct = np.clip(sl_pct, self.min_sl_pct, self.max_sl_pct)
+            tp_pct = np.clip(tp_pct, self.min_tp_pct, self.max_tp_pct)
+            
+            logger.info(
+                f"🏛️ Structural SL/TP (VWAP: ${vwap:.2f}): "
+                f"SL={sl_pct:.2%} (${sl_price:.2f}), TP={tp_pct:.2%} (${tp_price:.2f})"
+            )
+            return sl_pct, tp_pct
+            
+        except Exception as e:
+            logger.warning(f"Failed to calc Structural SL/TP: {e}. Falling back to ATR.")
+            return self.get_adaptive_sl_tp(df, trade_type)
     
     def calculate_kelly_fraction(self) -> float:
         """
