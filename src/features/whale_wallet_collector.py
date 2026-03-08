@@ -21,6 +21,7 @@ from src.features.whale_wallet_registry import (
     WhaleWallet,
     get_wallets_by_chain,
     get_all_wallets,
+    get_address_context,
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,8 @@ class EthereumCollector(BaseCollector):
                         direction = "unknown"
                         counterparty = ""
 
+                    context = get_address_context(counterparty, self.chain)
+
                     all_new_txns.append(
                         {
                             "hash": tx_hash,
@@ -177,6 +180,7 @@ class EthereumCollector(BaseCollector):
                             "direction": direction,
                             "value": value_eth,
                             "counterparty": counterparty,
+                            "context": context,
                             "gas_used": int(tx.get("gasUsed", 0)),
                         }
                     )
@@ -300,6 +304,7 @@ class SolanaCollector(BaseCollector):
                     # Parse native SOL transfers
                     native_transfers = tx.get("nativeTransfers", [])
                     sol_change = 0.0
+                    counterparty = ""
 
                     for nt in native_transfers:
                         from_addr = nt.get("fromUserAccount", "")
@@ -309,14 +314,19 @@ class SolanaCollector(BaseCollector):
 
                         if to_addr == wallet.address:
                             sol_change += amount_sol
+                            if from_addr and from_addr != wallet.address:
+                                counterparty = from_addr
                         elif from_addr == wallet.address:
                             sol_change -= amount_sol
+                            if to_addr and to_addr != wallet.address:
+                                counterparty = to_addr
 
                     # Skip transactions with no SOL movement
                     if abs(sol_change) < 0.001:
                         continue
 
                     direction = "in" if sol_change > 0 else "out"
+                    context = get_address_context(counterparty, self.chain)
 
                     all_new_txns.append({
                         "hash": tx_sig,
@@ -324,7 +334,8 @@ class SolanaCollector(BaseCollector):
                         "direction": direction,
                         "value": abs(sol_change),
                         "tx_type": tx_type,
-                        "counterparty": "",
+                        "counterparty": counterparty,
+                        "context": context,
                     })
 
                 # Pagination: use last signature as cursor
@@ -395,6 +406,7 @@ class SolanaCollector(BaseCollector):
                         "timestamp": sig_info.get("blockTime", 0),
                         "direction": "unknown",
                         "value": 0,
+                        "context": "unknown",
                     })
                 if new_txns:
                     data["transactions"].extend(new_txns)
@@ -519,6 +531,8 @@ class XRPLCollector(BaseCollector):
                         direction = "unknown"
                         counterparty = ""
 
+                    context = get_address_context(counterparty, self.chain)
+
                     # Parse timestamp (ripple epoch = 946684800)
                     ripple_time = tx.get("date", 0)
                     unix_time = ripple_time + 946684800 if ripple_time else 0
@@ -534,6 +548,7 @@ class XRPLCollector(BaseCollector):
                             "direction": direction,
                             "value": xrp_value,
                             "counterparty": counterparty,
+                            "context": context,
                         }
                     )
 

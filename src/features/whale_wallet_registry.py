@@ -218,3 +218,14 @@ def get_all_wallets() -> Dict[str, List[WhaleWallet]]:
 def get_wallet_addresses(chain: str) -> List[str]:
     """Get just the addresses for a chain."""
     return [w.address for w in get_wallets_by_chain(chain)]
+
+def get_address_context(address: str, chain: str) -> str:
+    """Return the context of an address (e.g., 'exchange', 'institution', 'unknown')."""
+    if not address:
+        return "unknown"
+    address = address.lower()
+    wallets = get_wallets_by_chain(chain)
+    for w in wallets:
+        if w.address.lower() == address:
+            return w.wallet_type
+    return "unknown"

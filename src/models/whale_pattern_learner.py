@@ -82,6 +82,7 @@ class WhalePatternLearner:
                     continue
                 value = tx.get("value", 0)
                 direction = tx.get("direction", "unknown")
+                context = tx.get("context", "unknown")
 
                 # Signed flow: positive = inflow, negative = outflow
                 signed_value = value if direction == "in" else -value
@@ -91,6 +92,7 @@ class WhalePatternLearner:
                     "value": value,
                     "signed_value": signed_value,
                     "direction": direction,
+                    "context": context,
                     "wallet_idx": w_idx,
                     "wallet_label": wallet_label,
                 })
@@ -155,6 +157,23 @@ class WhalePatternLearner:
             hourly["large_tx_flow"] = 0
             hourly["large_tx_count"] = 0
             hourly["large_tx_ratio"] = 0
+
+        # ── Contextual Flow Features ──
+        for ctx in ["exchange", "institution", "accumulator"]:
+            # Money sent TO ctx (bearish if exchange, bullish if cold storage/staking)
+            mask_out = (df["direction"] == "out") & (df["context"] == ctx)
+            hourly[f"to_{ctx}_flow"] = (
+                df.loc[mask_out, "value"]
+                .resample("1h").sum()
+                .reindex(hourly.index, fill_value=0)
+            )
+            # Money received FROM ctx
+            mask_in = (df["direction"] == "in") & (df["context"] == ctx)
+            hourly[f"from_{ctx}_flow"] = (
+                df.loc[mask_in, "value"]
+                .resample("1h").sum()
+                .reindex(hourly.index, fill_value=0)
+            )
 
         # ── Per-wallet flow features (top 5 wallets) ──
         unique_wallets = sorted(df["wallet_idx"].unique())[:5]
