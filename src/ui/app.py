@@ -1627,9 +1627,73 @@ def main():
                 return '+' if val >= 0 else ''
             
             # ─── Build the Live Portfolio HTML ───
-            # Equity curve data for Chart.js
-            eq_labels = list(range(len(equity_points)))
+            # Equity curve data for SVG chart (pure inline, no CDN)
             eq_pct = [(p / initial_capital) * 100 if initial_capital > 0 else 0 for p in equity_points]
+            
+            # Build SVG polyline points
+            svg_w = 900
+            svg_h = 160
+            n_points = len(eq_pct)
+            eq_min_val = min(eq_pct) if eq_pct else 0
+            eq_max_val = max(eq_pct) if eq_pct else 0
+            eq_range_val = max(abs(eq_min_val), abs(eq_max_val), 0.01)
+            padding_y = 20  # vertical padding
+            
+            svg_points = []
+            svg_fill_points = []
+            for i, val in enumerate(eq_pct):
+                x = (i / max(n_points - 1, 1)) * svg_w
+                # Map value from [-range, +range] to [svg_h - padding, padding]
+                y = svg_h - padding_y - ((val + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
+                svg_points.append(f"{x:.1f},{y:.1f}")
+                svg_fill_points.append(f"{x:.1f},{y:.1f}")
+            
+            polyline_str = ' '.join(svg_points)
+            # Close the fill polygon at bottom
+            fill_points = svg_fill_points.copy()
+            if fill_points:
+                fill_points.append(f"{svg_w:.1f},{svg_h - padding_y:.1f}")
+                fill_points.append(f"0,{svg_h - padding_y:.1f}")
+            fill_str = ' '.join(fill_points)
+            
+            last_eq = eq_pct[-1] if eq_pct else 0
+            line_color = '#00e676' if last_eq >= 0 else '#ff5252'
+            fill_color_start = 'rgba(0,230,118,0.3)' if last_eq >= 0 else 'rgba(255,82,82,0.3)'
+            fill_color_end = 'rgba(0,230,118,0.0)' if last_eq >= 0 else 'rgba(255,82,82,0.0)'
+            
+            # Zero line Y position
+            zero_y = svg_h - padding_y - ((0 + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
+            
+            # Last point for dot
+            last_x = svg_w if n_points <= 1 else ((n_points - 1) / max(n_points - 1, 1)) * svg_w
+            last_y = svg_h - padding_y - ((last_eq + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
+            
+            # Y-axis labels
+            top_label = f"+{eq_range_val:.1f}%"
+            bot_label = f"-{eq_range_val:.1f}%"
+            
+            svg_chart = f'''
+                <svg width="100%" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="none" style="display:block;">
+                    <defs>
+                        <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stop-color="{fill_color_start}"/>
+                            <stop offset="100%" stop-color="{fill_color_end}"/>
+                        </linearGradient>
+                    </defs>
+                    <!-- Zero line -->
+                    <line x1="0" y1="{zero_y:.1f}" x2="{svg_w}" y2="{zero_y:.1f}" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4,4"/>
+                    <!-- Fill area -->
+                    <polygon points="{fill_str}" fill="url(#eqGrad)"/>
+                    <!-- Line -->
+                    <polyline points="{polyline_str}" fill="none" stroke="{line_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <!-- Last point dot -->
+                    <circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="4" fill="{line_color}" stroke="#fff" stroke-width="1.5"/>
+                    <!-- Labels -->
+                    <text x="{svg_w - 5}" y="{padding_y + 4}" fill="#8b949e" font-size="10" text-anchor="end" font-family="monospace">{top_label}</text>
+                    <text x="{svg_w - 5}" y="{svg_h - padding_y + 12}" fill="#8b949e" font-size="10" text-anchor="end" font-family="monospace">{bot_label}</text>
+                    <text x="5" y="{zero_y - 4:.1f}" fill="#555" font-size="9" font-family="monospace">0%</text>
+                </svg>
+            '''
             
             # Build asset rows HTML
             asset_rows_html = ''
@@ -1679,7 +1743,7 @@ def main():
                     worst_html = '<span style="color:#555;">—</span>'
                 
                 asset_rows_html += f'''
-                <tr>
+                <tr style="border-bottom:1px solid #1a1e2a;">
                     <td style="padding:14px 16px;font-weight:600;color:#fff;font-size:13px;">
                         {row['symbol']}
                     </td>
@@ -1700,11 +1764,6 @@ def main():
                     </td>
                 </tr>
                 '''
-            
-            # Min/Max for equity chart
-            eq_min = min(eq_pct) if eq_pct else 0
-            eq_max = max(eq_pct) if eq_pct else 0
-            eq_range = max(abs(eq_min), abs(eq_max), 0.01)
             
             portfolio_html = f'''
             <div style="
@@ -1750,11 +1809,11 @@ def main():
                     </div>
                 </div>
                 
-                <!-- Equity Curve -->
+                <!-- Equity Curve (Pure SVG — no external deps) -->
                 <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:24px;">
                     <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:2px;">Equity Curve</div>
-                    <div style="color:#8b949e;font-size:11px;margin-bottom:16px;">Cumulative P&L from closed trades</div>
-                    <canvas id="equityChart" height="180"></canvas>
+                    <div style="color:#8b949e;font-size:11px;margin-bottom:12px;">Cumulative P&L from closed trades</div>
+                    {svg_chart}
                 </div>
                 
                 <!-- Asset Table -->
@@ -1782,92 +1841,9 @@ def main():
                     DRL Trading System · Signals from PPO + Composite Scoring · Connected to OKX
                 </div>
             </div>
-            
-            <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-            <script>
-                (function() {{
-                    var ctx = document.getElementById('equityChart').getContext('2d');
-                    var data = {eq_pct};
-                    var labels = {eq_labels};
-                    
-                    var gradient = ctx.createLinearGradient(0, 0, 0, 180);
-                    var lastVal = data[data.length - 1] || 0;
-                    if (lastVal >= 0) {{
-                        gradient.addColorStop(0, 'rgba(0, 230, 118, 0.25)');
-                        gradient.addColorStop(1, 'rgba(0, 230, 118, 0.0)');
-                    }} else {{
-                        gradient.addColorStop(0, 'rgba(255, 82, 82, 0.25)');
-                        gradient.addColorStop(1, 'rgba(255, 82, 82, 0.0)');
-                    }}
-                    
-                    new Chart(ctx, {{
-                        type: 'line',
-                        data: {{
-                            labels: labels,
-                            datasets: [{{
-                                data: data,
-                                borderColor: lastVal >= 0 ? '#00e676' : '#ff5252',
-                                borderWidth: 2,
-                                backgroundColor: gradient,
-                                fill: true,
-                                tension: 0.3,
-                                pointRadius: function(ctx) {{
-                                    return ctx.dataIndex === data.length - 1 ? 4 : 0;
-                                }},
-                                pointBackgroundColor: lastVal >= 0 ? '#00e676' : '#ff5252',
-                                pointBorderColor: '#fff',
-                                pointBorderWidth: 1,
-                            }}]
-                        }},
-                        options: {{
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: {{
-                                legend: {{ display: false }},
-                                tooltip: {{
-                                    backgroundColor: '#1e222d',
-                                    titleColor: '#fff',
-                                    bodyColor: '#ccc',
-                                    borderColor: '#333',
-                                    borderWidth: 1,
-                                    callbacks: {{
-                                        label: function(ctx) {{
-                                            return ctx.parsed.y >= 0 ? '+' + ctx.parsed.y.toFixed(2) + '%' : ctx.parsed.y.toFixed(2) + '%';
-                                        }}
-                                    }}
-                                }}
-                            }},
-                            scales: {{
-                                x: {{
-                                    display: false,
-                                }},
-                                y: {{
-                                    grid: {{
-                                        color: 'rgba(255,255,255,0.05)',
-                                        drawBorder: false,
-                                    }},
-                                    ticks: {{
-                                        color: '#8b949e',
-                                        font: {{ size: 10 }},
-                                        callback: function(value) {{
-                                            return (value >= 0 ? '+' : '') + value.toFixed(1) + '%';
-                                        }}
-                                    }},
-                                    suggestedMin: -{eq_range * 1.2:.2f},
-                                    suggestedMax: {eq_range * 1.2:.2f},
-                                }}
-                            }},
-                            interaction: {{
-                                intersect: false,
-                                mode: 'index'
-                            }}
-                        }}
-                    }});
-                }})();
-            </script>
             '''
             
-            components.html(portfolio_html, height=700, scrolling=True)
+            components.html(portfolio_html, height=850, scrolling=True)
 
         with tab_portfolio:
             st.markdown("### 📋 Multi-Asset Portfolio Overview")
