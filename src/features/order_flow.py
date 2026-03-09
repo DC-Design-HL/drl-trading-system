@@ -62,6 +62,11 @@ class FundingRateAnalyzer:
         self.cache_duration = cache_duration
         self._last_fetch = 0
         self._cached_data = None
+        
+        # Open Interest tracking for liquidation cascade detection
+        self._oi_history: deque = deque(maxlen=24)  # Rolling 24 samples (~24 hours at 1h interval)
+        self._last_oi_fetch = 0
+        self._cached_oi = 0.0
 
         logger.info(f"💰 FundingRateAnalyzer initialized for {symbol}")
 
@@ -182,6 +187,101 @@ class FundingRateAnalyzer:
             return True, f"Funding favors SHORT: {signal.rate:.4%} (longs paying)"
 
         return True, f"Funding neutral: {signal.rate:.4%}"
+
+    def _fetch_open_interest(self) -> float:
+        """Fetch current Open Interest from OKX."""
+        now = time.time()
+        if self._cached_oi > 0 and (now - self._last_oi_fetch) < self.cache_duration:
+            return self._cached_oi
+            
+        try:
+            base = self.symbol.replace('USDT', '')
+            okx_inst = f"{base}-USDT-SWAP"
+            url = "https://www.okx.com/api/v5/public/open-interest"
+            response = requests.get(
+                url,
+                params={"instId": okx_inst},
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('data'):
+                oi = float(data['data'][0].get('oi', 0))
+                self._cached_oi = oi
+                self._last_oi_fetch = now
+                
+                # Track rolling history
+                self._oi_history.append(oi)
+                logger.info(f"📈 OKX Open Interest for {okx_inst}: {oi:,.0f} contracts")
+                return oi
+        except Exception as e:
+            logger.warning(f"OKX OI fetch failed: {e}")
+        
+        return self._cached_oi if self._cached_oi > 0 else 0.0
+
+    def get_liquidation_danger(self) -> Dict:
+        """
+        Compute a Liquidation Danger Score.
+        
+        Combines:
+        - Funding Rate (how greedy is retail?)
+        - Open Interest spike (how loaded is the system?)
+        
+        Returns dict with:
+          - danger_score: 0.0 (safe) to 1.0 (extremely dangerous)
+          - long_danger: True if conditions favor a long squeeze
+          - short_danger: True if conditions favor a short squeeze
+          - reason: Human-readable explanation
+        """
+        funding_data = self._fetch_funding_rate()
+        rate = funding_data.get('rate', 0)
+        
+        oi = self._fetch_open_interest()
+        
+        # Calculate OI spike ratio (current vs rolling average)
+        oi_spike = 0.0
+        if len(self._oi_history) >= 3:
+            avg_oi = sum(list(self._oi_history)[:-1]) / (len(self._oi_history) - 1)
+            if avg_oi > 0:
+                oi_spike = (oi - avg_oi) / avg_oi  # e.g. 0.10 = 10% above average
+        
+        # Funding danger: how extreme is the funding rate?
+        funding_danger = min(abs(rate) / 0.001, 1.0)  # Normalize: 0.1% funding = max danger
+        
+        # OI danger: how much has OI spiked?
+        oi_danger = min(max(oi_spike, 0) / 0.15, 1.0)  # 15% OI spike = max danger
+        
+        # Combined danger score (weighted blend)
+        danger_score = 0.6 * funding_danger + 0.4 * oi_danger
+        danger_score = min(danger_score, 1.0)
+        
+        # Determine direction of danger
+        long_danger = rate > 0.00015 and danger_score > 0.5  # Greedy longs → long squeeze risk
+        short_danger = rate < -0.00015 and danger_score > 0.5  # Greedy shorts → short squeeze risk
+        
+        reason_parts = []
+        if funding_danger > 0.3:
+            reason_parts.append(f"Funding={rate:.4%}")
+        if oi_danger > 0.3:
+            reason_parts.append(f"OI_Spike={oi_spike:+.1%}")
+        reason = ", ".join(reason_parts) if reason_parts else "Normal"
+        
+        logger.info(
+            f"⚠️ Liquidation Danger [{self.symbol}]: score={danger_score:.2f} "
+            f"(funding={funding_danger:.2f}, oi={oi_danger:.2f}) "
+            f"long_danger={long_danger}, short_danger={short_danger}"
+        )
+        
+        return {
+            'danger_score': danger_score,
+            'long_danger': long_danger,
+            'short_danger': short_danger,
+            'funding_rate': rate,
+            'oi': oi,
+            'oi_spike': oi_spike,
+            'reason': reason,
+        }
 
 
 class OrderFlowAnalyzer:
@@ -499,6 +599,70 @@ class OrderFlowAnalyzer:
         self._cache_result = result
 
         return result
+
+    def detect_cvd_divergence(self, df: pd.DataFrame = None) -> Dict:
+        """
+        Detect CVD Divergence: price going up while volume delta goes down.
+        This signals hidden selling (whales limit-selling into retail buying)
+        and often precedes a sudden dump.
+        
+        Returns:
+            dict with divergence_detected (bool), direction, and details.
+        """
+        if df is None or len(df) < 20:
+            return {'divergence_detected': False, 'direction': 'none', 'price_trend': 'unknown', 'cvd_trend': 'unknown'}
+        
+        recent = df.tail(20)
+        
+        # Price trend: compare last 5 candles avg vs previous 5
+        price_recent = recent['close'].tail(5).mean()
+        price_prev = recent['close'].tail(10).head(5).mean()
+        price_change = (price_recent - price_prev) / price_prev
+        
+        if price_change > 0.002:  # 0.2% up
+            price_trend = 'bullish'
+        elif price_change < -0.002:
+            price_trend = 'bearish'
+        else:
+            price_trend = 'neutral'
+        
+        # CVD trend: same window
+        body = recent['close'] - recent['open']
+        range_size = recent['high'] - recent['low']
+        body_ratio = body / (range_size + 1e-10)
+        volume_delta = body_ratio * recent['volume']
+        
+        cvd_recent = volume_delta.tail(5).sum()
+        cvd_prev = volume_delta.tail(10).head(5).sum()
+        
+        if cvd_recent > cvd_prev * 1.1:
+            cvd_trend = 'bullish'
+        elif cvd_recent < cvd_prev * 0.9:
+            cvd_trend = 'bearish'
+        else:
+            cvd_trend = 'neutral'
+        
+        # Divergence: price up but CVD down (bearish divergence → dump incoming)
+        bearish_divergence = price_trend == 'bullish' and cvd_trend == 'bearish'
+        # Divergence: price down but CVD up (bullish divergence → pump incoming)
+        bullish_divergence = price_trend == 'bearish' and cvd_trend == 'bullish'
+        
+        divergence_detected = bearish_divergence or bullish_divergence
+        direction = 'bearish' if bearish_divergence else ('bullish' if bullish_divergence else 'none')
+        
+        if divergence_detected:
+            logger.warning(
+                f"⚡ CVD DIVERGENCE [{self.symbol}]: {direction.upper()} "
+                f"(price={price_trend}, cvd={cvd_trend}, Δprice={price_change:+.2%})"
+            )
+        
+        return {
+            'divergence_detected': divergence_detected,
+            'direction': direction,
+            'price_trend': price_trend,
+            'cvd_trend': cvd_trend,
+            'price_change': price_change,
+        }
 
     def get_signal(self, df: pd.DataFrame = None) -> OrderFlowSignal:
         """Get order flow signal (backward-compatible wrapper)."""

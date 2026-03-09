@@ -582,6 +582,40 @@ class MultiAssetTradingBot:
                     f"(Whale={whale_s:+.2f}, Flow={flow_s:+.2f}) | {detail_str}"
                 )
         
+        # ── LIQUIDATION DANGER VETO (Phase 4 — prevents manipulation flushes) ──
+        try:
+            liq_danger = self.funding_analyzer.get_liquidation_danger()
+            if action == 1 and liq_danger.get('long_danger', False):
+                return 0, 0.10, (
+                    f"🚫 Blocked BUY: LIQUIDATION DANGER — Longs at risk "
+                    f"(score={liq_danger['danger_score']:.2f}, {liq_danger['reason']}) | {detail_str}"
+                )
+            if action == 2 and liq_danger.get('short_danger', False):
+                return 0, 0.10, (
+                    f"🚫 Blocked SELL: LIQUIDATION DANGER — Shorts at risk "
+                    f"(score={liq_danger['danger_score']:.2f}, {liq_danger['reason']}) | {detail_str}"
+                )
+        except Exception as e:
+            logger.warning(f"Liquidation danger check failed: {e}")
+        
+        # ── CVD DIVERGENCE VETO (catches hidden whale selling/buying) ──
+        try:
+            cvd_div = self.order_flow.detect_cvd_divergence(df)
+            if cvd_div.get('divergence_detected', False):
+                div_dir = cvd_div['direction']
+                if action == 1 and div_dir == 'bearish':
+                    return 0, 0.15, (
+                        f"⚡ Blocked BUY: CVD DIVERGENCE — Price up but volume down "
+                        f"(Hidden selling detected) | {detail_str}"
+                    )
+                if action == 2 and div_dir == 'bullish':
+                    return 0, 0.15, (
+                        f"⚡ Blocked SELL: CVD DIVERGENCE — Price down but volume up "
+                        f"(Hidden buying detected) | {detail_str}"
+                    )
+        except Exception as e:
+            logger.warning(f"CVD divergence check failed: {e}")
+        
         return action, confidence, (
             f"✅ {action_names[action]} approved: confidence={confidence:.2f} "
             f"(composite={composite:+.3f}) | {detail_str}"
@@ -973,6 +1007,68 @@ class MultiAssetTradingBot:
             # Decision layer generated a signal override
             filtered_action = final_action
             reason = decision_reason
+        
+        # ━━━ CONVICTION COLLAPSE EMERGENCY EXIT ━━━━━━━━━━━━━━━━━━━━━━━━
+        # If we're in a position and the composite score DEEPLY reverses,
+        # exit immediately — don't wait for SL. This bypasses MIN_HOLD_SECONDS.
+        COLLAPSE_THRESHOLD = 0.40
+        composite = getattr(self, '_last_composite_score', 0)
+        
+        if self.position == 1 and composite < -COLLAPSE_THRESHOLD:
+            # LONG but market is now deeply bearish — emergency exit
+            logger.warning(
+                f"💀 CONVICTION COLLAPSE for {self.symbol}: LONG but composite={composite:+.3f} "
+                f"(threshold=-{COLLAPSE_THRESHOLD}). Emergency exit!"
+            )
+            trade = self.execute_trade(2, current_price)  # Sell to close
+            
+            total_equity = self.balance
+            self.last_equity = total_equity
+            
+            return {
+                "symbol": self.symbol,
+                "timestamp": datetime.now().isoformat(),
+                "price": current_price,
+                "raw_action": ["HOLD", "BUY", "SELL"][raw_action],
+                "filtered_action": "CLOSE_LONG",
+                "reason": f"💀 CONVICTION COLLAPSE (composite={composite:+.3f})",
+                "position": 0,
+                "balance": self.balance,
+                "equity": total_equity,
+                "realized_pnl": self.realized_pnl,
+                "unrealized_pnl": 0,
+                "trade": trade,
+                "sl": 0,
+                "tp": 0
+            }
+        
+        if self.position == -1 and composite > COLLAPSE_THRESHOLD:
+            # SHORT but market is now deeply bullish — emergency exit
+            logger.warning(
+                f"💀 CONVICTION COLLAPSE for {self.symbol}: SHORT but composite={composite:+.3f} "
+                f"(threshold=+{COLLAPSE_THRESHOLD}). Emergency exit!"
+            )
+            trade = self.execute_trade(1, current_price)  # Buy to close
+            
+            total_equity = self.balance
+            self.last_equity = total_equity
+            
+            return {
+                "symbol": self.symbol,
+                "timestamp": datetime.now().isoformat(),
+                "price": current_price,
+                "raw_action": ["HOLD", "BUY", "SELL"][raw_action],
+                "filtered_action": "CLOSE_SHORT",
+                "reason": f"💀 CONVICTION COLLAPSE (composite={composite:+.3f})",
+                "position": 0,
+                "balance": self.balance,
+                "equity": total_equity,
+                "realized_pnl": self.realized_pnl,
+                "unrealized_pnl": 0,
+                "trade": trade,
+                "sl": 0,
+                "tp": 0
+            }
         
         # --- Anti-overtrading guards ---
         now = time.time()
