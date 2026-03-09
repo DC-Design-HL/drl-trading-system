@@ -810,6 +810,10 @@ class WhaleTracker:
         # Signal history for debugging
         self.signal_history = deque(maxlen=100)
         
+        # Exchange reserve tracking (net exchange flow accumulator)
+        # Tracks running sum of flows TO/FROM exchanges
+        self._exchange_flow_history: deque = deque(maxlen=48)  # 48 samples (~48h)
+        
         logger.info(f"🐋 WhaleTracker initialized with 4+ FREE sources (min_confidence={min_confidence}, min_agreement={min_signal_agreement})")
 
     def start_stream(self):
@@ -821,6 +825,46 @@ class WhaleTracker:
         """Stop the real-time whale stream."""
         if hasattr(self, 'whale_stream'):
             self.whale_stream.stop()
+    
+    def _get_exchange_reserve_signal(self) -> float:
+        """
+        Compute exchange reserve delta signal from whale flow data.
+        
+        When assets LEAVE exchanges (net outflow) → BULLISH (supply squeeze)
+        When assets ENTER exchanges (net inflow) → BEARISH (dumping)
+        
+        Returns:
+            Signal from -1 (bearish, assets entering exchanges) to +1 (bullish, leaving)
+        """
+        try:
+            if not hasattr(self, 'whale_stream'):
+                return 0.0
+            
+            flow_metrics = self.whale_stream.get_metrics()
+            # Get directional flow: exchange_inflow means tokens going TO exchange
+            inflow = flow_metrics.get('exchange_inflow', 0)  # bearish
+            outflow = flow_metrics.get('exchange_outflow', 0)  # bullish
+            net_exchange_flow = outflow - inflow  # positive = leaving exchanges (bullish)
+            
+            # Track rolling history
+            self._exchange_flow_history.append(net_exchange_flow)
+            
+            # Compute rolling 24h net exchange flow
+            if len(self._exchange_flow_history) >= 3:
+                rolling_sum = sum(self._exchange_flow_history)
+                # Normalize: >$5M net outflow is a strong bullish signal
+                signal = float(np.clip(rolling_sum / 5_000_000, -1.0, 1.0))
+            else:
+                signal = 0.0
+            
+            if abs(signal) > 0.2:
+                direction = "OUTFLOW (bullish)" if signal > 0 else "INFLOW (bearish)"
+                logger.info(f"🏦 Exchange Reserve [{self.symbol}]: {direction}, signal={signal:+.2f}")
+            
+            return signal
+        except Exception as e:
+            logger.warning(f"Exchange reserve signal error: {e}")
+            return 0.0
         
     def get_whale_signals(self) -> Dict:
         """
@@ -899,21 +943,30 @@ class WhaleTracker:
             try:
                 wp_data = self.whale_pattern_predictor.get_signal(self.symbol)
                 signals_raw['whale_patterns'] = wp_data.get('signal', 0)
-                logger.info(f"🧠 Whale Pattern: signal={wp_data.get('signal', 0):.3f}, confidence={wp_data.get('confidence', 0):.3f}")
+                accuracy_mult = wp_data.get('accuracy_multiplier', 1.0)
+                logger.info(f"🧠 Whale Pattern: signal={wp_data.get('signal', 0):.3f}, confidence={wp_data.get('confidence', 0):.3f}, accuracy={accuracy_mult:.2f}x")
             except Exception as e:
                 logger.error(f"Error getting whale patterns: {e}")
                 signals_raw['whale_patterns'] = None
         else:
             signals_raw['whale_patterns'] = None
+        
+        # 6. Exchange Reserve Delta (net flow to/from exchanges)
+        try:
+            signals_raw['exchange_reserve'] = self._get_exchange_reserve_signal()
+        except Exception as e:
+            logger.error(f"Error getting exchange reserve: {e}")
+            signals_raw['exchange_reserve'] = None
             
         # Calculate weighted score
         weights = {
-            'flow': 0.25,            # Real-time whale buying/selling
-            'binance_ls': 0.15,      # Smart money positioning (imbalance)
-            'oi_trend': 0.10,        # Smart money interest
-            'large_txns': 0.10,      # Whale activity
-            'fear_greed': 0.10,      # Market sentiment
-            'whale_patterns': 0.30,  # Learned whale wallet patterns
+            'flow': 0.20,             # Real-time whale buying/selling
+            'binance_ls': 0.12,       # Smart money positioning (imbalance)
+            'oi_trend': 0.08,         # Smart money interest
+            'large_txns': 0.08,       # Whale activity
+            'fear_greed': 0.07,       # Market sentiment
+            'whale_patterns': 0.30,   # Learned whale wallet patterns
+            'exchange_reserve': 0.15, # Exchange reserve delta (NEW)
         }
         
         total_weight = 0
@@ -994,6 +1047,7 @@ class WhaleTracker:
             'high_confidence': high_confidence,
             'recommendation': recommendation,
             'squeeze_status': squeeze_status,
+            'exchange_reserve': signals_raw.get('exchange_reserve', 0) or 0,
             'timestamp': datetime.now().isoformat(),
             'flow_metrics': getattr(self, 'last_flow_metrics', {})  # Expose real-time flow data
         }

@@ -132,6 +132,25 @@ class WhalePatternLearner:
         hourly["flow_7d"] = hourly["net_flow"].rolling(168, min_periods=1).sum()
         hourly["flow_acceleration"] = hourly["flow_24h"].diff(6).fillna(0)
 
+        # ── Time-Decay Weighted Flow (Whale Velocity) ──
+        # Recent whale moves are MUCH more predictive than older ones.
+        # Exponential decay: half-life = 6 hours → recent 2h have ~5x weight of 12h-old
+        decay_half_life = 6  # hours
+        decay_lambda = np.log(2) / decay_half_life
+
+        if len(hourly) > 1:
+            hours_ago = np.arange(len(hourly))[::-1].astype(float)
+            decay_weights = np.exp(-decay_lambda * hours_ago)
+
+            hourly["decay_weighted_flow"] = hourly["net_flow"] * decay_weights
+            hourly["decay_flow_cum"] = hourly["decay_weighted_flow"].rolling(24, min_periods=1).sum()
+            # Whale velocity: rate of change of time-decayed flow
+            hourly["whale_velocity"] = hourly["decay_flow_cum"].diff(3).fillna(0)
+        else:
+            hourly["decay_weighted_flow"] = hourly["net_flow"]
+            hourly["decay_flow_cum"] = hourly["net_flow"]
+            hourly["whale_velocity"] = 0
+
         # ── Transaction size classification ──
         if len(df) > 10:
             value_75th = df["value"].quantile(0.75)

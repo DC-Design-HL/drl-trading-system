@@ -47,6 +47,9 @@ class WhalePatternPredictor:
         self.prediction_cache = {}
         self.prediction_cache_time = 0
 
+        # Wallet accuracy weights (computed from trained models)
+        self.wallet_accuracy: Dict[str, Dict[str, float]] = {}  # chain -> {wallet_idx: accuracy}
+
         # Asset-to-chain mapping
         self.asset_chain_map = {
             "ETHUSDT": "ETH",
@@ -57,6 +60,8 @@ class WhalePatternPredictor:
 
         # Load models
         self._load_models()
+        # Compute accuracy weights from loaded models
+        self._compute_wallet_accuracy_weights()
 
     def _load_models(self):
         """Load trained whale pattern models for each chain."""
@@ -105,6 +110,48 @@ class WhalePatternPredictor:
 
         except Exception as e:
             logger.error(f"Whale collection error: {e}")
+
+    def _compute_wallet_accuracy_weights(self):
+        """
+        Rank wallets by historical prediction accuracy using impact features
+        from trained models. Wallets with >55% hit rate get boosted weight.
+        """
+        for chain, learner in self.learners.items():
+            try:
+                wallets = learner._load_wallet_data()
+                if not wallets:
+                    continue
+
+                # Use impact features if model has them cached
+                impact = getattr(learner, '_cached_impact_features', {})
+                if not impact:
+                    # Try to compute from stored data
+                    price_data = learner._fetch_price_data(days=30)
+                    if price_data is not None and not price_data.empty:
+                        price_hourly = price_data['close'].resample('1h').last().dropna()
+                        if hasattr(price_hourly.index, 'tz') and price_hourly.index.tz is not None:
+                            price_hourly.index = price_hourly.index.tz_convert(None)
+                        impact = learner._compute_price_impact_features(wallets, price_hourly)
+
+                accuracy = {}
+                for w_idx in range(5):
+                    hit_rate_key = f"w{w_idx}_hit_rate"
+                    if hit_rate_key in impact:
+                        hr = impact[hit_rate_key]
+                        # Scale: 0.50 (random) → weight 1.0, 0.70 → weight 2.0
+                        weight = max(0.5, 1.0 + (hr - 0.50) * 5.0)
+                        accuracy[f"w{w_idx}"] = min(weight, 3.0)  # Cap at 3x
+                    else:
+                        accuracy[f"w{w_idx}"] = 1.0  # Default weight
+
+                self.wallet_accuracy[chain] = accuracy
+                logger.info(
+                    f"🎯 Wallet accuracy computed for {chain}: "
+                    f"{', '.join(f'{k}={v:.2f}x' for k, v in accuracy.items())}"
+                )
+            except Exception as e:
+                logger.warning(f"Wallet accuracy computation failed for {chain}: {e}")
+                self.wallet_accuracy[chain] = {}
 
     def get_signal(self, symbol: str = "BTCUSDT") -> Dict:
         """
@@ -174,13 +221,32 @@ class WhalePatternPredictor:
 
             # Predict
             prediction = learner.predict(hourly)
+            raw_signal = prediction.get("signal", 0.0)
+            raw_confidence = prediction.get("confidence", 0.0)
+
+            # Apply wallet accuracy weighting
+            # If accurate wallets drove this signal, boost it; if random wallets, dampen it
+            accuracy_weights = self.wallet_accuracy.get(chain, {})
+            if accuracy_weights and raw_signal != 0:
+                # Compute average accuracy multiplier across tracked wallets
+                weights_list = list(accuracy_weights.values())
+                avg_accuracy_mult = sum(weights_list) / len(weights_list) if weights_list else 1.0
+                # Apply: accurate wallets (>1.0x) boost the signal
+                adjusted_signal = float(np.clip(raw_signal * avg_accuracy_mult, -1.0, 1.0))
+                adjusted_confidence = min(raw_confidence * min(avg_accuracy_mult, 1.5), 1.0)
+            else:
+                adjusted_signal = raw_signal
+                adjusted_confidence = raw_confidence
+
             result = {
-                "signal": prediction.get("signal", 0.0),
-                "confidence": prediction.get("confidence", 0.0),
+                "signal": adjusted_signal,
+                "confidence": adjusted_confidence,
                 "chain": chain,
                 "status": prediction.get("status", "unknown"),
                 "n_wallets": len(wallets),
                 "n_hours": len(hourly),
+                "raw_signal": raw_signal,
+                "accuracy_multiplier": avg_accuracy_mult if accuracy_weights else 1.0,
             }
 
             self.prediction_cache[cache_key] = (now, result)
