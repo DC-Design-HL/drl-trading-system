@@ -1729,6 +1729,7 @@ def main():
                 pnl_val = row['pnl']
                 pnl_pct = (pnl_val / (initial_capital / max(len(asset_rows), 1))) * 100 if initial_capital > 0 else 0
                 pnl_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;">{pnl_sign(pnl_val)}{pnl_pct:.2f}%</span>'
+                pnl_dollar_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;font-family:monospace;">{pnl_sign(pnl_val)}${abs(pnl_val):,.2f}</span>'
                 
                 # Trades
                 trades_str = str(row['trades'])
@@ -1770,6 +1771,7 @@ def main():
                     <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['price']:,.2f}</td>
                     <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['equity']:,.2f}</td>
                     <td style="padding:14px 16px;">{pnl_html}</td>
+                    <td style="padding:14px 16px;">{pnl_dollar_html}</td>
                     <td style="padding:14px 16px;color:#ccc;font-size:13px;">{trades_str}</td>
                     <td style="padding:14px 16px;min-width:100px;">{wr_html}</td>
                     <td style="padding:14px 16px;">{best_html}</td>
@@ -1780,7 +1782,7 @@ def main():
             if not asset_rows_html:
                 asset_rows_html = '''
                 <tr>
-                    <td colspan="9" style="padding:30px;text-align:center;color:#555;font-size:14px;">
+                    <td colspan="10" style="padding:30px;text-align:center;color:#555;font-size:14px;">
                         No trades recorded yet. Start the trading bot to see portfolio data.
                     </td>
                 </tr>
@@ -1872,7 +1874,8 @@ def main():
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Status</th>
                                 <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Price</th>
                                 <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Equity</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL (%)</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL ($)</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Trades</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Win Rate</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Best</th>
