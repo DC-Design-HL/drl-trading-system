@@ -1344,8 +1344,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_portfolio, tab_performance, tab_whales, tab_backtest = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📋 Portfolio Details", "📈 Performance", "🐋 On-Chain Whales", "🔬 Backtest"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_backtest = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🔬 Backtest"
         ])
         
         with tab_chart:
@@ -1598,10 +1598,16 @@ def main():
                 if sym.endswith('USDT'):
                     display_sym = sym[:-4] + ' /USDT'
                 
+                # Get price / equity from raw state
+                sym_price = raw_assets.get(sym, {}).get('price', 0)
+                sym_equity = raw_assets.get(sym, {}).get('equity', raw_assets.get(sym, {}).get('balance', 0))
+                
                 asset_rows.append({
                     'symbol': display_sym,
                     'raw_symbol': sym,
                     'status': sym_status,
+                    'price': sym_price,
+                    'equity': sym_equity,
                     'pnl': sym_realized + sym_open_pnl,
                     'trades': sym_closed + (1 if sym_status != 'FLAT' else 0),
                     'open_trades': 1 if sym_status != 'FLAT' else 0,
@@ -1618,6 +1624,19 @@ def main():
             open_pct = (open_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
             overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
             total_trades_count = total_closed_trades + total_open_trades
+            
+            # Dollar values from state
+            lp_total_balance = state.get('total_balance', state.get('balance', 0))
+            lp_active_assets_count = len(state.get('available_assets', []))
+            lp_grand_total_pnl = lp_total_balance - initial_capital
+            if lp_grand_total_pnl < -0.9 * initial_capital:
+                lp_grand_total_pnl = state.get('realized_pnl', 0)
+            
+            # System status
+            is_online = check_process_running("live_trading_multi.py")
+            status_dot = '🟢' if is_online else '🔴'
+            status_text = 'Online' if is_online else 'Offline'
+            status_color = '#00e676' if is_online else '#ff5252'
             
             # Color helpers
             def pnl_color(val):
@@ -1748,9 +1767,11 @@ def main():
                         {row['symbol']}
                     </td>
                     <td style="padding:14px 16px;">{status_html}</td>
+                    <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['price']:,.2f}</td>
+                    <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['equity']:,.2f}</td>
                     <td style="padding:14px 16px;">{pnl_html}</td>
                     <td style="padding:14px 16px;color:#ccc;font-size:13px;">{trades_str}</td>
-                    <td style="padding:14px 16px;min-width:120px;">{wr_html}</td>
+                    <td style="padding:14px 16px;min-width:100px;">{wr_html}</td>
                     <td style="padding:14px 16px;">{best_html}</td>
                     <td style="padding:14px 16px;">{worst_html}</td>
                 </tr>
@@ -1759,7 +1780,7 @@ def main():
             if not asset_rows_html:
                 asset_rows_html = '''
                 <tr>
-                    <td colspan="7" style="padding:30px;text-align:center;color:#555;font-size:14px;">
+                    <td colspan="9" style="padding:30px;text-align:center;color:#555;font-size:14px;">
                         No trades recorded yet. Start the trading bot to see portfolio data.
                     </td>
                 </tr>
@@ -1785,9 +1806,19 @@ def main():
                         letter-spacing: 1px;
                         text-transform: uppercase;
                     ">LIVE TRADING</span>
+                    <span style="
+                        background: {'#1b3a26' if is_online else '#3a1b1b'};
+                        color: {status_color};
+                        padding: 3px 10px;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        font-weight: 700;
+                        letter-spacing: 1px;
+                        margin-left: 4px;
+                    ">{status_dot} {status_text}</span>
                 </div>
                 
-                <!-- Metric Cards -->
+                <!-- Metric Cards Row 1 -->
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Realized PNL</div>
@@ -1809,6 +1840,22 @@ def main():
                     </div>
                 </div>
                 
+                <!-- Metric Cards Row 2 (Dollar Values) -->
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;">
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Portfolio Value</div>
+                        <div style="font-size:22px;font-weight:700;color:#fff;">${lp_total_balance:,.2f}</div>
+                    </div>
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total P&L</div>
+                        <div style="font-size:22px;font-weight:700;color:{pnl_color(lp_grand_total_pnl)};">{pnl_sign(lp_grand_total_pnl)}${abs(lp_grand_total_pnl):,.2f}</div>
+                    </div>
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Active Assets</div>
+                        <div style="font-size:22px;font-weight:700;color:#fff;">{lp_active_assets_count}</div>
+                    </div>
+                </div>
+                
                 <!-- Equity Curve (Pure SVG — no external deps) -->
                 <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:24px;">
                     <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:2px;">Equity Curve</div>
@@ -1823,6 +1870,8 @@ def main():
                             <tr style="border-bottom:1px solid #21262d;">
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Asset</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Status</th>
+                                <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Price</th>
+                                <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Equity</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Trades</th>
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Win Rate</th>
@@ -1843,133 +1892,7 @@ def main():
             </div>
             '''
             
-            components.html(portfolio_html, height=850, scrolling=True)
-
-        with tab_portfolio:
-            st.markdown("### 📋 Multi-Asset Portfolio Overview")
-            
-            # Metric Row
-            m1, m2, m3, m4 = st.columns(4)
-            total_balance = state.get('total_balance', state.get('balance', 0))
-            active_assets_count = len(state.get('available_assets', []))
-            
-            # CONSISTENCY FIX: Calculate Total P&L as Equity - Initial Capital
-            # Assuming standard $5k allocation per asset. 
-            # This ensures P&L + Initial = Portfolio Value
-            initial_capital = active_assets_count * 5000
-            grand_total_pnl = total_balance - initial_capital
-            
-            # Fallback if calculation looks broken (e.g. near -20000)
-            if grand_total_pnl < -0.9 * initial_capital:
-                # Fallback to realized only
-                 grand_total_pnl = state.get('realized_pnl', 0)
-
-            m1.metric("Total Portfolio Value", f"${total_balance:,.2f}")
-            m2.metric("Total P&L", f"${grand_total_pnl:,.2f}", delta=f"${grand_total_pnl:,.2f}")
-            m3.metric("Active Assets", active_assets_count)
-            is_online = check_process_running("live_trading_multi.py")
-            m4.metric("System Status", "🟢 Online" if is_online else "🔴 Offline")
-            
-            if not is_online:
-                st.error("⚠️ System Verification Failed")
-                with st.expander("📝 Debug Logs (Process & API)", expanded=True):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.text("Trading Bot Log:")
-                        st.code(get_last_logs(project_root / "process.log"), language="text")
-                    with c2:
-                        st.text("API Server Log:")
-                        st.code(get_last_logs(project_root / "api_server.log"), language="text")
-
-            st.divider()
-            
-            # Asset Table
-            if state.get('multi_asset') and state.get('raw_state', {}).get('assets'):
-                assets_data = []
-                raw_assets = state['raw_state']['assets']
-                
-                # Fetch all trades to populate table correctly
-                all_trades = []
-                try:
-                    all_trades = storage.get_trades(limit=1000)
-                except Exception as e:
-                    logger.error(f"Failed to load trades for table: {e}")
-                
-                # Map trades to symbols
-                trades_by_symbol = {}
-                for t in all_trades:
-                    sym = t.get('symbol', '').replace('/', '').upper()
-                    if sym not in trades_by_symbol:
-                        trades_by_symbol[sym] = []
-                    trades_by_symbol[sym].append(t)
-                
-                for symbol, data in raw_assets.items():
-                    # Calculate metrics
-                    position_amt = data.get('position', 0)
-                    pos_str = "LONG 🟢" if position_amt > 0 else "SHORT 🔴" if position_amt < 0 else "FLAT ⚪"
-                    
-                    # Get trades for this symbol
-                    clean_sym = symbol.replace('/', '').upper()
-                    sym_trades = trades_by_symbol.get(clean_sym, [])
-                    trades_count = len(sym_trades)
-                    
-                    # Determine last action from trades
-                    last_action = "NONE"
-                    if sym_trades:
-                        # Sort by timestamp (preferred) or entry_time/exit_time
-                        sorted_trades = sorted(sym_trades, key=lambda x: x.get('timestamp', x.get('entry_time', x.get('exit_time', ''))), reverse=True)
-                        if sorted_trades:
-                            last_trade = sorted_trades[0]
-                            # specific action key from live_trading_multi
-                            raw_action = last_trade.get('action', last_trade.get('side', 'NONE')).upper()
-                            
-                            # Beautify
-                            if 'OPEN_LONG' in raw_action:
-                                last_action = "LONG (OPEN)"
-                            elif 'OPEN_SHORT' in raw_action:
-                                last_action = "SHORT (OPEN)"
-                            elif 'CLOSE_LONG' in raw_action:
-                                last_action = "LONG (CLOSED)"
-                            elif 'CLOSE_SHORT' in raw_action:
-                                last_action = "SHORT (CLOSED)"
-                            elif 'EXIT' in raw_action:
-                                last_action = "EXIT"
-                            else:
-                                last_action = raw_action
-                                
-                            # Fix State Mismatch Bug: 
-                            # If position is exactly 0 (FLAT) but last action was an OPEN, it means the state reset but trade logs remained.
-                            if data.get('position', 0) == 0 and "(OPEN)" in last_action:
-                                last_action = "STATE RESET (FLAT)"
-                    
-                    assets_data.append({
-                        "Asset": symbol,
-                        "Price": data.get('price', 0),
-                        "Position": pos_str,
-                        "Equity": data.get('equity', data.get('balance', 0)), # Use Equity (Total Value) not Balance (Cash) 
-                        "PnL ($)": data.get('pnl', 0),
-                        "Trades": trades_count,
-                        "Last Action": last_action
-                    })
-                
-                if assets_data:
-                    df_portfolio = pd.DataFrame(assets_data)
-                    
-                    # Formatting
-                    st.dataframe(
-                        df_portfolio,
-                        column_config={
-                            "Price": st.column_config.NumberColumn(format="$%.2f"),
-                            "Equity": st.column_config.NumberColumn(format="$%.2f"),
-                            "PnL ($)": st.column_config.NumberColumn(format="$%.2f"),
-                        },
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                else:
-                    st.info("No asset data available yet.")
-            else:
-                st.info("Multi-Asset mode not active or data not available.")
+            components.html(portfolio_html, height=950, scrolling=True)
 
         with tab_performance:
             total_pnl = state.get('realized_pnl', 0)
