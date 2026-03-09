@@ -1344,8 +1344,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_portfolio, tab_performance, tab_whales, tab_backtest = st.tabs([
-            "📊 Live Chart", "📋 Portfolio Details", "📈 Performance", "🐋 On-Chain Whales", "🔬 Backtest"
+        tab_chart, tab_live_portfolio, tab_portfolio, tab_performance, tab_whales, tab_backtest = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📋 Portfolio Details", "📈 Performance", "🐋 On-Chain Whales", "🔬 Backtest"
         ])
         
         with tab_chart:
@@ -1504,6 +1504,371 @@ def main():
                     time.sleep(0.5)
                     st.rerun()
         
+        with tab_live_portfolio:
+            # ─── Compute portfolio metrics from trade data ───
+            all_trades_lp = []
+            try:
+                all_trades_lp = storage.get_trades(limit=1000)
+                # Apply reset filter
+                try:
+                    lp_state = storage.load_state()
+                    reset_ts = lp_state.get('reset_timestamp')
+                    if reset_ts:
+                        reset_dt = datetime.fromisoformat(reset_ts.replace('Z', '+00:00'))
+                        all_trades_lp = [t for t in all_trades_lp if datetime.fromisoformat(t.get('timestamp', '2020-01-01').replace('Z', '+00:00')) >= reset_dt]
+                except:
+                    pass
+            except:
+                pass
+            
+            # Separate by symbol and compute per-asset metrics
+            assets_by_symbol = {}
+            for t in all_trades_lp:
+                sym = t.get('symbol', t.get('asset', 'UNKNOWN'))
+                sym = sym.replace('/', '').upper()
+                if sym not in assets_by_symbol:
+                    assets_by_symbol[sym] = []
+                assets_by_symbol[sym].append(t)
+            
+            # Compute closed P&L, open P&L, win rate
+            realized_pnl_total = 0.0
+            open_pnl_total = 0.0
+            total_closed_trades = 0
+            total_winning_trades = 0
+            total_open_trades = 0
+            equity_points = [0.0]  # Start at 0%
+            
+            asset_rows = []
+            
+            raw_state = state.get('raw_state', {})
+            raw_assets = raw_state.get('assets', {})
+            
+            for sym, trades_list in assets_by_symbol.items():
+                sorted_trades = sorted(trades_list, key=lambda x: x.get('timestamp', ''))
+                
+                sym_realized = 0.0
+                sym_open_pnl = 0.0
+                sym_wins = 0
+                sym_closed = 0
+                sym_open = 0
+                sym_best = None
+                sym_worst = None
+                sym_status = 'FLAT'
+                
+                for t in sorted_trades:
+                    action = t.get('action', '').upper()
+                    pnl = t.get('pnl', 0) or 0
+                    
+                    if 'CLOSE' in action or 'EXIT' in action:
+                        sym_realized += pnl
+                        sym_closed += 1
+                        if pnl > 0:
+                            sym_wins += 1
+                        equity_points.append(equity_points[-1] + pnl)
+                        # Track best/worst
+                        if sym_best is None or pnl > sym_best:
+                            sym_best = pnl
+                        if sym_worst is None or pnl < sym_worst:
+                            sym_worst = pnl
+                    elif 'OPEN_LONG' in action:
+                        sym_status = 'LONG'
+                        sym_open += 1
+                    elif 'OPEN_SHORT' in action:
+                        sym_status = 'SHORT'
+                        sym_open += 1
+                
+                # Check current state for open P&L
+                if sym in raw_assets:
+                    asset_data = raw_assets[sym]
+                    if asset_data.get('position', 0) != 0:
+                        sym_open_pnl = asset_data.get('pnl', 0) or 0
+                        sym_status = 'LONG' if asset_data.get('position', 0) > 0 else 'SHORT'
+                    else:
+                        sym_status = 'FLAT'
+                
+                realized_pnl_total += sym_realized
+                open_pnl_total += sym_open_pnl
+                total_closed_trades += sym_closed
+                total_winning_trades += sym_wins
+                if sym_status != 'FLAT':
+                    total_open_trades += 1
+                
+                # Format display symbol
+                display_sym = sym
+                if sym.endswith('USDT'):
+                    display_sym = sym[:-4] + ' /USDT'
+                
+                asset_rows.append({
+                    'symbol': display_sym,
+                    'raw_symbol': sym,
+                    'status': sym_status,
+                    'pnl': sym_realized + sym_open_pnl,
+                    'trades': sym_closed + (1 if sym_status != 'FLAT' else 0),
+                    'open_trades': 1 if sym_status != 'FLAT' else 0,
+                    'win_rate': (sym_wins / sym_closed * 100) if sym_closed > 0 else 0,
+                    'wins': sym_wins,
+                    'closed': sym_closed,
+                    'best': sym_best,
+                    'worst': sym_worst,
+                })
+            
+            # Overall metrics
+            initial_capital = max(len(raw_assets), 1) * 5000
+            realized_pct = (realized_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
+            open_pct = (open_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
+            overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
+            total_trades_count = total_closed_trades + total_open_trades
+            
+            # Color helpers
+            def pnl_color(val):
+                return '#00e676' if val >= 0 else '#ff5252'
+            
+            def pnl_sign(val):
+                return '+' if val >= 0 else ''
+            
+            # ─── Build the Live Portfolio HTML ───
+            # Equity curve data for Chart.js
+            eq_labels = list(range(len(equity_points)))
+            eq_pct = [(p / initial_capital) * 100 if initial_capital > 0 else 0 for p in equity_points]
+            
+            # Build asset rows HTML
+            asset_rows_html = ''
+            for row in asset_rows:
+                # Status badge
+                if row['status'] == 'LONG':
+                    status_html = '<span style="background:#1b3a26;color:#00e676;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;">● LONG</span>'
+                elif row['status'] == 'SHORT':
+                    status_html = '<span style="background:#3a1b1b;color:#ff5252;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;">● SHORT</span>'
+                else:
+                    status_html = '<span style="background:#2a2e39;color:#888;padding:3px 10px;border-radius:4px;font-size:11px;">● —</span>'
+                
+                # PNL
+                pnl_val = row['pnl']
+                pnl_pct = (pnl_val / (initial_capital / max(len(asset_rows), 1))) * 100 if initial_capital > 0 else 0
+                pnl_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;">{pnl_sign(pnl_val)}{pnl_pct:.2f}%</span>'
+                
+                # Trades
+                trades_str = str(row['trades'])
+                if row['open_trades'] > 0:
+                    trades_str += f' <span style="color:#888;">(+{row["open_trades"]})</span>'
+                
+                # Win rate bar
+                wr = row['win_rate']
+                bar_color = '#00e676' if wr >= 50 else '#ff9800' if wr > 0 else '#555'
+                wr_html = f'''
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="flex:1;background:#1a1e2a;border-radius:4px;height:8px;overflow:hidden;min-width:60px;">
+                            <div style="width:{wr}%;height:100%;background:{bar_color};border-radius:4px;"></div>
+                        </div>
+                        <span style="color:#ccc;font-size:12px;min-width:35px;">{wr:.0f}%</span>
+                    </div>
+                '''
+                
+                # Best
+                if row['best'] is not None:
+                    best_pct = (row['best'] / (initial_capital / max(len(asset_rows), 1))) * 100
+                    best_html = f'<span style="color:#00e676;">{pnl_sign(best_pct)}{best_pct:.2f}%</span>'
+                else:
+                    best_html = '<span style="color:#555;">—</span>'
+                
+                # Worst
+                if row['worst'] is not None:
+                    worst_pct = (row['worst'] / (initial_capital / max(len(asset_rows), 1))) * 100
+                    worst_html = f'<span style="color:#ff5252;">{worst_pct:.2f}%</span>'
+                else:
+                    worst_html = '<span style="color:#555;">—</span>'
+                
+                asset_rows_html += f'''
+                <tr>
+                    <td style="padding:14px 16px;font-weight:600;color:#fff;font-size:13px;">
+                        {row['symbol']}
+                    </td>
+                    <td style="padding:14px 16px;">{status_html}</td>
+                    <td style="padding:14px 16px;">{pnl_html}</td>
+                    <td style="padding:14px 16px;color:#ccc;font-size:13px;">{trades_str}</td>
+                    <td style="padding:14px 16px;min-width:120px;">{wr_html}</td>
+                    <td style="padding:14px 16px;">{best_html}</td>
+                    <td style="padding:14px 16px;">{worst_html}</td>
+                </tr>
+                '''
+            
+            if not asset_rows_html:
+                asset_rows_html = '''
+                <tr>
+                    <td colspan="7" style="padding:30px;text-align:center;color:#555;font-size:14px;">
+                        No trades recorded yet. Start the trading bot to see portfolio data.
+                    </td>
+                </tr>
+                '''
+            
+            # Min/Max for equity chart
+            eq_min = min(eq_pct) if eq_pct else 0
+            eq_max = max(eq_pct) if eq_pct else 0
+            eq_range = max(abs(eq_min), abs(eq_max), 0.01)
+            
+            portfolio_html = f'''
+            <div style="
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #0d1117;
+                color: #fff;
+                padding: 0;
+            ">
+                <!-- Header -->
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+                    <span style="font-size:22px;font-weight:700;color:#fff;">Live Portfolio</span>
+                    <span style="
+                        background: #1a6b3c;
+                        color: #00e676;
+                        padding: 3px 10px;
+                        border-radius: 4px;
+                        font-size: 10px;
+                        font-weight: 700;
+                        letter-spacing: 1px;
+                        text-transform: uppercase;
+                    ">LIVE TRADING</span>
+                </div>
+                
+                <!-- Metric Cards -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Realized PNL</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pct)}{realized_pct:.2f}%</div>
+                    </div>
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Open PNL</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pct)}{open_pct:.2f}%</div>
+                    </div>
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Win Rate</div>
+                        <div style="font-size:26px;font-weight:700;color:#fff;">{overall_win_rate:.0f}%</div>
+                        <div style="color:#8b949e;font-size:11px;">{total_winning_trades}W / {total_closed_trades - total_winning_trades}L</div>
+                    </div>
+                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
+                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Trades</div>
+                        <div style="font-size:26px;font-weight:700;color:#fff;">{total_trades_count}</div>
+                        <div style="color:#8b949e;font-size:11px;">{total_open_trades} open · {total_closed_trades} closed</div>
+                    </div>
+                </div>
+                
+                <!-- Equity Curve -->
+                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:24px;">
+                    <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:2px;">Equity Curve</div>
+                    <div style="color:#8b949e;font-size:11px;margin-bottom:16px;">Cumulative P&L from closed trades</div>
+                    <canvas id="equityChart" height="180"></canvas>
+                </div>
+                
+                <!-- Asset Table -->
+                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;overflow:hidden;">
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="border-bottom:1px solid #21262d;">
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Asset</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Status</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Trades</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Win Rate</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Best</th>
+                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Worst</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {asset_rows_html}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Footer -->
+                <div style="text-align:center;color:#555;font-size:11px;margin-top:16px;">
+                    DRL Trading System · Signals from PPO + Composite Scoring · Connected to OKX
+                </div>
+            </div>
+            
+            <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+            <script>
+                (function() {{
+                    var ctx = document.getElementById('equityChart').getContext('2d');
+                    var data = {eq_pct};
+                    var labels = {eq_labels};
+                    
+                    var gradient = ctx.createLinearGradient(0, 0, 0, 180);
+                    var lastVal = data[data.length - 1] || 0;
+                    if (lastVal >= 0) {{
+                        gradient.addColorStop(0, 'rgba(0, 230, 118, 0.25)');
+                        gradient.addColorStop(1, 'rgba(0, 230, 118, 0.0)');
+                    }} else {{
+                        gradient.addColorStop(0, 'rgba(255, 82, 82, 0.25)');
+                        gradient.addColorStop(1, 'rgba(255, 82, 82, 0.0)');
+                    }}
+                    
+                    new Chart(ctx, {{
+                        type: 'line',
+                        data: {{
+                            labels: labels,
+                            datasets: [{{
+                                data: data,
+                                borderColor: lastVal >= 0 ? '#00e676' : '#ff5252',
+                                borderWidth: 2,
+                                backgroundColor: gradient,
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: function(ctx) {{
+                                    return ctx.dataIndex === data.length - 1 ? 4 : 0;
+                                }},
+                                pointBackgroundColor: lastVal >= 0 ? '#00e676' : '#ff5252',
+                                pointBorderColor: '#fff',
+                                pointBorderWidth: 1,
+                            }}]
+                        }},
+                        options: {{
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {{
+                                legend: {{ display: false }},
+                                tooltip: {{
+                                    backgroundColor: '#1e222d',
+                                    titleColor: '#fff',
+                                    bodyColor: '#ccc',
+                                    borderColor: '#333',
+                                    borderWidth: 1,
+                                    callbacks: {{
+                                        label: function(ctx) {{
+                                            return ctx.parsed.y >= 0 ? '+' + ctx.parsed.y.toFixed(2) + '%' : ctx.parsed.y.toFixed(2) + '%';
+                                        }}
+                                    }}
+                                }}
+                            }},
+                            scales: {{
+                                x: {{
+                                    display: false,
+                                }},
+                                y: {{
+                                    grid: {{
+                                        color: 'rgba(255,255,255,0.05)',
+                                        drawBorder: false,
+                                    }},
+                                    ticks: {{
+                                        color: '#8b949e',
+                                        font: {{ size: 10 }},
+                                        callback: function(value) {{
+                                            return (value >= 0 ? '+' : '') + value.toFixed(1) + '%';
+                                        }}
+                                    }},
+                                    suggestedMin: -{eq_range * 1.2:.2f},
+                                    suggestedMax: {eq_range * 1.2:.2f},
+                                }}
+                            }},
+                            interaction: {{
+                                intersect: false,
+                                mode: 'index'
+                            }}
+                        }}
+                    }});
+                }})();
+            </script>
+            '''
+            
+            components.html(portfolio_html, height=700, scrolling=True)
+
         with tab_portfolio:
             st.markdown("### 📋 Multi-Asset Portfolio Overview")
             
