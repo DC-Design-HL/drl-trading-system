@@ -36,73 +36,230 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for TradingView dark theme
+# Custom CSS — Premium Dark Theme (matches Live Portfolio aesthetic)
 st.markdown("""
 <style>
+    /* ═══ Foundation ═══ */
     .stApp {
-        background-color: #0e1117;
+        background-color: #0d1117;
+        color: #e6edf3;
     }
-    .stMetric {
-        background-color: #1e222d;
-        padding: 15px;
-        border-radius: 10px;
-    }
+    
+    /* ═══ Sidebar ═══ */
     div[data-testid="stSidebarContent"] {
-        background-color: #131722;
+        background-color: #0d1117;
+        border-right: 1px solid #21262d;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
+    div[data-testid="stSidebarContent"] .stMarkdown h3 {
+        color: #8b949e;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
     }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: #888;
+    
+    /* ═══ Metric Cards (native st.metric) ═══ */
+    div[data-testid="stMetric"] {
+        background: #151b23;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        padding: 16px 18px;
     }
-    .stTabs [aria-selected="true"] {
-        color: white;
+    div[data-testid="stMetric"] label {
+        color: #8b949e !important;
+        font-size: 11px !important;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
     }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        color: #fff !important;
+        font-weight: 700;
+    }
+    div[data-testid="stMetricDelta"] svg { display: none; }
+    
+    /* ═══ Custom metric-card class (sidebar panels) ═══ */
     .metric-card {
-        background: linear-gradient(135deg, #1e222d 0%, #131722 100%);
-        border-radius: 10px;
-        padding: 20px;
-        border: 1px solid #2a2e39;
-        margin-bottom: 15px;
+        background: #151b23;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        padding: 16px 18px;
+        margin-bottom: 12px;
     }
     .metric-label {
-        color: #888;
-        font-size: 12px;
-        margin-bottom: 5px;
+        color: #8b949e;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 6px;
     }
     .metric-value {
         font-size: 24px;
-        font-weight: bold;
-        color: white;
+        font-weight: 700;
+        color: #fff;
     }
-    .metric-delta-positive {
-        color: #26a69a;
+    .metric-delta-positive { color: #00e676; }
+    .metric-delta-negative { color: #ff5252; }
+    
+    /* ═══ Tabs ═══ */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        border-bottom: 1px solid #21262d;
     }
-    .metric-delta-negative {
-        color: #ef5350;
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        color: #8b949e;
+        border-radius: 6px 6px 0 0;
+        padding: 8px 16px;
+        font-size: 13px;
     }
-    /* Timeframe buttons */
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #e6edf3;
+        background-color: rgba(255,255,255,0.04);
+    }
+    .stTabs [aria-selected="true"] {
+        color: #fff !important;
+        font-weight: 600;
+        border-bottom: 2px solid #00e676;
+    }
+    .stTabs [data-baseweb="tab-highlight"] {
+        background-color: #00e676 !important;
+    }
+    .stTabs [data-baseweb="tab-border"] {
+        display: none;
+    }
+    
+    /* ═══ Buttons ═══ */
+    .stButton > button {
+        background: #151b23;
+        border: 1px solid #21262d;
+        color: #e6edf3;
+        border-radius: 6px;
+        font-weight: 500;
+        transition: all 0.15s ease;
+    }
+    .stButton > button:hover {
+        background: #1c2333;
+        border-color: #388bfd;
+        color: #fff;
+    }
+    .stButton > button[kind="primary"],
+    .stButton > button[data-testid="stBaseButton-primary"] {
+        background: #1a6b3c;
+        border-color: #1a6b3c;
+        color: #00e676;
+    }
+    .stButton > button[kind="primary"]:hover,
+    .stButton > button[data-testid="stBaseButton-primary"]:hover {
+        background: #217a45;
+        border-color: #00e676;
+    }
+    
+    /* ═══ Inputs, Selects, Date Pickers ═══ */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="input"] > div,
+    .stDateInput > div > div > input,
+    .stTextInput > div > div > input,
+    .stSelectbox > div > div {
+        background-color: #151b23 !important;
+        border-color: #21262d !important;
+        color: #e6edf3 !important;
+    }
+    
+    /* ═══ Text Areas ═══ */
+    .stTextArea textarea {
+        background-color: #151b23 !important;
+        border-color: #21262d !important;
+        color: #e6edf3 !important;
+        border-radius: 6px;
+    }
+    
+    /* ═══ Code Blocks ═══ */
+    .stCodeBlock, code, pre {
+        background-color: #151b23 !important;
+        border: 1px solid #21262d;
+        border-radius: 6px;
+    }
+    
+    /* ═══ Expanders ═══ */
+    .streamlit-expanderHeader {
+        background: #151b23;
+        border: 1px solid #21262d;
+        border-radius: 6px;
+        color: #e6edf3;
+    }
+    details {
+        background: #151b23;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+    }
+    
+    /* ═══ Dividers ═══ */
+    hr {
+        border-color: #21262d !important;
+    }
+    
+    /* ═══ Checkboxes & Toggles ═══ */
+    .stCheckbox label span {
+        color: #8b949e;
+    }
+    
+    /* ═══ Dataframes ═══ */
+    .stDataFrame {
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    /* ═══ Alerts ═══ */
+    .stAlert {
+        background: #151b23;
+        border: 1px solid #21262d;
+        border-radius: 8px;
+    }
+    
+    /* ═══ Caption ═══ */
+    .stCaption {
+        color: #8b949e !important;
+    }
+    
+    /* ═══ Scrollbar ═══ */
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #0d1117;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #21262d;
+        border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #30363d;
+    }
+    
+    /* ═══ Hide defaults ═══ */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* ═══ Timeframe buttons (custom) ═══ */
     .timeframe-btn {
-        background: #1e222d;
-        border: 1px solid #2a2e39;
-        color: #888;
+        background: #151b23;
+        border: 1px solid #21262d;
+        color: #8b949e;
         padding: 5px 12px;
         margin: 2px;
-        border-radius: 4px;
+        border-radius: 6px;
         cursor: pointer;
         font-size: 12px;
     }
     .timeframe-btn.active {
-        background: #2962FF;
-        color: white;
-        border-color: #2962FF;
+        background: #1a6b3c;
+        color: #00e676;
+        border-color: #1a6b3c;
     }
     .timeframe-btn:hover {
-        background: #363a45;
+        background: #1c2333;
+        border-color: #388bfd;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1301,8 +1458,8 @@ def main():
         refresh_status = "🔄 Auto (10s)" if st.session_state.auto_refresh else "⏸️ Paused"
         st.markdown(f"""
         <div style="text-align: right; padding-top: 10px;">
-            <span style="color: #26a69a; font-size: 14px;">🟢 Connected</span><br>
-            <span style="color: #888; font-size: 12px;">{refresh_status}</span>
+            <span style="color: #00e676; font-size: 14px;">🟢 Connected</span><br>
+            <span style="color: #8b949e; font-size: 12px;">{refresh_status}</span>
         </div>
         """, unsafe_allow_html=True)
     
@@ -1964,10 +2121,12 @@ def main():
                     
                     st.markdown(f'''
                     <div style="
-                        background: #1e222d;
+                        background: #151b23;
                         padding: 15px;
                         border-radius: 8px;
                         margin-bottom: 10px;
+                        border-left: 4px solid {color};
+                        border: 1px solid #21262d;
                         border-left: 4px solid {color};
                         display: flex;
                         justify-content: space-between;
@@ -1984,8 +2143,8 @@ def main():
                         </div>
                         <div>
                             <a href="{link}" target="_blank" style="
-                                background: #2a2e39;
-                                color: white;
+                                background: #21262d;
+                                color: #e6edf3;
                                 text-decoration: none;
                                 padding: 5px 15px;
                                 border-radius: 4px;
@@ -2038,7 +2197,7 @@ def main():
     st.markdown(f"""
     <div style="text-align: center; color: #888; font-size: 12px;">
         DRL Trading System v2.1 | Advanced PPO Agent | 
-        <span style="color: #26a69a;">●</span> WebSocket Live Data |
+        <span style="color: #00e676;">●</span> WebSocket Live Data |
         Deployed: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
     </div>
     """, unsafe_allow_html=True)
