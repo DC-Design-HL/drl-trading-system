@@ -681,10 +681,10 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             let lastCandle = candleData[candleData.length - 1];
             
             function connectWebSocket() {{
-                ws = new WebSocket('wss://stream.binance.com/ws/{ws_stream}');
+                ws = new WebSocket('wss://data-stream.binance.vision/ws/{ws_stream}');
                 
                 ws.onopen = function() {{
-                    console.log('WebSocket connected to Binance successfully');
+                    console.log('WebSocket connected to Binance Vision cluster successfully');
                     document.getElementById('live-indicator').style.display = 'inline-flex';
                 }};
                 
@@ -747,16 +747,6 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     document.getElementById('h-val').textContent = candle.high.toFixed(2);
                     document.getElementById('l-val').textContent = candle.low.toFixed(2);
                     document.getElementById('c-val').textContent = candle.close.toFixed(2);
-                }};
-                
-                ws.onerror = function(error) {{
-                    console.error('WebSocket error:', error);
-                }};
-                
-                ws.onclose = function() {{
-                    console.log('WebSocket closed, reconnecting...');
-                    document.getElementById('live-indicator').style.display = 'none';
-                    setTimeout(connectWebSocket, reconnectInterval);
                 }};
             }}
             
