@@ -681,7 +681,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             let lastCandle = candleData[candleData.length - 1];
             
             function connectWebSocket() {{
-                ws = new WebSocket('wss://stream.binance.com:9443/ws/{ws_stream}');
+                ws = new WebSocket('wss://stream.binance.com/ws/{ws_stream}');
                 
                 ws.onopen = function() {{
                     console.log('WebSocket connected');
