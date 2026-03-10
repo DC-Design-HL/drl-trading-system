@@ -1021,7 +1021,7 @@ def render_market_analysis_fragment(symbol: str):
     market_data = {}
     try:
         api_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=5)
+        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=15)
         if market_resp.status_code == 200:
             market_data = market_resp.json()
     except Exception as e:
@@ -1354,7 +1354,7 @@ def render_agent_status_fragment():
         <div class="metric-label">Active Model</div>
         <div style="color: white; font-size: 14px; margin-top: 5px;">Ultimate Agent (PPO)</div>
         <div style="color: {return_color}; font-size: 12px;">{return_sign}{total_return:.2f}% Return | {win_rate:.1f}% Win Rate</div>
-        <div style="color: #888; font-size: 11px;">Trades: {len(trades)} | Model: {model_date}</div>
+        <div style="color: #888; font-size: 11px;">Trades: {len(all_trades)} | Model: {model_date}</div>
         <div style="color: {'#26a69a' if model_exists else '#ef5350'}; font-size: 11px;">{'✓ Model loaded' if model_exists else '✗ Model not found'}</div>
     </div>
     """, unsafe_allow_html=True)
