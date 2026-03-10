@@ -975,7 +975,7 @@ def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd
 
 
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=60)
 def render_sidebar_metrics_fragment():
     """Render sidebar portfolio metrics with auto-refresh."""
     import requests
@@ -1009,7 +1009,7 @@ def render_sidebar_metrics_fragment():
     except Exception as e:
         logger.error(f"Sidebar data fetch error: {e}")
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=120)
 def render_market_analysis_fragment(symbol: str):
     """Render market analysis panel with auto-refresh."""
     import requests
@@ -1177,7 +1177,7 @@ def render_market_analysis_fragment(symbol: str):
         </div>
         """, unsafe_allow_html=True)
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=30)
 def render_position_fragment(symbol: str):
     """Render current position and portfolio status with auto-refresh."""
     import requests
@@ -1287,7 +1287,7 @@ def render_position_fragment(symbol: str):
     render_trade_history(trades)
 
 
-@st.fragment(run_every=15)
+@st.fragment(run_every=60)
 def render_agent_status_fragment():
     """Render active agent status and model info with auto-refresh."""
     import requests
