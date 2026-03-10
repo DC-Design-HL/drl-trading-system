@@ -260,8 +260,10 @@ def get_market_analysis():
             
             if clean_symbol not in WHALE_TRACKERS:
                 logger.info(f"Initializing new WhaleTracker for {clean_symbol}")
-                tracker = WhaleTracker(symbol=clean_symbol)
-                tracker.start_stream()
+                tracker = WhaleTracker(symbol=clean_symbol, enable_ml=False)
+                # DO NOT start live websocket stream inside the API server memory space
+                # as it leaks sockets and hangs threads. We only use it for REST fetch here.
+                # tracker.start_stream()
                 WHALE_TRACKERS[clean_symbol] = tracker
             
             whale = WHALE_TRACKERS[clean_symbol]
@@ -365,29 +367,12 @@ def get_market_analysis():
             logger.error(f"OrderFlow fallback error: {e}")
             result['order_flow'] = {'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0}
 
-    # TFT Forecast (Phase 11.1)
+    # API Server should NOT perform heavy ML analysis on the fly.
+    # TFT Forecast (Phase 11.1) requires massive PyTorch model loading that hangs the main thread.
     if not result['forecast']:
-        try:
-            from src.models.price_forecaster import TFTForecaster
-            forecaster = TFTForecaster(device='cpu')
-            if forecaster.load_model(symbol=clean_symbol):
-                from src.data.multi_asset_fetcher import MultiAssetDataFetcher
-                fetcher = MultiAssetDataFetcher()
-                df = fetcher.fetch_asset(clean_symbol, '1h', days=7)
-                if df is not None and len(df) >= 72:
-                    forecast = forecaster.forecast(df)
-                    result['forecast'] = {
-                        'return_1h': round(forecast.get('return_1h', 0) * 100, 3),
-                        'return_4h': round(forecast.get('return_4h', 0) * 100, 3),
-                        'return_12h': round(forecast.get('return_12h', 0) * 100, 3),
-                        'return_24h': round(forecast.get('return_24h', 0) * 100, 3),
-                        'confidence': round(forecast.get('confidence_4h', 0), 2),
-                        'consensus': round(forecast.get('direction_consensus', 0), 2),
-                    }
-        except Exception as e:
-            logger.error(f"TFT forecast error: {e}")
-            result['forecast'] = None
-
+        # Return empty forecast instead of loading PyTorch on CPU to prevent API deadlock
+        pass
+        
     if not result['mtf']:
         result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
 
@@ -408,4 +393,6 @@ def get_crash_log():
     return "No crash log found. Bot might be running or log not written.", 404
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=False)
+    # threaded=True is CRITICAL to prevent single requests (like Market Analysis fallback)
+    # from locking up the entire dashboard and causing 'Trades: 0' sidebars
+    app.run(port=5001, debug=False, threaded=True)

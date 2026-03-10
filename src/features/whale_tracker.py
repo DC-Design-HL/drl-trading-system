@@ -757,7 +757,8 @@ class WhaleTracker:
         whale_alert_api_key: Optional[str] = None,
         bscscan_api_key: Optional[str] = None,
         min_confidence: float = 0.5,
-        min_signal_agreement: int = 2
+        min_signal_agreement: int = 2,
+        enable_ml: bool = True
     ):
         """
         Initialize whale tracker with all data sources.
@@ -767,6 +768,7 @@ class WhaleTracker:
             bscscan_api_key: Optional BSCScan API key
             min_confidence: Minimum confidence score to allow trades (0-1)
             min_signal_agreement: Minimum number of signals that must agree
+            enable_ml: Set to False when calling from the API server to prevent massive PyTorch locking.
         """
         # Initialize FREE data sources (no API key needed)
         self.liquidation_tracker = BinanceLiquidationTracker(symbol=symbol)  # L/S ratio
@@ -787,12 +789,13 @@ class WhaleTracker:
         
         # Whale Pattern Predictor (Phase 12 — learned wallet patterns)
         self.whale_pattern_predictor = None
-        try:
-            from src.features.whale_pattern_predictor import WhalePatternPredictor
-            self.whale_pattern_predictor = WhalePatternPredictor()
-            logger.info(f"🧠 Whale pattern predictor loaded for {symbol}")
-        except Exception as e:
-            logger.warning(f"⚠️ Whale pattern predictor not available: {e}")
+        if enable_ml:
+            try:
+                from src.features.whale_pattern_predictor import WhalePatternPredictor
+                self.whale_pattern_predictor = WhalePatternPredictor()
+                logger.info(f"🧠 Whale pattern predictor loaded for {symbol}")
+            except Exception as e:
+                logger.warning(f"⚠️ Whale pattern predictor not available: {e}")
         
         self.symbol = symbol  # Store for pattern predictor lookups
         
