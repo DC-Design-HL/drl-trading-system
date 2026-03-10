@@ -698,6 +698,8 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     console.error('WebSocket encountered an error:', err);
                     ws.close();
                 }};
+                
+                ws.onmessage = function(event) {{
                     const data = JSON.parse(event.data);
                     const kline = data.k;
                     
