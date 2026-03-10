@@ -41,6 +41,26 @@ def get_state():
     """Get current trading state."""
     try:
         state = storage.load_state()
+        
+        # MATHEMATICAL OVERRIDE: Calculate true global equity from trade history
+        # bypassing the historically corrupted bot balance tracker.
+        try:
+            all_trades = storage.get_trades(limit=1000)
+            realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+            
+            raw_assets = state.get('raw_state', {}).get('assets', {})
+            open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
+            
+            initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
+            
+            if all_trades or raw_assets:
+                state['total_pnl'] = realized_pnl + open_pnl
+                state['realized_pnl'] = realized_pnl + open_pnl
+                state['total_balance'] = initial_capital + state['total_pnl']
+                state['balance'] = state['total_balance']
+        except Exception as math_err:
+            logger.error(f"Failed mathematical override: {math_err}")
+            
         # Normalize keys for frontend compatibility
         if 'total_balance' in state and 'balance' not in state:
             state['balance'] = state['total_balance']
@@ -56,7 +76,7 @@ def get_state():
 def get_trades():
     """Get recent trades."""
     try:
-        trades = storage.get_trades(limit=100)
+        trades = storage.get_trades(limit=1000)
         return jsonify(trades)
     except Exception as e:
         logger.error(f"Failed to load trades: {e}")
