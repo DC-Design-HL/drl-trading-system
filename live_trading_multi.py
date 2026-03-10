@@ -246,7 +246,7 @@ class MultiAssetTradingBot:
         """Restore bot state from saved dictionary."""
         try:
             self.position = state.get('position', 0)
-            self.position_price = state.get('price', 0.0)
+            self.position_price = state.get('entry_price', state.get('price', 0.0))
             self.balance = state.get('balance', self.initial_balance)
             self.realized_pnl = state.get('pnl', 0.0)
             self.sl_price = state.get('sl', 0.0)
@@ -1372,7 +1372,7 @@ class MultiAssetOrchestrator:
         for symbol, bot in self.bots.items():
             state['assets'][symbol] = {
                 'price': bot.current_price if bot.current_price > 0 else bot.position_price, # Latest price for display
-                'entry_price': bot.position_price, # Explicit entry price for P&L
+                'entry_price': bot.position_price, # Actual entry price for P&L calculation
                 'position': bot.position,
                 'balance': bot.balance,
                 'pnl': bot.realized_pnl,

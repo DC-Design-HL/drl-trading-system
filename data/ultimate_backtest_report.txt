@@ -2,7 +2,7 @@
 ╔══════════════════════════════════════════════════════════════╗
 ║                    BACKTEST REPORT                            ║
 ╠══════════════════════════════════════════════════════════════╣
-║ Generated: 2026-02-26 22:23:10
+║ Generated: 2026-03-03 22:50:21
 ║ Model: Ultimate Trading Agent
 ║ Symbol: BTC/USDT
 ║ Timeframe: 1h
@@ -10,13 +10,13 @@
 ╠══════════════════════════════════════════════════════════════╣
 ║                    PERFORMANCE METRICS                        ║
 ╠══════════════════════════════════════════════════════════════╣
-║ Total Return:        +794.03%
-║ Sharpe Ratio:        14.568
-║ Sortino Ratio:       21.594
-║ Max Drawdown:         7.46%
-║ Win Rate:            72.5%
-║ Profit Factor:       3.17
-║ Trade Count:           432
+║ Total Return:        +5515.05%
+║ Sharpe Ratio:        10.717
+║ Sortino Ratio:       14.005
+║ Max Drawdown:         9.49%
+║ Win Rate:            70.4%
+║ Profit Factor:       3.75
+║ Trade Count:           1068
 ╠══════════════════════════════════════════════════════════════╣
 ║                    VALIDATION STATUS                          ║
 ╠══════════════════════════════════════════════════════════════╣
