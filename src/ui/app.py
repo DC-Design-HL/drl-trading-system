@@ -1217,10 +1217,31 @@ def render_position_fragment(symbol: str):
     except Exception as e:
         logger.error(f"Price fetch error: {e}")
 
-    # 3. Render Portfolio Value & P&L
-    # Handle both top-level keys (from app.py compatibility) and nested structure
-    balance = state.get('total_balance', state.get('balance', 10000))
-    total_pnl = state.get('total_pnl', state.get('realized_pnl', 0))
+    # 3. Fetch ALL Trades early to calculate perfectly mathematically synced global Portfolio Value
+    all_trades = []
+    try:
+        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=2)
+        if trades_resp.status_code == 200:
+            all_trades = trades_resp.json()
+    except Exception as e:
+        logger.error(f"Trades fetch error: {e}")
+        
+    realized_pnl_total = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+    
+    open_pnl_total = 0.0
+    raw_assets = state.get('raw_state', {}).get('assets', {})
+    for sym, asset_data in raw_assets.items():
+        if asset_data.get('position', 0) != 0:
+            open_pnl_total += asset_data.get('pnl', 0)
+            
+    initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
+    
+    if all_trades or raw_assets:
+        total_pnl = realized_pnl_total + open_pnl_total
+        balance = initial_capital + total_pnl
+    else:
+        balance = state.get('total_balance', state.get('balance', 10000))
+        total_pnl = state.get('total_pnl', state.get('realized_pnl', 0))
     pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
     pnl_sign = "+" if total_pnl >= 0 else ""
     
@@ -1258,17 +1279,9 @@ def render_position_fragment(symbol: str):
     render_position_card(asset_state, current_price)
     
     # 5. Render Trade History
-    # Fetch trades from API explicitly
-    trades = []
-    try:
-        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=2)
-        if trades_resp.status_code == 200:
-            all_trades = trades_resp.json()
-            # Filter for current symbol
-            clean_symbol = symbol.replace('/', '').upper()
-            trades = [t for t in all_trades if t.get('symbol', '').replace('/', '').upper() == clean_symbol]
-    except Exception as e:
-        logger.error(f"Trades fetch error: {e}")
+    # Filter trades for current symbol (already fetched above)
+    clean_symbol = symbol.replace('/', '').upper()
+    trades = [t for t in all_trades if t.get('symbol', '').replace('/', '').upper() == clean_symbol]
         
     render_trade_history(trades)
 
@@ -1296,18 +1309,32 @@ def render_agent_status_fragment():
     model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
     model_exists = model_path.exists()
     
+    # Fetch trades explicitly for mathematical accuracy
+    all_trades = state.get('trades', [])
+    try:
+        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=1)
+        if trades_resp.status_code == 200:
+            all_trades = trades_resp.json()
+    except Exception as e:
+        pass
+        
+    # Calculate real mathematical return
+    realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+    raw_assets = state.get('raw_state', {}).get('assets', {})
+    open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
+    total_pnl = realized_pnl + open_pnl
+    initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
+    
+    total_return = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0
+    
     # Calculate actual win rate from trades
-    trades = state.get('trades', [])
-    if trades:
-        winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
-        total = len(trades)
+    closed_trades = [t for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper()]
+    if closed_trades:
+        winning = sum(1 for t in closed_trades if t.get('pnl', 0) > 0)
+        total = len(closed_trades)
         win_rate = (winning / total * 100) if total > 0 else 0
     else:
         win_rate = 0
-    
-    # Calculate return from balance
-    balance = state.get('balance', 10000)
-    total_return = ((balance - 10000) / 10000) * 100
     
     # Get model last modified time
     if model_exists:
