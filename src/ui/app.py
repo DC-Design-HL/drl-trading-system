@@ -1757,7 +1757,8 @@ def main():
                 
                 # Get price / equity from raw state
                 sym_price = raw_assets.get(sym, {}).get('price', 0)
-                sym_equity = raw_assets.get(sym, {}).get('equity', raw_assets.get(sym, {}).get('balance', 0))
+                # Calculate True Equity mathematically instead of relying on historically corrupted bot.balance
+                sym_equity = 5000 + sym_realized + sym_open_pnl
                 
                 asset_rows.append({
                     'symbol': display_sym,
@@ -1782,12 +1783,10 @@ def main():
             overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
             total_trades_count = total_closed_trades + total_open_trades
             
-            # Dollar values from state
-            lp_total_balance = state.get('total_balance', state.get('balance', 0))
-            lp_active_assets_count = len(state.get('available_assets', []))
+            # Calculate Total Balance derived strictly from asset equity sums to ensure consistency
+            lp_total_balance = sum([row['equity'] for row in asset_rows]) if asset_rows else initial_capital
+            lp_active_assets_count = len(asset_rows) if asset_rows else len(state.get('available_assets', []))
             lp_grand_total_pnl = lp_total_balance - initial_capital
-            if lp_grand_total_pnl < -0.9 * initial_capital:
-                lp_grand_total_pnl = state.get('realized_pnl', 0)
             
             # System status
             is_online = check_process_running("live_trading_multi.py")
