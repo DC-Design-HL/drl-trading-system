@@ -684,11 +684,20 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                 ws = new WebSocket('wss://stream.binance.com/ws/{ws_stream}');
                 
                 ws.onopen = function() {{
-                    console.log('WebSocket connected');
+                    console.log('WebSocket connected to Binance successfully');
                     document.getElementById('live-indicator').style.display = 'inline-flex';
                 }};
                 
-                ws.onmessage = function(event) {{
+                ws.onclose = function(event) {{
+                    console.log('WebSocket closed: code=' + event.code + ', reason=' + event.reason);
+                    document.getElementById('live-indicator').style.display = 'none';
+                    setTimeout(connectWebSocket, reconnectInterval);
+                }};
+                
+                ws.onerror = function(err) {{
+                    console.error('WebSocket encountered an error:', err);
+                    ws.close();
+                }};
                     const data = JSON.parse(event.data);
                     const kline = data.k;
                     
@@ -1805,15 +1814,17 @@ def main():
             
             # Overall metrics
             initial_capital = max(len(raw_assets), 1) * 5000
+            
+            # Use the mathematically validated global balance from the API Server patched state
+            lp_total_balance = state.get('total_balance', initial_capital)
+            lp_grand_total_pnl = state.get('total_pnl', 0)
+            
             realized_pct = (realized_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
             open_pct = (open_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
             overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
             total_trades_count = total_closed_trades + total_open_trades
             
-            # Calculate Total Balance derived strictly from asset equity sums to ensure consistency
-            lp_total_balance = sum([row['equity'] for row in asset_rows]) if asset_rows else initial_capital
             lp_active_assets_count = len(asset_rows) if asset_rows else len(state.get('available_assets', []))
-            lp_grand_total_pnl = lp_total_balance - initial_capital
             
             # System status
             is_online = check_process_running("live_trading_multi.py")
