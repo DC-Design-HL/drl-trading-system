@@ -280,7 +280,7 @@ TIMEFRAMES = {
 def load_trading_log(symbol: str = None) -> list:
     """Load real trading data from updated storage, filtered by reset timestamp."""
     try:
-        all_trades = storage.get_trades(limit=500)
+        all_trades = storage.get_trades(limit=1000)
         
         # Filter by reset_timestamp if available (hide pre-reset trades)
         try:
@@ -1854,7 +1854,7 @@ def main():
                 return '#00e676' if val >= 0 else '#ff5252'
             
             def pnl_sign(val):
-                return '+' if val >= 0 else ''
+                return '+' if val >= 0 else '-'
             
             # ─── Build the Live Portfolio HTML ───
             # Equity curve data for SVG chart (pure inline, no CDN)
