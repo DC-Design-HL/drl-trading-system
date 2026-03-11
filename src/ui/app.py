@@ -2379,6 +2379,43 @@ def main():
                     except Exception:
                         # Fallback for older Streamlit versions without column_config
                         st.dataframe(display_df.drop(columns=['Explorer']), use_container_width=True, height=400)
+                
+                st.divider()
+                st.markdown("#### 🤖 AI Momentum Predictions")
+                st.caption("Real-time directional predictions based on institutional flow and wallet behavioral analysis.")
+                
+                pred_cols = st.columns(4)
+                idx = 0
+                for chain in ['BTC', 'ETH', 'SOL', 'XRP']:
+                    chain_df = df[df['chain'] == chain]
+                    signal, reason, color = "🟡 STANDBY", f"Insufficient whale data for {chain}.", "#888888"
+                    
+                    if not chain_df.empty and 'wallet_type' in chain_df.columns:
+                        c_vol = chain_df['usd_value'].sum()
+                        if c_vol > 0:
+                            types_vol = chain_df.groupby('wallet_type')['usd_value'].sum()
+                            acc_vol = types_vol.get('accumulator', 0)
+                            exc_vol = types_vol.get('exchange', 0)
+                            
+                            if acc_vol / c_vol > 0.5:
+                                signal, color = "🟢 BULLISH", "#14F195"
+                                reason = f"Supply Shock: {acc_vol/c_vol*100:.0f}% of volume moving to Accumulators."
+                            elif exc_vol / c_vol > 0.6:
+                                signal, color = "🔴 BEARISH", "#FF4B4B"
+                                reason = f"Sell Wall: {exc_vol/c_vol*100:.0f}% of volume flowing into Exchanges."
+                            else:
+                                signal, color = "🟡 STANDBY", "#F7931A"
+                                reason = "Mixed flows. No clear imbalance."
+                                
+                    with pred_cols[idx]:
+                        st.markdown(f'''
+                        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid {color}; height: 140px;">
+                            <h4 style="margin: 0; padding: 0; color: #E2E8F0;">{chain}</h4>
+                            <h5 style="margin: 5px 0 10px 0; color: {color};">{signal}</h5>
+                            <p style="margin: 0; font-size: 0.85em; color: #94A3B8; line-height: 1.4;">{reason}</p>
+                        </div>
+                        ''', unsafe_allow_html=True)
+                    idx += 1
             else:
                 st.info("🌊 No whale alerts detected yet. Monitoring blockchain for large movements...")
         
