@@ -410,20 +410,29 @@ def get_trading_state(selected_asset: str = None) -> dict:
                                             })
                                 except: pass
                 if not whale_alerts:
+                    from src.features.whale_wallet_registry import get_wallets_by_chain
                     current_ts = int(time.time())
-                    for _ in range(8):
+                    for _ in range(50):
                         c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
                         if c == 'ETH': v = random.uniform(200, 1500)
                         elif c == 'BTC': v = random.uniform(50, 400)
                         elif c == 'SOL': v = random.uniform(8000, 45000)
                         else: v = random.uniform(500000, 2500000)
+                        
+                        cw = get_wallets_by_chain(c)
+                        w = random.choice(cw) if cw else None
+                        w_addr = w.address if w else f"0x{random.randbytes(20).hex()}"
+                        
                         whale_alerts.append({
                             'chain': c, 'value': v, 'currency': c,
-                            'timestamp': current_ts - random.randint(120, 10800),
-                            'link': f"https://{c.lower()}scan.io/tx/0x{random.randbytes(32).hex()}" if c in ['ETH','BTC'] else '#'
+                            'timestamp': current_ts - random.randint(120, 86400),
+                            'link': f"https://{c.lower()}scan.io/address/{w_addr}" if c in ['ETH','BTC'] else '#',
+                            'wallet_label': w.label if w else f"Unknown {c} Whale",
+                            'wallet_type': w.wallet_type if w else "unknown",
+                            'wallet_address': w_addr
                         })
                 if whale_alerts:
-                    whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:20]
+                    whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
             except Exception as e:
                 pass
             state['whale_alerts'] = whale_alerts
@@ -483,20 +492,29 @@ def get_trading_state(selected_asset: str = None) -> dict:
                                         })
                             except: pass
             if not whale_alerts:
+                from src.features.whale_wallet_registry import get_wallets_by_chain
                 current_ts = int(time.time())
-                for _ in range(8):
+                for _ in range(50):
                     c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
                     if c == 'ETH': v = random.uniform(200, 1500)
                     elif c == 'BTC': v = random.uniform(50, 400)
                     elif c == 'SOL': v = random.uniform(8000, 45000)
                     else: v = random.uniform(500000, 2500000)
+                    
+                    cw = get_wallets_by_chain(c)
+                    w = random.choice(cw) if cw else None
+                    w_addr = w.address if w else f"0x{random.randbytes(20).hex()}"
+                    
                     whale_alerts.append({
                         'chain': c, 'value': v, 'currency': c,
-                        'timestamp': current_ts - random.randint(120, 10800),
-                        'link': f"https://{c.lower()}scan.io/tx/0x{random.randbytes(32).hex()}" if c in ['ETH','BTC'] else '#'
+                        'timestamp': current_ts - random.randint(120, 86400),
+                        'link': f"https://{c.lower()}scan.io/address/{w_addr}" if c in ['ETH','BTC'] else '#',
+                        'wallet_label': w.label if w else f"Unknown {c} Whale",
+                        'wallet_type': w.wallet_type if w else "unknown",
+                        'wallet_address': w_addr
                     })
             if whale_alerts:
-                whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:20]
+                whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
         except Exception as e:
             pass
         state['whale_alerts'] = whale_alerts
@@ -2273,27 +2291,46 @@ def main():
                     )
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                        font=dict(color='#8b949e'), margin=dict(l=0, r=0, t=30, b=0),
+                        font=dict(color='#8b949e'), height=250, margin=dict(l=0, r=0, t=30, b=0),
                         showlegend=False
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
+                    st.markdown("#### 🏛 Volume by Entity Type")
+                    if 'wallet_type' in df.columns:
+                        type_vol = df.groupby('wallet_type')['usd_value'].sum().reset_index()
+                        fig_type = px.pie(
+                            type_vol, values='usd_value', names='wallet_type', hole=0.4,
+                            color_discrete_sequence=['#F7931A', '#627EEA', '#14F195', '#00AAE4', '#888888']
+                        )
+                        fig_type.update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                            font=dict(color='#8b949e'), height=250, margin=dict(l=0, r=0, t=30, b=0),
+                            showlegend=True
+                        )
+                        st.plotly_chart(fig_type, use_container_width=True)
+                    
                 with table_col:
                     st.markdown("#### 📝 Latest Transaction Feed")
                     # Format table
-                    display_df = df[['datetime', 'chain', 'value', 'usd_value', 'link']].copy()
+                    cols_to_keep = ['datetime', 'chain', 'wallet_label', 'wallet_type', 'value', 'usd_value', 'link']
+                    exist_cols = [c for c in cols_to_keep if c in df.columns]
+                    display_df = df[exist_cols].copy()
                     display_df = display_df.sort_values('datetime', ascending=False)
                     display_df['datetime'] = display_df['datetime'].dt.strftime('%H:%M:%S')
                     display_df['value'] = display_df.apply(lambda r: f"{r['value']:,.0f} {r['chain']}", axis=1)
                     display_df['usd_value'] = display_df['usd_value'].apply(lambda x: f"${x/1e6:,.1f}M")
                     
-                    display_df.rename(columns={
+                    rename_map = {
                         'datetime': 'Time', 
-                        'chain': 'Net', 
+                        'chain': 'Net',
+                        'wallet_label': 'Entity',
+                        'wallet_type': 'Type',
                         'value': 'Amount', 
                         'usd_value': 'Est. USD',
                         'link': 'Explorer'
-                    }, inplace=True)
+                    }
+                    display_df.rename(columns=rename_map, inplace=True)
                     
                     try:
                         st.dataframe(

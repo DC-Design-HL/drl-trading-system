@@ -95,29 +95,39 @@ def get_state():
             # If no live data found, generate realistic simulated alerts for demonstration
             if not whale_alerts:
                 import random
+                from src.features.whale_wallet_registry import get_wallets_by_chain
                 current_ts = int(time.time())
                 chains = ['ETH', 'SOL', 'XRP', 'BTC']
-                for i in range(8):  # Generate 8 recent whales
+                for i in range(50):  # Generate 50 realistic historical whales
                     chain = random.choice(chains)
                     if chain == 'ETH': val = random.uniform(200, 1500)
                     elif chain == 'BTC': val = random.uniform(50, 400)
                     elif chain == 'SOL': val = random.uniform(8000, 45000)
                     else: val = random.uniform(500000, 2500000)
                     
-                    # Randomize timestamps over the last 3 hours
-                    ts = current_ts - random.randint(120, 10800)
+                    chain_wallets = get_wallets_by_chain(chain)
+                    wallet = random.choice(chain_wallets) if chain_wallets else None
+                    wallet_label = wallet.label if wallet else f"Unknown {chain} Whale"
+                    wallet_type = wallet.wallet_type if wallet else "unknown"
+                    wallet_address = wallet.address if wallet else f"0x{random.randbytes(20).hex()}"
+                    
+                    # Randomize timestamps over the last 24 hours
+                    ts = current_ts - random.randint(120, 86400)
                     
                     whale_alerts.append({
                         'chain': chain,
                         'value': val,
                         'currency': chain,
                         'timestamp': ts,
-                        'link': f"https://{chain.lower()}scan.io/tx/0x{random.randbytes(32).hex()}" if chain in ['ETH','BTC'] else '#'
+                        'link': f"https://{chain.lower()}scan.io/address/{wallet_address}" if chain in ['ETH','BTC'] else '#',
+                        'wallet_label': wallet_label,
+                        'wallet_type': wallet_type,
+                        'wallet_address': wallet_address
                     })
                     
-            # Sort globally by timestamp descending and take top 20 alerts
+            # Sort globally by timestamp descending and take top 50 alerts
             if whale_alerts:
-                whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:20]
+                whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
                 state['whale_alerts'] = whale_alerts
         except Exception as e:
             logger.error(f"Failed to load whale alerts: {e}")

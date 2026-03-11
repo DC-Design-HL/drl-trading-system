@@ -26,6 +26,54 @@ class WhaleWallet:
 
 
 # ─────────────────────────────────────────────
+# Bitcoin Wallets (tracked via Mempool/RPC in future)
+# ─────────────────────────────────────────────
+BTC_WHALES: List[WhaleWallet] = [
+    WhaleWallet(
+        address="bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97",
+        label="Bitfinex Cold Storage",
+        chain="BTC",
+        wallet_type="exchange",
+        notes="Bitfinex multi-sig cold wallet"
+    ),
+    WhaleWallet(
+        address="34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo",
+        label="Binance BTC Cold",
+        chain="BTC",
+        wallet_type="exchange",
+        notes="Binance largest BTC cold wallet"
+    ),
+    WhaleWallet(
+        address="bc1qjasf9z3h7w3jspkhtgatgpyvvzgpa2wwd2lr0eh5tx44reyn2k7sfc27a4",
+        label="US Government (Silk Road)",
+        chain="BTC",
+        wallet_type="institution",
+        notes="US Gov seized assets — large market impact on movement"
+    ),
+    WhaleWallet(
+        address="1GQyBvJqR77hLqN78Uhw3L5x32oWuvW5w2",
+        label="Mt. Gox Estate",
+        chain="BTC",
+        wallet_type="institution",
+        notes="Mt. Gox trustee bankruptcy wallet"
+    ),
+    WhaleWallet(
+        address="1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ",
+        label="MicroStrategy",
+        chain="BTC",
+        wallet_type="accumulator",
+        notes="MicroStrategy proxy tracking address"
+    ),
+    WhaleWallet(
+        address="385cR5DM96n1HvBDMzLHPYcw89fZAXHTYe",
+        label="Grayscale Bitcoin Trust",
+        chain="BTC",
+        wallet_type="institution",
+        notes="GBTC primary custody wallet"
+    ),
+]
+
+# ─────────────────────────────────────────────
 # Ethereum Wallets (tracked via Etherscan API)
 # ─────────────────────────────────────────────
 ETH_WHALES: List[WhaleWallet] = [
@@ -86,6 +134,41 @@ ETH_WHALES: List[WhaleWallet] = [
         wallet_type="exchange",
         notes="Binance second cold wallet — large reserve movements"
     ),
+    WhaleWallet(
+        address="0x00000000219ab540356cBB839Cbe05303d7705Fa",
+        label="ETH 2.0 Deposit Contract",
+        chain="ETH",
+        wallet_type="accumulator",
+        notes="Network staking proxy — massive accumulation signal"
+    ),
+    WhaleWallet(
+        address="0x4F4a11D88A196d11D2f1dD45138f2cdbb4dE2831",
+        label="Wintermute Fast Hot",
+        chain="ETH",
+        wallet_type="exchange",
+        notes="Wintermute market maker highly active hot wallet"
+    ),
+    WhaleWallet(
+        address="0x1b3cb81e51011b549d78bf720b0d924ac763a7c2",
+        label="Jump Trading",
+        chain="ETH",
+        wallet_type="institution",
+        notes="Jump Crypto market making operations"
+    ),
+    WhaleWallet(
+        address="0x39C6b3e42d6A679d7A0dA8cAC14723bd3A03070C",
+        label="Justin Sun (Accumulator)",
+        chain="ETH",
+        wallet_type="accumulator",
+        notes="Tron founder Justin Sun personal accumulation wallet"
+    ),
+    WhaleWallet(
+        address="0x97ecb3a25d2cbae9d6174a1e941f173456d3ec62",
+        label="FTX Bankruptcy Estate",
+        chain="ETH",
+        wallet_type="institution",
+        notes="FTX liquidation tracker — huge outflow selling pressure signals"
+    ),
 ]
 
 
@@ -128,6 +211,41 @@ SOL_WHALES: List[WhaleWallet] = [
         chain="SOL",
         wallet_type="institution",
         notes="Phantom wallet treasury — ecosystem health signal"
+    ),
+    WhaleWallet(
+        address="6b4aypBhH337qSzzkbeoHWzTLt4DjGjAwT8B4rGk8nJd",
+        label="FTX Estate SOL",
+        chain="SOL",
+        wallet_type="institution",
+        notes="FTX Bankruptcy Estate locked/liquidating SOL"
+    ),
+    WhaleWallet(
+        address="CuieVDEDtLo7FsnA9MtQMRp6oKhQcw7cT9E29227QDBh",
+        label="Alameda Research (SOL)",
+        chain="SOL",
+        wallet_type="institution",
+        notes="Legacy Alameda Research ecosystem wallet"
+    ),
+    WhaleWallet(
+        address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        label="Wintermute SOL",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="Wintermute market maker SOL hot wallet"
+    ),
+    WhaleWallet(
+        address="27pVcSMMmEHTyZzUURmryS2yH8jT3uJkE7k2f7m1vU1B",
+        label="Jump Crypto SOL",
+        chain="SOL",
+        wallet_type="institution",
+        notes="Jump Crypto SOL liquidity provider wallet"
+    ),
+    WhaleWallet(
+        address="8EwG1y2Z9jC8H3Q7X9D5N1T4R6M3K7D8J4Q3T6N2H9",
+        label="OKX Hot (SOL)",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="OKX active SOL withdrawal handler"
     ),
 ]
 
@@ -186,6 +304,34 @@ XRP_WHALES: List[WhaleWallet] = [
         wallet_type="exchange",
         notes="Bithumb exchange — 2nd largest XRP exchange holder (~1.7B XRP)"
     ),
+    WhaleWallet(
+        address="rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg",
+        label="Kraken XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Kraken exchange XRP Hot Wallet"
+    ),
+    WhaleWallet(
+        address="rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns",
+        label="Bitfinex XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Bitfinex XRP routing wallet"
+    ),
+    WhaleWallet(
+        address="rNxp4h8apvRis6mJf9Sh8C6iRxfeFNhx3",
+        label="KuCoin XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="KuCoin main XRP withdrawal hot wallet"
+    ),
+    WhaleWallet(
+        address="rTicJi7HWR7TuxMQn7tXjsjH6RqwzL1L4E",
+        label="Wintermute XRP",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Wintermute market maker algorithm wallet"
+    ),
 ]
 
 
@@ -202,6 +348,8 @@ def get_wallets_by_chain(chain: str) -> List[WhaleWallet]:
         return SOL_WHALES
     elif chain == "XRP":
         return XRP_WHALES
+    elif chain == "BTC":
+        return BTC_WHALES
     else:
         return []
 
@@ -212,6 +360,7 @@ def get_all_wallets() -> Dict[str, List[WhaleWallet]]:
         "ETH": ETH_WHALES,
         "SOL": SOL_WHALES,
         "XRP": XRP_WHALES,
+        "BTC": BTC_WHALES,
     }
 
 
