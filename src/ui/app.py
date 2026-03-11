@@ -2273,7 +2273,7 @@ def main():
                 xrp_whales = len(df[df['chain'] == 'XRP'])
                 sol_whales = len(df[df['chain'] == 'SOL'])
                 btc_whales = len(df[df['chain'] == 'BTC'])
-                col4.metric("Network Activity", f"BTC:{btc_whales} ETH:{eth_whales} SOL:{sol_whales}")
+                col4.metric("Network Activity", f"BTC:{btc_whales} ETH:{eth_whales} SOL:{sol_whales} XRP:{xrp_whales}")
                 
                 st.divider()
                 
@@ -2281,8 +2281,11 @@ def main():
                 
                 with chart_col:
                     st.markdown("#### 📊 Whale Volume by Chain (USD)")
-                    # Group by chain
+                    # Group by chain and enforce order
                     chain_vol = df.groupby('chain')['usd_value'].sum().reset_index()
+                    all_chains = pd.DataFrame({'chain': ['BTC', 'ETH', 'SOL', 'XRP']})
+                    chain_vol = pd.merge(all_chains, chain_vol, on='chain', how='left').fillna(0)
+                    
                     fig = px.bar(
                         chain_vol, x='chain', y='usd_value', 
                         color='chain', text_auto='.2s',
@@ -2292,7 +2295,8 @@ def main():
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                         font=dict(color='#8b949e'), height=250, margin=dict(l=0, r=0, t=30, b=0),
-                        showlegend=False
+                        showlegend=False,
+                        xaxis={'categoryorder':'array', 'categoryarray':['BTC','ETH','SOL','XRP']}
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
