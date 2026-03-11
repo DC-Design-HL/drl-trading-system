@@ -71,6 +71,20 @@ BTC_WHALES: List[WhaleWallet] = [
         wallet_type="institution",
         notes="GBTC primary custody wallet"
     ),
+    WhaleWallet(
+        address="1NDyJtNTjmwk5xPNhjgAMu4HDHigtobu1s",
+        label="Binance BTC Hot",
+        chain="BTC",
+        wallet_type="exchange",
+        notes="Binance massive BTC hot wallet"
+    ),
+    WhaleWallet(
+        address="bc1ql49ydapnjafl5t2c9zptw3wk9dfu6qwk0p6jxtk",
+        label="Robinhood BTC",
+        chain="BTC",
+        wallet_type="exchange",
+        notes="Robinhood proxy tracking address"
+    ),
 ]
 
 # ─────────────────────────────────────────────
@@ -169,6 +183,20 @@ ETH_WHALES: List[WhaleWallet] = [
         wallet_type="institution",
         notes="FTX liquidation tracker — huge outflow selling pressure signals"
     ),
+    WhaleWallet(
+        address="0xcEe284F754E854890e311e3280bbf64426eb862b",
+        label="Arbitrum Bridge",
+        chain="ETH",
+        wallet_type="institution",
+        notes="Massive lockup proxy for Arbitrum network"
+    ),
+    WhaleWallet(
+        address="0x2910543af39abA0Cd09dBb2D50200b3E800A63D2",
+        label="Kraken Deposit",
+        chain="ETH",
+        wallet_type="exchange",
+        notes="Kraken ETH Deposit consolidation"
+    ),
 ]
 
 
@@ -246,6 +274,20 @@ SOL_WHALES: List[WhaleWallet] = [
         chain="SOL",
         wallet_type="exchange",
         notes="OKX active SOL withdrawal handler"
+    ),
+    WhaleWallet(
+        address="5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
+        label="Raydium Authority",
+        chain="SOL",
+        wallet_type="institution",
+        notes="Massive SOL DEX router"
+    ),
+    WhaleWallet(
+        address="3vxheE5CEeG7tQpD7ZtL1mWeXF5B8M63U4hD1D1WegE",
+        label="Upbit SOL",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="Upbit SOL dominant exchange"
     ),
 ]
 
@@ -331,6 +373,20 @@ XRP_WHALES: List[WhaleWallet] = [
         chain="XRP",
         wallet_type="exchange",
         notes="Wintermute market maker algorithm wallet"
+    ),
+    WhaleWallet(
+        address="rKiCet8SdvWxPeB8U4b2gA2YF4hXGkKw7T",
+        label="Ripple OTC",
+        chain="XRP",
+        wallet_type="institution",
+        notes="Ripple OTC distribution wallet"
+    ),
+    WhaleWallet(
+        address="rJb5KsHsDnc14QvA3P9A5h5D3H4x7R8gMv",
+        label="Binance XRP Cold 2",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Binance Cold Storage backup for XRP"
     ),
 ]
 
