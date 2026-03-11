@@ -377,11 +377,24 @@ def get_trading_state(selected_asset: str = None) -> dict:
         if selected_asset and 'assets' in state and selected_asset in state['assets']:
             asset_state = state['assets'][selected_asset]
             asset_trades = load_trading_log(symbol=selected_asset)
+            
+            # MATHEMATICAL OVERRIDE: Same logic as api_server.py to sync the center dashboard
+            all_trades = load_trading_log()
+            realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+            raw_assets = state.get('assets', {})
+            open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
+            initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
+            
+            total_pnl = realized_pnl + open_pnl
+            total_balance = initial_capital + total_pnl
+            
             return {
-                'balance': state.get('total_balance', 0),
+                'balance': total_balance,
+                'total_balance': total_balance,
                 'asset_balance': asset_state.get('balance', 0),
                 'position': asset_state.get('position', 0),
-                'realized_pnl': state.get('total_pnl', 0),
+                'realized_pnl': total_pnl,
+                'total_pnl': total_pnl,
                 'asset_pnl': asset_state.get('pnl', 0),
                 'trades': asset_trades,
                 'total_trades': len([t for t in asset_trades if 'OPEN' in t.get('action', '')]),
@@ -397,9 +410,21 @@ def get_trading_state(selected_asset: str = None) -> dict:
             }
         
         # Default: return list of assets if no specific one selected (or global view)
+        
+        # MATHEMATICAL OVERRIDE: Global sync
+        all_trades = load_trading_log()
+        realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+        raw_assets = state.get('assets', {})
+        open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
+        initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
+        total_pnl = realized_pnl + open_pnl
+        total_balance = initial_capital + total_pnl
+        
         return {
-            'balance': state.get('total_balance', 0),
-            'realized_pnl': state.get('total_pnl', 0),
+            'balance': total_balance,
+            'total_balance': total_balance,
+            'realized_pnl': total_pnl,
+            'total_pnl': total_pnl,
             'multi_asset': True,
             'available_assets': list(state.get('assets', {}).keys()),
             'raw_state': state 
