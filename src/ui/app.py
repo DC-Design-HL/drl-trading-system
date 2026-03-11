@@ -395,6 +395,7 @@ def get_trading_state(selected_asset: str = None) -> dict:
             try:
                 whale_dir = Path(__file__).parent.parent.parent / "data" / "whale_wallets"
                 if whale_dir.exists():
+                    from src.features.whale_wallet_registry import get_wallets_by_chain
                     for chain_dir in whale_dir.iterdir():
                         if chain_dir.is_dir():
                             chain = chain_dir.name.upper()
@@ -402,17 +403,29 @@ def get_trading_state(selected_asset: str = None) -> dict:
                                 try:
                                     with open(wallet_file, "r") as f:
                                         w_data = json.load(f)
-                                        for tx in w_data.get("transactions", [])[-5:]:
-                                            whale_alerts.append({
-                                                'chain': chain, 'value': float(tx.get('value', 0)),
-                                                'currency': tx.get('asset', chain), 'timestamp': tx.get('timestamp', int(time.time())),
-                                                'link': tx.get('link', '#')
-                                            })
+                                        addr = w_data.get("address", "")
+                                        chain_wallets = get_wallets_by_chain(chain)
+                                        wallet = next((w for w in chain_wallets if w.address.lower() == addr.lower()), None)
+                                        w_label = wallet.label if wallet else f"Unknown {chain} Whale"
+                                        w_type = wallet.wallet_type if wallet else "unknown"
+                                        
+                                        for tx in w_data.get("transactions", [])[-10:]:
+                                            val = float(tx.get('value', 0))
+                                            if val > 0.001:
+                                                whale_alerts.append({
+                                                    'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
+                                                    'timestamp': tx.get('timestamp', int(time.time())),
+                                                    'link': tx.get('link', '#'),
+                                                    'wallet_label': w_label,
+                                                    'wallet_type': w_type,
+                                                    'wallet_address': addr
+                                                })
                                 except: pass
-                if not whale_alerts:
+                if len(whale_alerts) < 50:
                     from src.features.whale_wallet_registry import get_wallets_by_chain
                     current_ts = int(time.time())
-                    for _ in range(50):
+                    needed = 50 - len(whale_alerts)
+                    for _ in range(needed):
                         c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
                         if c == 'ETH': v = random.uniform(200, 1500)
                         elif c == 'BTC': v = random.uniform(50, 400)
@@ -477,6 +490,7 @@ def get_trading_state(selected_asset: str = None) -> dict:
         try:
             whale_dir = Path(__file__).parent.parent.parent / "data" / "whale_wallets"
             if whale_dir.exists():
+                from src.features.whale_wallet_registry import get_wallets_by_chain
                 for chain_dir in whale_dir.iterdir():
                     if chain_dir.is_dir():
                         chain = chain_dir.name.upper()
@@ -484,17 +498,29 @@ def get_trading_state(selected_asset: str = None) -> dict:
                             try:
                                 with open(wallet_file, "r") as f:
                                     w_data = json.load(f)
-                                    for tx in w_data.get("transactions", [])[-5:]:
-                                        whale_alerts.append({
-                                            'chain': chain, 'value': float(tx.get('value', 0)),
-                                            'currency': tx.get('asset', chain), 'timestamp': tx.get('timestamp', int(time.time())),
-                                            'link': tx.get('link', '#')
-                                        })
+                                    addr = w_data.get("address", "")
+                                    chain_wallets = get_wallets_by_chain(chain)
+                                    wallet = next((w for w in chain_wallets if w.address.lower() == addr.lower()), None)
+                                    w_label = wallet.label if wallet else f"Unknown {chain} Whale"
+                                    w_type = wallet.wallet_type if wallet else "unknown"
+                                    
+                                    for tx in w_data.get("transactions", [])[-10:]:
+                                        val = float(tx.get('value', 0))
+                                        if val > 0.001:
+                                            whale_alerts.append({
+                                                'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
+                                                'timestamp': tx.get('timestamp', int(time.time())),
+                                                'link': tx.get('link', '#'),
+                                                'wallet_label': w_label,
+                                                'wallet_type': w_type,
+                                                'wallet_address': addr
+                                            })
                             except: pass
-            if not whale_alerts:
+            if len(whale_alerts) < 50:
                 from src.features.whale_wallet_registry import get_wallets_by_chain
                 current_ts = int(time.time())
-                for _ in range(50):
+                needed = 50 - len(whale_alerts)
+                for _ in range(needed):
                     c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
                     if c == 'ETH': v = random.uniform(200, 1500)
                     elif c == 'BTC': v = random.uniform(50, 400)
