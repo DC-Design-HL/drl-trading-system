@@ -2227,68 +2227,87 @@ def main():
                     st.code(f.read())
         
         with tab_whales:
-            st.markdown("### 🐋 On-Chain Whale Alerts")
+            st.markdown("### 🐋 On-Chain Whale Analytics")
             
             whale_alerts = state.get('whale_alerts', [])
             
             if whale_alerts:
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Recent Alerts", len(whale_alerts))
+                import pandas as pd
+                import plotly.express as px
                 
-                eth_whales = len([w for w in whale_alerts if w.get('chain') == 'ETH'])
-                xrp_whales = len([w for w in whale_alerts if w.get('chain') == 'XRP'])
+                df = pd.DataFrame(whale_alerts)
+                df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
                 
-                col2.metric("ETH Whales", eth_whales)
-                col3.metric("XRP Whales", xrp_whales)
+                # Approximate USD prices for aggregation (since we only have raw crypto values)
+                # This allows us to "tell the story" of total USD economic volume moved
+                price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
+                df['usd_value'] = df.apply(lambda row: row['value'] * price_map.get(row['chain'], 1), axis=1)
+                
+                total_usd = df['usd_value'].sum()
+                top_chain = df.groupby('chain')['usd_value'].sum().idxmax() if not df.empty else "N/A"
+                
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Recent Alerts", len(df))
+                col2.metric("Trailing Vol (USD)", f"${total_usd/1e6:.1f}M")
+                col3.metric("Most Active Chain", top_chain)
+                
+                eth_whales = len(df[df['chain'] == 'ETH'])
+                xrp_whales = len(df[df['chain'] == 'XRP'])
+                sol_whales = len(df[df['chain'] == 'SOL'])
+                btc_whales = len(df[df['chain'] == 'BTC'])
+                col4.metric("Network Activity", f"BTC:{btc_whales} ETH:{eth_whales} SOL:{sol_whales}")
                 
                 st.divider()
                 
-                for alert in whale_alerts:
-                    chain = alert.get('chain', 'UNKNOWN')
-                    value = alert.get('value', 0)
-                    currency = alert.get('currency', '')
-                    link = alert.get('link', '#')
-                    ts = alert.get('timestamp', 0)
-                    time_str = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
+                chart_col, table_col = st.columns([1.2, 1])
+                
+                with chart_col:
+                    st.markdown("#### 📊 Whale Volume by Chain (USD)")
+                    # Group by chain
+                    chain_vol = df.groupby('chain')['usd_value'].sum().reset_index()
+                    fig = px.bar(
+                        chain_vol, x='chain', y='usd_value', 
+                        color='chain', text_auto='.2s',
+                        color_discrete_map={'BTC': '#F7931A', 'ETH': '#627EEA', 'SOL': '#14F195', 'XRP': '#00AAE4'},
+                        labels={'usd_value': 'Estimated USD Volume', 'chain': 'Network'}
+                    )
+                    fig.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                        font=dict(color='#8b949e'), margin=dict(l=0, r=0, t=30, b=0),
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
                     
-                    color = "#627EEA" if chain == 'ETH' else "#23292F"
-                    if chain == 'XRP': color = "#00AAE4"
-                    if chain == 'SOL': color = "#14F195"
+                with table_col:
+                    st.markdown("#### 📝 Latest Transaction Feed")
+                    # Format table
+                    display_df = df[['datetime', 'chain', 'value', 'usd_value', 'link']].copy()
+                    display_df = display_df.sort_values('datetime', ascending=False)
+                    display_df['datetime'] = display_df['datetime'].dt.strftime('%H:%M:%S')
+                    display_df['value'] = display_df.apply(lambda r: f"{r['value']:,.0f} {r['chain']}", axis=1)
+                    display_df['usd_value'] = display_df['usd_value'].apply(lambda x: f"${x/1e6:,.1f}M")
                     
-                    st.markdown(f'''
-                    <div style="
-                        background: #151b23;
-                        padding: 15px;
-                        border-radius: 8px;
-                        margin-bottom: 10px;
-                        border-left: 4px solid {color};
-                        border: 1px solid #21262d;
-                        border-left: 4px solid {color};
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                    ">
-                        <div>
-                            <span style="color: {color}; font-weight: bold; font-size: 14px;">{chain}</span>
-                            <span style="color: white; font-size: 16px; font-weight: bold; margin-left: 15px;">
-                                {value:,.0f} {currency}
-                            </span>
-                            <span style="color: #888; font-size: 12px; margin-left: 15px;">
-                                {time_str}
-                            </span>
-                        </div>
-                        <div>
-                            <a href="{link}" target="_blank" style="
-                                background: #21262d;
-                                color: #e6edf3;
-                                text-decoration: none;
-                                padding: 5px 15px;
-                                border-radius: 4px;
-                                font-size: 12px;
-                            ">View TX ↗</a>
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
+                    display_df.rename(columns={
+                        'datetime': 'Time', 
+                        'chain': 'Net', 
+                        'value': 'Amount', 
+                        'usd_value': 'Est. USD',
+                        'link': 'Explorer'
+                    }, inplace=True)
+                    
+                    try:
+                        st.dataframe(
+                            display_df,
+                            column_config={
+                                "Explorer": st.column_config.LinkColumn("Explorer", display_text="View TX ↗")
+                            },
+                            use_container_width=True,
+                            hide_index=True,
+                            height=400
+                        )
+                    except Exception:
+                        # Fallback for older Streamlit versions without column_config
+                        st.dataframe(display_df.drop(columns=['Explorer']), use_container_width=True, height=400)
             else:
                 st.info("🌊 No whale alerts detected yet. Monitoring blockchain for large movements...")
         
