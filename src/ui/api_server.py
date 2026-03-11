@@ -91,8 +91,12 @@ def get_state():
                                     
                                     for tx in w_data.get("transactions", [])[-10:]:
                                         val = float(tx.get('value', 0))
-                                        # Filter out 0-value smart contract pings
-                                        if val > 0.001: 
+                                        
+                                        # Strict $50k USD minimum threshold
+                                        price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
+                                        usd_val = val * price_map.get(chain, 1)
+                                        
+                                        if usd_val > 50000: 
                                             alert = {
                                                 'chain': chain,
                                                 'value': val,

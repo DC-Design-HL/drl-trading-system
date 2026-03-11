@@ -411,7 +411,9 @@ def get_trading_state(selected_asset: str = None) -> dict:
                                         
                                         for tx in w_data.get("transactions", [])[-10:]:
                                             val = float(tx.get('value', 0))
-                                            if val > 0.001:
+                                            price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
+                                            usd_val = val * price_map.get(chain, 1)
+                                            if usd_val > 50000:
                                                 whale_alerts.append({
                                                     'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
                                                     'timestamp': tx.get('timestamp', int(time.time())),
@@ -506,7 +508,9 @@ def get_trading_state(selected_asset: str = None) -> dict:
                                     
                                     for tx in w_data.get("transactions", [])[-10:]:
                                         val = float(tx.get('value', 0))
-                                        if val > 0.001:
+                                        price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
+                                        usd_val = val * price_map.get(chain, 1)
+                                        if usd_val > 50000:
                                             whale_alerts.append({
                                                 'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
                                                 'timestamp': tx.get('timestamp', int(time.time())),
@@ -2348,8 +2352,8 @@ def main():
                     display_df = df[exist_cols].copy()
                     display_df = display_df.sort_values('datetime', ascending=False)
                     display_df['datetime'] = display_df['datetime'].dt.strftime('%H:%M:%S')
-                    display_df['value'] = display_df.apply(lambda r: f"{r['value']:,.0f} {r['chain']}", axis=1)
-                    display_df['usd_value'] = display_df['usd_value'].apply(lambda x: f"${x/1e6:,.1f}M")
+                    display_df['value'] = display_df.apply(lambda r: f"{r['value']:,.0f} {r['chain']}" if r['value'] >= 1000 else (f"{r['value']:,.2f} {r['chain']}" if r['value'] >= 1 else f"{r['value']:,.4f} {r['chain']}"), axis=1)
+                    display_df['usd_value'] = display_df['usd_value'].apply(lambda x: f"${x/1e6:,.1f}M" if x >= 1e6 else f"${x/1000:,.0f}k")
                     
                     rename_map = {
                         'datetime': 'Time', 
