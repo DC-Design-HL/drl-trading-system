@@ -1015,15 +1015,15 @@ def render_sidebar_metrics_fragment():
                 # Update session state with API data (optional, but good for other parts)
                 if 'balance' in api_state:
                      st.session_state.portfolio_balance = api_state.get('balance', 0)
-                     st.session_state.realized_pnl = api_state.get('realized_pnl', 0)
+                     st.session_state.total_pnl = api_state.get('total_pnl', 0)
             
             # Render
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Portfolio Value</div>
                 <div class="metric-value">${st.session_state.get('portfolio_balance', 10000):,.2f}</div>
-                <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('realized_pnl', 0) >= 0 else '#ef5350'}">
-                    P&L: {'+' if st.session_state.get('realized_pnl', 0) >= 0 else ''}${st.session_state.get('realized_pnl', 0):,.2f}
+                <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('total_pnl', 0) >= 0 else '#ef5350'}">
+                    P&L: {'+' if st.session_state.get('total_pnl', 0) >= 0 else ''}${st.session_state.get('total_pnl', 0):,.2f}
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -2035,11 +2035,11 @@ def main():
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Realized PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pct)}{realized_pct:.2f}%</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pct)}{abs(realized_pct):.2f}%</div>
                     </div>
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Open PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pct)}{open_pct:.2f}%</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pct)}{abs(open_pct):.2f}%</div>
                     </div>
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Win Rate</div>
