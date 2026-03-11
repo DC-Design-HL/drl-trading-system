@@ -194,6 +194,12 @@ class WhalePatternLearner:
                 .reindex(hourly.index, fill_value=0)
             )
 
+        # ── Contextual Flow Ratio Features ──
+        # Provide the ML model with the direct percentage splits (Exchange Dominance vs Accumulators)
+        total_ctx_flow = sum(hourly.get(f"to_{ctx}_flow", 0) for ctx in ["exchange", "institution", "accumulator"]) + 1e-9
+        hourly["exchange_dump_ratio"] = hourly.get("to_exchange_flow", 0) / total_ctx_flow
+        hourly["accumulator_hoard_ratio"] = hourly.get("to_accumulator_flow", 0) / total_ctx_flow
+
         # ── Per-wallet flow features (top 5 wallets) ──
         unique_wallets = sorted(df["wallet_idx"].unique())[:5]
         for w_idx in unique_wallets:
