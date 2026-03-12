@@ -53,3 +53,14 @@ sdist/
 var/
 venv/
 wheels/
+
+# Test files
+test_*.py
+test_*.js
+backfill_context.py
+
+# Data files (local only)
+data/backtest_report.json
+data/trading.db
+rendered*.html
+rendered*.js
