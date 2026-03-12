@@ -6,6 +6,8 @@ This directory contains specialized AI agent definitions for the DRL Trading Sys
 
 ## 🤖 Available Agents
 
+### Core Team (Essential)
+
 ### 1. **ML Engineer / Quant Developer** [`developer-ml-engineer.md`]
 **Expertise:** Deep Reinforcement Learning, Feature Engineering, Trading Systems
 **Primary Focus:** Model development, training, feature engineering, code quality
@@ -106,6 +108,108 @@ This directory contains specialized AI agent definitions for the DRL Trading Sys
 
 ---
 
+### Profitability Team (Highly Recommended)
+
+### 6. **Quantitative Researcher** [`quantitative-researcher.md`]
+**Expertise:** Alpha Discovery, Statistical Analysis, Market Microstructure Research
+**Primary Focus:** Find new profitable signals and trading strategies
+
+**Key Responsibilities:**
+- Research and discover new alpha (profitable signals)
+- Implement academic papers and cutting-edge research
+- Perform statistical analysis and hypothesis testing
+- Identify predictive features through rigorous research
+- Validate strategies across market regimes
+
+**When to Use:**
+- Discovering new trading strategies
+- Researching feature importance
+- Implementing academic papers
+- Statistical validation of signals
+- Market regime analysis
+
+---
+
+### 7. **Data Scientist / Analyst** [`data-scientist.md`]
+**Expertise:** Experimentation, Performance Analysis, Statistical Validation
+**Primary Focus:** Validate what works through data analysis
+
+**Key Responsibilities:**
+- Deep-dive analysis of trading performance
+- A/B testing of models and strategies
+- Root cause analysis for losses
+- Feature attribution analysis
+- Data quality monitoring
+
+**When to Use:**
+- Analyzing why strategies work/fail
+- Comparing models (A/B testing)
+- Performance attribution
+- Experiment design and validation
+- Data quality issues
+
+---
+
+### 8. **MLOps Engineer** [`mlops-engineer.md`]
+**Expertise:** Model Lifecycle Management, ML Infrastructure, Production ML
+**Primary Focus:** Keep models profitable over time
+
+**Key Responsibilities:**
+- Monitor model performance in production
+- Detect model drift and trigger retraining
+- Manage model versions and registry
+- A/B test models in production
+- Automated retraining pipelines
+
+**When to Use:**
+- Model performance degrading
+- Setting up monitoring dashboards
+- Automating retraining
+- Deploying new model versions
+- Rollback after bad deployment
+
+---
+
+### 9. **DevOps / SRE Engineer** [`devops-sre-engineer.md`]
+**Expertise:** Production Infrastructure, CI/CD, Monitoring, Incident Response
+**Primary Focus:** Ensure 24/7 reliability and uptime
+
+**Key Responsibilities:**
+- Maintain production infrastructure (99.9% uptime)
+- CI/CD pipelines for automated deployment
+- Monitoring and alerting (Prometheus, Grafana)
+- Incident response and on-call
+- Disaster recovery and backups
+
+**When to Use:**
+- Bot is down or unstable
+- Setting up deployment pipelines
+- Performance optimization
+- Infrastructure scaling
+- Incident response
+
+---
+
+### 10. **Risk Officer / Compliance** [`risk-officer.md`]
+**Expertise:** Financial Risk, Regulatory Compliance, Portfolio Risk
+**Primary Focus:** Prevent catastrophic losses
+
+**Key Responsibilities:**
+- Real-time risk monitoring (VaR, drawdown, concentration)
+- Enforce position limits and circuit breakers
+- Stress testing and scenario analysis
+- Regulatory compliance (KYC/AML if production)
+- Risk reporting to management
+
+**When to Use:**
+- Setting risk parameters (position size, SL/TP)
+- Analyzing drawdown events
+- Stress testing portfolio
+- Compliance requirements
+- Risk limit breaches
+
+---
+
 ## 🎯 How to Use These Agents
 
 ### Scenario 1: Adding a New Feature
@@ -148,18 +252,20 @@ This directory contains specialized AI agent definitions for the DRL Trading Sys
 
 ## 📚 Agent Expertise Matrix
 
-| Topic | Developer | QA | Product | Architect | Trader |
-|-------|-----------|----|---------|-----------| -------|
-| **DRL/ML Models** | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★☆☆☆ |
-| **Trading Strategies** | ★★☆☆☆ | ★☆☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ |
-| **System Architecture** | ★★★☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★★ | ★☆☆☆☆ |
-| **Testing & QA** | ★★★☆☆ | ★★★★★ | ★★☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ |
-| **Product Management** | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ | ★★☆☆☆ | ★★★☆☆ |
-| **Risk Management** | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★★★★ |
-| **Feature Engineering** | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★☆ |
-| **Market Analysis** | ★★☆☆☆ | ★☆☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★★ |
-| **Performance Optimization** | ★★★★☆ | ★★★☆☆ | ★☆☆☆☆ | ★★★★★ | ★★☆☆☆ |
-| **User Experience** | ★★☆☆☆ | ★★★☆☆ | ★★★★★ | ★★☆☆☆ | ★★☆☆☆ |
+| Topic | ML Eng | QA | Product | Architect | Trader | Quant | DataSci | MLOps | DevOps | Risk |
+|-------|--------|----|---------|-----------| -------|-------|---------|-------|--------|------|
+| **DRL/ML Models** | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★☆☆☆ | ★★★★☆ | ★★★★☆ | ★★★★★ | ★★☆☆☆ | ★★☆☆☆ |
+| **Trading Strategies** | ★★☆☆☆ | ★☆☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★☆ |
+| **System Architecture** | ★★★☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★★ | ★☆☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★☆ | ★★★★★ | ★★☆☆☆ |
+| **Testing & QA** | ★★★☆☆ | ★★★★★ | ★★☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★☆☆ | ★★★★☆ | ★★★☆☆ | ★★★☆☆ | ★★☆☆☆ |
+| **Product Management** | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ | ★★☆☆☆ | ★★★☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ |
+| **Risk Management** | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★★★★ | ★★★★☆ | ★★★☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★★ |
+| **Feature Engineering** | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★☆ | ★★★★★ | ★★★★☆ | ★★★☆☆ | ★☆☆☆☆ | ★★☆☆☆ |
+| **Market Analysis** | ★★☆☆☆ | ★☆☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★★ | ★★★★★ | ★★★★☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★☆ |
+| **Performance Optimization** | ★★★★☆ | ★★★☆☆ | ★☆☆☆☆ | ★★★★★ | ★★☆☆☆ | ★★★☆☆ | ★★★☆☆ | ★★★★☆ | ★★★★★ | ★★☆☆☆ |
+| **Statistical Analysis** | ★★★☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★☆☆ | ★★★★★ | ★★★★★ | ★★★☆☆ | ★☆☆☆☆ | ★★★★☆ |
+| **Infrastructure/DevOps** | ★★☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★★★☆ | ★☆☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★★★☆ | ★★★★★ | ★★☆☆☆ |
+| **Compliance/Legal** | ★☆☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★★☆☆☆ | ★☆☆☆☆ | ★★☆☆☆ | ★★★★★ |
 
 ★★★★★ = Expert | ★★★★☆ = Advanced | ★★★☆☆ = Proficient | ★★☆☆☆ = Intermediate | ★☆☆☆☆ = Basic
 
@@ -323,16 +429,23 @@ Location: `.agent/agents/professional-trader.md` → Section "Trade Journal Temp
 ## 🚀 Quick Reference
 
 ### I need to...
-- **Add a new feature** → Developer + Product + QA
-- **Fix a bug** → Developer + QA
-- **Train a model** → Developer + Trader
-- **Design architecture** → Architect + Developer
-- **Plan roadmap** → Product + Trader + Architect
-- **Test a feature** → QA + Developer
-- **Optimize performance** → Developer + Architect
-- **Analyze trades** → Trader + Product
-- **Make tech decision** → Architect + Developer + Product
-- **Validate strategy** → Trader + QA
+- **Add a new feature** → ML Engineer + Product + QA
+- **Fix a bug** → ML Engineer + QA
+- **Train a model** → ML Engineer + Professional Trader
+- **Design architecture** → Architect + ML Engineer
+- **Plan roadmap** → Product + Professional Trader + Architect
+- **Test a feature** → QA + ML Engineer
+- **Optimize performance** → ML Engineer + Architect + DevOps
+- **Analyze trades** → Data Scientist + Professional Trader
+- **Make tech decision** → Architect + ML Engineer + Product
+- **Validate strategy** → Quant Researcher + Data Scientist + QA
+- **Find new alpha** → Quant Researcher + Professional Trader
+- **Monitor model performance** → MLOps + Data Scientist
+- **Deploy to production** → DevOps + MLOps
+- **Manage risk** → Risk Officer + Professional Trader
+- **A/B test models** → Data Scientist + MLOps
+- **Incident response** → DevOps + Architect
+- **Compliance check** → Risk Officer + Product
 
 ---
 
