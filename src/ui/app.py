@@ -1961,10 +1961,10 @@ def main():
             
             # Overall metrics
             initial_capital = max(len(raw_assets), 1) * 5000
-            
-            # Use the mathematically validated global balance from the API Server patched state
-            lp_total_balance = state.get('total_balance', initial_capital)
-            lp_grand_total_pnl = state.get('total_pnl', 0)
+
+            # Calculate from trades (single source of truth) - same logic as Agent Status sidebar
+            lp_grand_total_pnl = realized_pnl_total + open_pnl_total
+            lp_total_balance = initial_capital + lp_grand_total_pnl
             
             realized_pct = (realized_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
             open_pct = (open_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
