@@ -1234,20 +1234,89 @@ class MultiAssetOrchestrator:
         logger.info("✅ Clean state saved")
     
     def load_state(self):
-        """Load state from storage."""
+        """Load state from storage and reconcile with trade history."""
         try:
             state = self.storage.load_state()
             if not state:
+                # No saved state - reconstruct from trade history
+                logger.info("💾 No saved state found, reconstructing from trade history...")
+                self._reconstruct_state_from_trades()
                 return
-                
+
             assets = state.get('assets', {})
             for symbol, asset_state in assets.items():
                 if symbol in self.bots:
                     self.bots[symbol].restore_state(asset_state)
-                    
+
+            # CRITICAL FIX: Reconcile any missing assets from trade history
+            # If a bot exists but wasn't in the saved state, its P&L was lost
+            for symbol, bot in self.bots.items():
+                if symbol not in assets:
+                    logger.warning(f"⚠️ {symbol} not found in saved state, reconstructing from trades...")
+                    self._reconstruct_bot_state(symbol, bot)
+                else:
+                    # Validate that saved P&L matches trade history
+                    trades_pnl = self._calculate_pnl_from_trades(symbol)
+                    state_pnl = assets[symbol].get('pnl', 0)
+
+                    if abs(trades_pnl - state_pnl) > 0.01:
+                        logger.error(
+                            f"🚨 P&L MISMATCH for {symbol}: "
+                            f"State=${state_pnl:+.2f}, Trades=${trades_pnl:+.2f}, "
+                            f"Diff=${trades_pnl - state_pnl:+.2f}"
+                        )
+                        logger.warning(f"🔧 Correcting {symbol} P&L from trade history...")
+                        bot.realized_pnl = trades_pnl
+
             logger.info(f"💾 Loaded state for {len(assets)} assets")
         except Exception as e:
             logger.error(f"Failed to load state: {e}")
+
+    def _reconstruct_state_from_trades(self):
+        """Reconstruct all bot states from trade history."""
+        for symbol, bot in self.bots.items():
+            self._reconstruct_bot_state(symbol, bot)
+
+    def _reconstruct_bot_state(self, symbol: str, bot):
+        """Reconstruct a single bot's state from trade history."""
+        try:
+            # Get all trades for this symbol from storage
+            all_trades = self.storage.get_trades(limit=10000)  # Get all trades
+            symbol_trades = [t for t in all_trades if t.get('symbol') == symbol or t.get('asset') == symbol]
+
+            if not symbol_trades:
+                logger.info(f"📊 No trade history found for {symbol}, starting fresh")
+                return
+
+            # Calculate total realized P&L from trade history
+            total_pnl = sum(t.get('pnl', 0) for t in symbol_trades)
+
+            # Find last trade to get position info
+            last_trade = max(symbol_trades, key=lambda t: t.get('timestamp', ''))
+
+            # Restore state
+            bot.realized_pnl = total_pnl
+            bot.position = last_trade.get('position', 0)
+            bot.balance = last_trade.get('balance', bot.initial_balance)
+
+            logger.info(
+                f"🔧 Reconstructed {symbol}: "
+                f"P&L=${total_pnl:+.2f}, "
+                f"Position={bot.position}, "
+                f"Trades={len(symbol_trades)}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to reconstruct {symbol} state: {e}")
+
+    def _calculate_pnl_from_trades(self, symbol: str) -> float:
+        """Calculate total realized P&L for a symbol from trade history."""
+        try:
+            all_trades = self.storage.get_trades(limit=10000)
+            symbol_trades = [t for t in all_trades if t.get('symbol') == symbol or t.get('asset') == symbol]
+            return sum(t.get('pnl', 0) for t in symbol_trades)
+        except Exception as e:
+            logger.error(f"Failed to calculate P&L from trades for {symbol}: {e}")
+            return 0.0
     
     def run_single_cycle(self) -> Dict[str, Dict]:
         """Run one trading cycle for all assets."""
@@ -1366,7 +1435,7 @@ class MultiAssetOrchestrator:
         state['active'] = self._running
         state['whale_alerts'] = self.whale_watcher.get_latest_alerts()
         state['reset_timestamp'] = getattr(self, 'reset_timestamp', None)
-        
+
         # Add per-asset details
         state['assets'] = {}
         for symbol, bot in self.bots.items():
@@ -1384,7 +1453,22 @@ class MultiAssetOrchestrator:
                 'equity': bot.last_equity,
                 'analysis': bot.get_market_analysis() # Add analysis data
             }
-            
+
+            # VALIDATION: Check if bot P&L matches trade history (every save)
+            if hasattr(self, '_last_pnl_check_time'):
+                # Only check every 5 minutes to avoid spam
+                if (datetime.now().timestamp() - self._last_pnl_check_time) < 300:
+                    continue
+
+            trades_pnl = self._calculate_pnl_from_trades(symbol)
+            if abs(bot.realized_pnl - trades_pnl) > 0.01:
+                logger.error(
+                    f"⚠️ P&L VALIDATION FAILED for {symbol}: "
+                    f"Bot=${bot.realized_pnl:+.2f}, Trades=${trades_pnl:+.2f}, "
+                    f"Diff=${bot.realized_pnl - trades_pnl:+.2f}"
+                )
+
+        self._last_pnl_check_time = datetime.now().timestamp()
         self.storage.save_state(state)
     
     def stop(self):
