@@ -51,8 +51,17 @@ except Exception as e:
         print(f"❌ Error duplicating Space: {e}")
         raise
 
-# Step 2: Add necessary secrets to dev Space
-print("\nStep 2: Configuring secrets...")
+# Step 2: Add necessary secrets and variables to dev Space
+print("\nStep 2: Configuring secrets and environment...")
+
+# Add ENVIRONMENT variable to distinguish dev from prod
+try:
+    api.add_space_variable(repo_id=DEV_SPACE, key="ENVIRONMENT", value="dev")
+    print(f"  ✅ Added variable: ENVIRONMENT=dev")
+except Exception as e:
+    print(f"  ⚠️  Could not add ENVIRONMENT variable: {e}")
+
+# Add secrets
 secrets_to_add = {
     "HF_TOKEN": HF_TOKEN,
     "BINANCE_API_KEY": os.getenv("BINANCE_API_KEY", ""),

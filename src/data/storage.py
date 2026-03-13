@@ -91,21 +91,25 @@ class MongoStorage(StorageInterface):
         self.uri = connection_string or os.getenv("MONGO_URI")
         if not self.uri:
             raise ValueError("MONGO_URI environment variable is not set")
-            
+
         # Create client with SSL certificate support
         try:
             import certifi
             self.client = pymongo.MongoClient(self.uri, tlsCAFile=certifi.where())
         except ImportError:
             self.client = pymongo.MongoClient(self.uri)
-        
+
+        # Use environment-specific database name to separate prod/dev data
+        environment = os.getenv("ENVIRONMENT", "production").lower()
+        db_name = "trading_system" if environment == "production" else f"trading_system_{environment}"
+
         try:
-            self.db = self.client.get_database("trading_system")
+            self.db = self.client.get_database(db_name)
             self.state_collection = self.db.get_collection("state")
             self.trades_collection = self.db.get_collection("trades")
             # Verify connection
             self.client.admin.command('ping')
-            logger.info("✅ Connected to MongoDB Atlas")
+            logger.info(f"✅ Connected to MongoDB Atlas (database: {db_name}, environment: {environment})")
         except Exception as e:
             logger.error(f"Failed to connect to MongoDB: {e}")
             raise
