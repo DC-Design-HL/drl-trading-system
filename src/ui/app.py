@@ -1477,7 +1477,31 @@ def render_agent_status_fragment():
     # Calculate real mathematical return
     realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
     raw_assets = state.get('raw_state', {}).get('assets', {})
-    open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
+
+    # Calculate unrealized P&L for open positions
+    open_pnl = 0.0
+    for sym, asset_data in raw_assets.items():
+        if asset_data.get('position', 0) != 0:
+            # Get current position details
+            current_price = asset_data.get('price', 0)
+            units = asset_data.get('units', 0)
+            position = asset_data.get('position', 0)
+
+            # Find entry price from last OPEN trade
+            entry_price = 0
+            sym_trades = [t for t in all_trades if t.get('symbol', '').upper() == sym.upper() or t.get('asset', '').upper() == sym.upper()]
+            for t in reversed(sorted(sym_trades, key=lambda x: x.get('timestamp', ''))):
+                if 'OPEN' in t.get('action', '').upper():
+                    entry_price = t.get('price', 0)
+                    break
+
+            # Calculate unrealized P&L
+            if entry_price > 0 and units > 0 and current_price > 0:
+                if position > 0:  # LONG
+                    open_pnl += (current_price - entry_price) * units
+                else:  # SHORT
+                    open_pnl += (entry_price - current_price) * units
+
     total_pnl = realized_pnl + open_pnl
     initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
     
@@ -1917,12 +1941,30 @@ def main():
                         sym_status = 'SHORT'
                         sym_open += 1
                 
-                # Check current state for open P&L
+                # Check current state for position status
                 if sym in raw_assets:
                     asset_data = raw_assets[sym]
                     if asset_data.get('position', 0) != 0:
-                        sym_open_pnl = asset_data.get('pnl', 0) or 0
-                        sym_status = 'LONG' if asset_data.get('position', 0) > 0 else 'SHORT'
+                        # Calculate unrealized P&L from entry price vs current price
+                        current_price = asset_data.get('price', 0)
+                        units = asset_data.get('units', 0)
+                        position = asset_data.get('position', 0)
+
+                        # Find entry price from last OPEN trade
+                        entry_price = 0
+                        for t in reversed(sorted_trades):
+                            if 'OPEN' in t.get('action', '').upper():
+                                entry_price = t.get('price', 0)
+                                break
+
+                        # Calculate unrealized P&L
+                        if entry_price > 0 and units > 0 and current_price > 0:
+                            if position > 0:  # LONG
+                                sym_open_pnl = (current_price - entry_price) * units
+                            else:  # SHORT
+                                sym_open_pnl = (entry_price - current_price) * units
+
+                        sym_status = 'LONG' if position > 0 else 'SHORT'
                     else:
                         sym_status = 'FLAT'
                 
