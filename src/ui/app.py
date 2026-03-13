@@ -1903,9 +1903,9 @@ def main():
             equity_points = [0.0]  # Start at 0%
             
             asset_rows = []
-            
-            raw_state = state.get('raw_state', {})
-            raw_assets = raw_state.get('assets', {})
+
+            # FIX: State structure is state['assets'], not state['raw_state']['assets']
+            raw_assets = state.get('assets', {})
             
             for sym, trades_list in assets_by_symbol.items():
                 sorted_trades = sorted(trades_list, key=lambda x: x.get('timestamp', ''))
@@ -1940,8 +1940,15 @@ def main():
                     elif 'OPEN_SHORT' in action:
                         sym_status = 'SHORT'
                         sym_open += 1
-                
-                # Check current state for position status
+
+                # FIX: Determine final status from last trade (if it was a CLOSE, position is FLAT)
+                if sorted_trades:
+                    last_trade = sorted_trades[-1]
+                    last_action = last_trade.get('action', '').upper()
+                    if 'CLOSE' in last_action or 'EXIT' in last_action:
+                        sym_status = 'FLAT'
+
+                # Check current state for position status (this overrides trade-based status)
                 if sym in raw_assets:
                     asset_data = raw_assets[sym]
                     if asset_data.get('position', 0) != 0:
@@ -2002,7 +2009,8 @@ def main():
                 })
             
             # Overall metrics
-            initial_capital = max(len(raw_assets), 1) * 5000
+            # FIX: Use number of assets with trades, not assets in state
+            initial_capital = max(len(assets_by_symbol), 1) * 5000
 
             # Calculate from trades (single source of truth) - same logic as Agent Status sidebar
             lp_grand_total_pnl = realized_pnl_total + open_pnl_total
