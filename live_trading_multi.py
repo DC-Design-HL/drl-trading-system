@@ -123,9 +123,15 @@ class MultiAssetTradingBot:
 
         # News sentiment aggregator (CryptoCompare)
         try:
-            base_symbol = symbol.split('/')[0]  # BTC/USDT -> BTC
+            # Extract base symbol: BTC/USDT -> BTC or BTCUSDT -> BTC
+            if '/' in symbol:
+                base_symbol = symbol.split('/')[0]
+            else:
+                # BTCUSDT -> BTC (remove USDT suffix)
+                base_symbol = symbol.replace('USDT', '').replace('BUSD', '').replace('USD', '')
+
             self.news_aggregator = CryptoNewsAggregator(symbol=base_symbol)
-            logger.info(f"✅ News aggregator initialized successfully for {base_symbol}")
+            logger.info(f"✅ News aggregator initialized successfully for {base_symbol} (from {symbol})")
         except Exception as e:
             logger.error(f"❌ News aggregator init failed for {symbol}: {e}", exc_info=True)
             self.news_aggregator = None
