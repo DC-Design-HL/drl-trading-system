@@ -257,7 +257,8 @@ def get_market_analysis():
         'mtf': None,
         'funding': None,
         'order_flow': None,
-        'forecast': None
+        'forecast': None,
+        'news': None
     }
     
     # Try to load from state first (Consistency with Bot)
@@ -332,6 +333,16 @@ def get_market_analysis():
         regime_data = state_analysis.get('regime')
         if regime_data:
              result['regime'] = regime_data
+
+        # News Sentiment
+        news_data = state_analysis.get('news', {})
+        if news_data:
+            result['news'] = {
+                'sentiment': round(news_data.get('sentiment', 0), 3),
+                'confidence': round(news_data.get('confidence', 0), 3),
+                'trend': news_data.get('trend', 'unknown'),
+                'sources': news_data.get('sources', 0)
+            }
 
     # Fallbacks and Regime (Regime is not in state yet, calculate it)
     # ... (Keep existing regime calculation as it's fast) ...
