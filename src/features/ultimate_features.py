@@ -526,7 +526,10 @@ class UltimateFeatureEngine:
         
         # 8. NEW: Explicit Whale Action Vectors (On-Chain Proxies)
         all_features.update(self._get_whale_action_vectors(df))
-        
+
+        # 9. Cross-Chain Whale Flow Features
+        all_features.update(self._get_cross_chain_features(df))
+
         return all_features
     
     def _get_whale_action_vectors(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
@@ -561,7 +564,52 @@ class UltimateFeatureEngine:
         features['whale_net_flow_proxy'] = (net_flow_raw - net_flow_raw.rolling(50).mean()) / (net_flow_raw.rolling(50).std() + 1e-10)
         
         return features
-    
+
+    def _get_cross_chain_features(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
+        """
+        Cross-chain whale flow features.
+
+        These features capture capital rotation and consensus across chains.
+        They are computed once and broadcast to all timesteps in the dataframe.
+        """
+        features = {}
+
+        try:
+            from src.features.cross_chain_whale_flow import get_cross_chain_analyzer
+
+            # Get cross-chain analyzer
+            analyzer = get_cross_chain_analyzer()
+
+            # Compute cross-chain features (returns dict with scalar values)
+            cc_features = analyzer.compute_cross_chain_features()
+
+            # Broadcast scalar values to match dataframe length
+            n_rows = len(df)
+
+            # Add as constant features (same value for all timesteps)
+            features['whale_eth_sol_rotation'] = pd.Series([cc_features.get('eth_to_sol_flow_ratio', 0.0)] * n_rows, index=df.index)
+            features['whale_stablecoin_flow'] = pd.Series([cc_features.get('total_stablecoin_flow', 0.0)] * n_rows, index=df.index)
+            features['whale_cross_chain_consensus'] = pd.Series([cc_features.get('cross_chain_consensus', 0.0)] * n_rows, index=df.index)
+            features['whale_unified_signal'] = pd.Series([cc_features.get('unified_signal', 0.0)] * n_rows, index=df.index)
+
+            logger.debug(
+                f"Cross-chain features: "
+                f"rotation={cc_features.get('eth_to_sol_flow_ratio', 0):+.2f}, "
+                f"consensus={cc_features.get('cross_chain_consensus', 0):.2f}, "
+                f"unified={cc_features.get('unified_signal', 0):+.2f}"
+            )
+
+        except Exception as e:
+            # If cross-chain analyzer fails, return zero features
+            logger.warning(f"Cross-chain features unavailable: {e}")
+            n_rows = len(df)
+            features['whale_eth_sol_rotation'] = pd.Series([0.0] * n_rows, index=df.index)
+            features['whale_stablecoin_flow'] = pd.Series([0.0] * n_rows, index=df.index)
+            features['whale_cross_chain_consensus'] = pd.Series([0.0] * n_rows, index=df.index)
+            features['whale_unified_signal'] = pd.Series([0.0] * n_rows, index=df.index)
+
+        return features
+
     def _get_whale_proxy_features(self, df: pd.DataFrame) -> Dict[str, pd.Series]:
         """
         Whale-proxy features that approximate institutional/whale behavior.
