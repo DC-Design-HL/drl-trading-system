@@ -895,7 +895,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     }}
                     
                     // Share price with sidebar via localStorage
-                    localStorage.setItem('btc_live_price', candle.close.toFixed(2));
+                    localStorage.setItem('{clean_symbol}_live_price', candle.close.toFixed(2));
                     
                     // Update OHLC display for current candle
                     document.getElementById('o-val').textContent = candle.open.toFixed(2);
@@ -917,9 +917,10 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
     return html
 
 
-def render_position_card(state: dict, current_price: float):
+def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/USDT'):
     """Render current position card."""
     position = state.get('position', 0)
+    clean_symbol = symbol.replace('/', '').lower()  # For localStorage key
     
     # SL/TP percentages (match live trading config)
     SL_PCT = 0.015  # 1.5% (matches live_trading.py)
@@ -1014,7 +1015,7 @@ def render_position_card(state: dict, current_price: float):
             const isLong = {'true' if is_long else 'false'};
             
             function updateSidebarPrice() {{
-                const livePrice = parseFloat(localStorage.getItem('btc_live_price'));
+                const livePrice = parseFloat(localStorage.getItem('{clean_symbol}_live_price'));
                 if (livePrice && livePrice > 0) {{
                     // Update current price
                     const priceEl = document.getElementById('sidebar-current-price');
@@ -1432,7 +1433,7 @@ def render_position_fragment(symbol: str):
         if 'position_price' not in asset_state and 'entry_price' in asset_state:
             asset_state['position_price'] = asset_state['entry_price']
             
-    render_position_card(asset_state, current_price)
+    render_position_card(asset_state, current_price, symbol)
     
     # 5. Render Trade History
     # Filter trades for current symbol (already fetched above)
