@@ -125,9 +125,9 @@ class MultiAssetTradingBot:
         try:
             base_symbol = symbol.split('/')[0]  # BTC/USDT -> BTC
             self.news_aggregator = CryptoNewsAggregator(symbol=base_symbol)
-            logger.info(f"📰 News aggregator initialized for {base_symbol}")
+            logger.info(f"✅ News aggregator initialized successfully for {base_symbol}")
         except Exception as e:
-            logger.warning(f"⚠️ News aggregator init failed: {e}")
+            logger.error(f"❌ News aggregator init failed for {symbol}: {e}", exc_info=True)
             self.news_aggregator = None
 
         self.risk_manager = AdaptiveRiskManager()
@@ -230,8 +230,11 @@ class MultiAssetTradingBot:
                         'trend': news_sentiment.get('trend', 'unknown'),
                         'sources': news_sentiment.get('total_sources', 0)
                     }
+                    logger.info(f"📰 News data collected: sentiment={news_data['sentiment']:+.2f}, sources={news_data['sources']}/3")
+                else:
+                    logger.error(f"📰 News aggregator not available: hasattr={hasattr(self, 'news_aggregator')}, is_none={getattr(self, 'news_aggregator', None) is None}")
             except Exception as e:
-                logger.warning(f"News sentiment for dashboard failed: {e}")
+                logger.error(f"📰 News sentiment failed: {e}", exc_info=True)
 
             analysis = {
                 'whale': whale,
