@@ -356,7 +356,7 @@ class CryptoCompareClient:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.environ.get('CRYPTOCOMPARE_API_KEY', '')
         self.cache = {}
-        self.cache_ttl = 300  # 5 minutes
+        self.cache_ttl = 600  # 10 minutes (increased for performance)
 
     def get_news(
         self,
@@ -389,7 +389,8 @@ class CryptoCompareClient:
             params['api_key'] = self.api_key
 
         try:
-            response = requests.get(self.BASE_URL, params=params, timeout=10)
+            # Reduced timeout from 10s to 5s for faster failures
+            response = requests.get(self.BASE_URL, params=params, timeout=5)
 
             if response.status_code == 200:
                 data = response.json()
@@ -406,11 +407,14 @@ class CryptoCompareClient:
                 logger.info(f"📊 CryptoCompare: {len(articles)} articles for {categories}")
                 return articles
             else:
-                logger.warning(f"CryptoCompare error: {response.status_code}")
+                logger.error(f"CryptoCompare HTTP error {response.status_code} for {categories}")
                 return []
 
+        except requests.Timeout:
+            logger.error(f"CryptoCompare timeout after 5s for {categories}")
+            return []
         except Exception as e:
-            logger.error(f"CryptoCompare error: {e}")
+            logger.error(f"CryptoCompare error for {categories}: {e}", exc_info=True)
             return []
 
     def calculate_sentiment(self, articles: List[Dict]) -> Dict:
@@ -556,11 +560,13 @@ class CryptoNewsAggregator:
         # Source 3: CryptoCompare (20% weight)
         cryptocompare_data = {'sentiment': 0.0, 'confidence': 0.0, 'article_count': 0}
         try:
-            articles = self.cryptocompare.get_news(categories=self.symbol)
+            # Reduced from 50 to 30 articles for faster processing
+            articles = self.cryptocompare.get_news(categories=self.symbol, max_results=30)
             if articles:
                 cryptocompare_data = self.cryptocompare.calculate_sentiment(articles)
+                logger.info(f"📰 CryptoCompare sentiment for {self.symbol}: {cryptocompare_data['sentiment']:+.2f}")
         except Exception as e:
-            logger.warning(f"CryptoCompare failed: {e}")
+            logger.error(f"CryptoCompare failed for {self.symbol}: {e}", exc_info=True)
 
         # Weighted aggregation
         weights = {
