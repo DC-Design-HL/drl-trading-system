@@ -23,6 +23,7 @@ class WhaleWallet:
     chain: str          # "ETH", "SOL", "XRP"
     wallet_type: str    # "exchange", "accumulator", "institution", "fund"
     notes: str = ""
+    active: bool = True  # Set False to disable broken wallets (0 transactions)
 
 
 # ─────────────────────────────────────────────
@@ -225,69 +226,81 @@ SOL_WHALES: List[WhaleWallet] = [
         wallet_type="exchange",
         notes="Binance SOL cold storage"
     ),
-    # --- NEW wallets ---
+    # --- DISABLED: Data collection failures (0 transactions) ---
+    # Reactivate after fixing Solana RPC/API issues
     WhaleWallet(
         address="GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7yVQ",
         label="Kraken SOL",
         chain="SOL",
         wallet_type="exchange",
-        notes="Kraken exchange SOL hot wallet"
+        notes="Kraken exchange SOL hot wallet - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsXAowFrgr2e",
         label="Phantom Treasury",
         chain="SOL",
         wallet_type="institution",
-        notes="Phantom wallet treasury — ecosystem health signal"
+        notes="Phantom wallet treasury - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="6b4aypBhH337qSzzkbeoHWzTLt4DjGjAwT8B4rGk8nJd",
         label="FTX Estate SOL",
         chain="SOL",
         wallet_type="institution",
-        notes="FTX Bankruptcy Estate locked/liquidating SOL"
+        notes="FTX Bankruptcy Estate - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="CuieVDEDtLo7FsnA9MtQMRp6oKhQcw7cT9E29227QDBh",
         label="Alameda Research (SOL)",
         chain="SOL",
         wallet_type="institution",
-        notes="Legacy Alameda Research ecosystem wallet"
+        notes="Legacy Alameda Research - DATA COLLECTION FAILED",
+        active=False
     ),
-    WhaleWallet(
-        address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-        label="Wintermute SOL",
-        chain="SOL",
-        wallet_type="exchange",
-        notes="Wintermute market maker SOL hot wallet"
-    ),
+    # DUPLICATE ADDRESS REMOVED - Same as line 222 (Binance SOL Cold)
+    # WhaleWallet(address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", ...),
     WhaleWallet(
         address="27pVcSMMmEHTyZzUURmryS2yH8jT3uJkE7k2f7m1vU1B",
         label="Jump Crypto SOL",
         chain="SOL",
         wallet_type="institution",
-        notes="Jump Crypto SOL liquidity provider wallet"
+        notes="Jump Crypto SOL liquidity provider - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="8EwG1y2Z9jC8H3Q7X9D5N1T4R6M3K7D8J4Q3T6N2H9",
         label="OKX Hot (SOL)",
         chain="SOL",
         wallet_type="exchange",
-        notes="OKX active SOL withdrawal handler"
+        notes="OKX active SOL withdrawal handler - INVALID ADDRESS FORMAT",
+        active=False
     ),
     WhaleWallet(
         address="5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
         label="Raydium Authority",
         chain="SOL",
         wallet_type="institution",
-        notes="Massive SOL DEX router"
+        notes="Massive SOL DEX router - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="3vxheE5CEeG7tQpD7ZtL1mWeXF5B8M63U4hD1D1WegE",
         label="Upbit SOL",
         chain="SOL",
         wallet_type="exchange",
-        notes="Upbit SOL dominant exchange"
+        notes="Upbit SOL dominant exchange - DATA COLLECTION FAILED",
+        active=False
+    ),
+    WhaleWallet(
+        address="5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvu6Kg",
+        label="Binance SOL Hot (INACTIVE)",
+        chain="SOL",
+        wallet_type="exchange",
+        notes="Binance main SOL hot wallet - DATA COLLECTION FAILED",
+        active=False
     ),
 ]
 
@@ -324,69 +337,87 @@ XRP_WHALES: List[WhaleWallet] = [
         wallet_type="institution",
         notes="Ripple programmatic sales wallet"
     ),
-    # --- NEW wallets ---
-    WhaleWallet(
-        address="rN7nDp64EKhECn3uMTfWKnJYKkHo2vjrPN",
-        label="Upbit XRP Hot",
-        chain="XRP",
-        wallet_type="exchange",
-        notes="Upbit exchange — largest XRP exchange holder (~6B XRP)"
-    ),
-    WhaleWallet(
-        address="rKRDibMbAaMMoUGRyNFabRboMFWEvFciJR",
-        label="Bitstamp XRP",
-        chain="XRP",
-        wallet_type="exchange",
-        notes="Bitstamp XRP hot wallet — European exchange flow signal"
-    ),
+    # --- ACTIVE wallets (verified with transaction data) ---
     WhaleWallet(
         address="rU2mEJSLqBRkYLVTv55rFTgQajkLTnT6mA",
         label="Bithumb XRP Hot",
         chain="XRP",
         wallet_type="exchange",
-        notes="Bithumb exchange — 2nd largest XRP exchange holder (~1.7B XRP)"
+        notes="Bithumb exchange — 4,001 transactions",
+        active=True
     ),
     WhaleWallet(
         address="rw2ciyaNshpHe7bCHo4bRWq6pqqynnWKQg",
         label="Kraken XRP Hot",
         chain="XRP",
         wallet_type="exchange",
-        notes="Kraken exchange XRP Hot Wallet"
+        notes="Kraken exchange XRP Hot Wallet — 2,994 transactions",
+        active=True
     ),
     WhaleWallet(
         address="rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns",
         label="Bitfinex XRP Hot",
         chain="XRP",
         wallet_type="exchange",
-        notes="Bitfinex XRP routing wallet"
+        notes="Bitfinex XRP routing wallet — 2,958 transactions",
+        active=True
+    ),
+    # --- DISABLED: Data collection failures (0 transactions) ---
+    WhaleWallet(
+        address="rN7nDp64EKhECn3uMTfWKnJYKkHo2vjrPN",
+        label="Upbit XRP Hot",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Upbit exchange largest holder - DATA COLLECTION FAILED",
+        active=False
+    ),
+    WhaleWallet(
+        address="rKRDibMbAaMMoUGRyNFabRboMFWEvFciJR",
+        label="Bitstamp XRP",
+        chain="XRP",
+        wallet_type="exchange",
+        notes="Bitstamp XRP hot wallet - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="rNxp4h8apvRis6mJf9Sh8C6iRxfeFNhx3",
         label="KuCoin XRP Hot",
         chain="XRP",
         wallet_type="exchange",
-        notes="KuCoin main XRP withdrawal hot wallet"
+        notes="KuCoin main XRP withdrawal - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="rTicJi7HWR7TuxMQn7tXjsjH6RqwzL1L4E",
         label="Wintermute XRP",
         chain="XRP",
         wallet_type="exchange",
-        notes="Wintermute market maker algorithm wallet"
+        notes="Wintermute market maker - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="rKiCet8SdvWxPeB8U4b2gA2YF4hXGkKw7T",
         label="Ripple OTC",
         chain="XRP",
         wallet_type="institution",
-        notes="Ripple OTC distribution wallet"
+        notes="Ripple OTC distribution - DATA COLLECTION FAILED",
+        active=False
     ),
     WhaleWallet(
         address="rJb5KsHsDnc14QvA3P9A5h5D3H4x7R8gMv",
         label="Binance XRP Cold 2",
         chain="XRP",
         wallet_type="exchange",
-        notes="Binance Cold Storage backup for XRP"
+        notes="Binance Cold Storage backup - DATA COLLECTION FAILED",
+        active=False
+    ),
+    WhaleWallet(
+        address="rLNaPoKeeBjZe2qs6x52yVPKpg8oT9Gkgb",
+        label="XRP Whale Accumulator",
+        chain="XRP",
+        wallet_type="accumulator",
+        notes="Non-exchange large XRP holder - DATA COLLECTION FAILED",
+        active=False
     ),
 ]
 
@@ -395,19 +426,28 @@ XRP_WHALES: List[WhaleWallet] = [
 # Utility functions
 # ─────────────────────────────────────────────
 
-def get_wallets_by_chain(chain: str) -> List[WhaleWallet]:
-    """Get all tracked wallets for a specific chain."""
+def get_wallets_by_chain(chain: str, active_only: bool = True) -> List[WhaleWallet]:
+    """Get all tracked wallets for a specific chain.
+
+    Args:
+        chain: Chain name (ETH, SOL, XRP, BTC)
+        active_only: If True, only return wallets with active=True (default)
+    """
     chain = chain.upper()
     if chain == "ETH":
-        return ETH_WHALES
+        wallets = ETH_WHALES
     elif chain == "SOL":
-        return SOL_WHALES
+        wallets = SOL_WHALES
     elif chain == "XRP":
-        return XRP_WHALES
+        wallets = XRP_WHALES
     elif chain == "BTC":
-        return BTC_WHALES
+        wallets = BTC_WHALES
     else:
         return []
+
+    if active_only:
+        return [w for w in wallets if w.active]
+    return wallets
 
 
 def get_all_wallets() -> Dict[str, List[WhaleWallet]]:
