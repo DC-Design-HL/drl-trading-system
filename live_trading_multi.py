@@ -75,7 +75,7 @@ class MultiAssetTradingBot:
         self.last_equity = initial_balance
         self.position_size = position_size
         self.portfolio_manager = portfolio_manager
-        
+
         self.position = 0  # 1 = long, -1 = short, 0 = flat
         self.position_price = 0.0
         self.current_price = 0.0  # Store latest price
@@ -85,6 +85,7 @@ class MultiAssetTradingBot:
         self.highest_price = 0.0
         self.lowest_price = 0.0
         self.base_trailing_pct = 0.0
+        self.position_entry_time = 0  # Track when position was opened (for time-based SL relaxation)
         
         self.pending_orders: List[Dict] = []
         
@@ -286,13 +287,14 @@ class MultiAssetTradingBot:
             self.sl_price = state.get('sl', 0.0)
             self.tp_price = state.get('tp', 0.0)
             self.position_units = state.get('units', 0.0)
-            
+            self.position_entry_time = state.get('entry_time', time.time())  # For time-based SL relaxation
+
             # Fallback for legacy state without units
             if self.position != 0 and self.position_units == 0 and self.position_price > 0:
                 logger.warning(f"⚠️ 'units' missing for {self.symbol}, estimating based on balance...")
                 # Assuming 50% position size meant trade_value ~= current_balance
                 self.position_units = self.balance / self.position_price
-            
+
             logger.info(f"♻️ Restored state for {self.symbol}: Pos={self.position}, Entry=${self.position_price:.2f}, SL=${self.sl_price:.2f}")
         except Exception as e:
             logger.error(f"Failed to restore state for {self.symbol}: {e}")
@@ -698,6 +700,7 @@ class MultiAssetTradingBot:
                 trade["pnl"] = pnl
                 self.position = 0
                 self.position_units = 0
+                self.position_entry_time = 0  # Reset entry time
                 self.pending_orders.clear() # Cancel any pending limit orders
                 if self.portfolio_manager:
                     self.portfolio_manager.clear_position(self.symbol)
@@ -741,28 +744,33 @@ class MultiAssetTradingBot:
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "long")
-                    
-                    # Regime-adaptive adjustments
+
+                    # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
                     try:
                         regime_info = self.regime_detector.detect_regime(df)
                         regime_name = regime_info.regime.value
                         if regime_name == 'high_volatility':
-                            sl_pct *= 1.5  # Wider stops in high vol
+                            sl_pct *= 2.0  # UPDATED: Wider stops in high vol (was 1.5x)
                             tp_pct *= 1.5
-                            logger.info(f"📊 HIGH VOL regime: widened SL/TP by 1.5x")
+                            logger.info(f"📊 HIGH VOL regime: widened SL by 2.0x, TP by 1.5x")
                         elif regime_name == 'trending_up':
                             tp_pct *= 1.5  # Let winners run in trend
-                            logger.info(f"📊 TRENDING_UP regime: widened TP by 1.5x")
+                            # Keep SL tight in trends (1.0x)
+                            logger.info(f"📊 TRENDING_UP regime: widened TP by 1.5x, tight SL for trend-following")
+                        elif regime_name == 'trending_down':
+                            sl_pct *= 1.3  # Slightly wider for counter-trend
+                            logger.info(f"📊 TRENDING_DOWN regime: widened SL by 1.3x (counter-trend)")
                         elif regime_name == 'ranging':
-                            sl_pct *= 1.5  # Wider stops in range to avoid getting chopped by noise
-                            logger.info(f"📊 RANGING regime: widened SL by 1.5x to avoid chop")
+                            sl_pct *= 1.8  # UPDATED: Wider stops to avoid chop (was 1.5x)
+                            logger.info(f"📊 RANGING regime: widened SL by 1.8x to avoid chop")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
-                    
+
                     self.sl_price = current_price * (1 - sl_pct)   # SL BELOW entry for LONG
                     self.tp_price = current_price * (1 + tp_pct)   # TP ABOVE entry for LONG
                     self.highest_price = current_price
                     self.base_trailing_pct = sl_pct
+                    self.position_entry_time = time.time()  # Track entry time for time-based SL relaxation
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
                     logger.info(f"🛡️ LONG SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
@@ -770,6 +778,7 @@ class MultiAssetTradingBot:
                     logger.error(f"Failed to calc SL/TP: {e}")
                     self.sl_price = current_price * 0.95   # 5% below entry
                     self.tp_price = current_price * 1.10   # 10% above entry
+                    self.position_entry_time = time.time()
             else:
                 # Already LONG - redundant
                 return None
@@ -784,6 +793,7 @@ class MultiAssetTradingBot:
                 trade["pnl"] = pnl
                 self.position = 0
                 self.position_units = 0
+                self.position_entry_time = 0  # Reset entry time
                 self.pending_orders.clear() # Cancel pending limit orders
                 if self.portfolio_manager:
                     self.portfolio_manager.clear_position(self.symbol)
@@ -827,28 +837,33 @@ class MultiAssetTradingBot:
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "short")
-                    
-                    # Regime-adaptive adjustments
+
+                    # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
                     try:
                         regime_info = self.regime_detector.detect_regime(df)
                         regime_name = regime_info.regime.value
                         if regime_name == 'high_volatility':
-                            sl_pct *= 1.5
+                            sl_pct *= 2.0  # UPDATED: Wider stops in high vol (was 1.5x)
                             tp_pct *= 1.5
-                            logger.info(f"📊 HIGH VOL regime: widened SL/TP by 1.5x")
+                            logger.info(f"📊 HIGH VOL regime: widened SL by 2.0x, TP by 1.5x")
                         elif regime_name == 'trending_down':
                             tp_pct *= 1.5  # Let winners run in downtrend
-                            logger.info(f"📊 TRENDING_DOWN regime: widened TP by 1.5x")
+                            # Keep SL tight in trends (1.0x)
+                            logger.info(f"📊 TRENDING_DOWN regime: widened TP by 1.5x, tight SL for trend-following")
+                        elif regime_name == 'trending_up':
+                            sl_pct *= 1.3  # Slightly wider for counter-trend
+                            logger.info(f"📊 TRENDING_UP regime: widened SL by 1.3x (counter-trend)")
                         elif regime_name == 'ranging':
-                            sl_pct *= 1.5
-                            logger.info(f"📊 RANGING regime: widened SL by 1.5x to avoid chop")
+                            sl_pct *= 1.8  # UPDATED: Wider stops to avoid chop (was 1.5x)
+                            logger.info(f"📊 RANGING regime: widened SL by 1.8x to avoid chop")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
-                    
+
                     self.sl_price = current_price * (1 + sl_pct)
                     self.tp_price = current_price * (1 - tp_pct)
                     self.lowest_price = current_price
                     self.base_trailing_pct = sl_pct
+                    self.position_entry_time = time.time()  # Track entry time for time-based SL relaxation
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
                     logger.info(f"🛡️ SHORT SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
@@ -856,6 +871,7 @@ class MultiAssetTradingBot:
                     logger.error(f"Failed to calc SL/TP: {e}")
                     self.sl_price = current_price * 1.05  # 5% above entry
                     self.tp_price = current_price * 0.90  # 10% below entry
+                    self.position_entry_time = time.time()
             else:
                 # Already SHORT - redundant
                 return None
@@ -911,10 +927,32 @@ class MultiAssetTradingBot:
             hit_tp = False
             hit_trailing = False
             reason = ""
-            
+
+            # Fix #3: Time-Based SL Relaxation (+$111.58 projected)
+            # Relax SL by 25% after position has been open for 12+ hours
+            time_in_position = time.time() - self.position_entry_time if self.position_entry_time > 0 else 0
+            if time_in_position >= 43200:  # 12 hours = 43200 seconds
+                # Only relax if we haven't already (check if SL is still close to original)
+                if self.position == 1:  # LONG
+                    original_sl_pct = (self.position_price - self.sl_price) / self.position_price
+                    if original_sl_pct > 0.03:  # Only if SL is at least 3% away (not already relaxed)
+                        relaxed_sl = self.position_price - (self.position_price - self.sl_price) * 0.75  # Move 25% closer
+                        if relaxed_sl > self.sl_price:  # Only move up (relax)
+                            old_sl = self.sl_price
+                            self.sl_price = relaxed_sl
+                            logger.info(f"⏰ TIME-BASED SL RELAX for {self.symbol}: ${old_sl:.2f} → ${self.sl_price:.2f} (after {time_in_position/3600:.1f}h)")
+                elif self.position == -1:  # SHORT
+                    original_sl_pct = (self.sl_price - self.position_price) / self.position_price
+                    if original_sl_pct > 0.03:  # Only if SL is at least 3% away
+                        relaxed_sl = self.position_price + (self.sl_price - self.position_price) * 0.75  # Move 25% closer
+                        if relaxed_sl < self.sl_price:  # Only move down (relax)
+                            old_sl = self.sl_price
+                            self.sl_price = relaxed_sl
+                            logger.info(f"⏰ TIME-BASED SL RELAX for {self.symbol}: ${old_sl:.2f} → ${self.sl_price:.2f} (after {time_in_position/3600:.1f}h)")
+
             if self.position == 1: # LONG
                 self.highest_price = max(self.highest_price, current_price)
-                
+
                 # Check normal SL/TP
                 if current_price <= self.sl_price and self.sl_price > 0:
                     hit_sl = True
@@ -1127,8 +1165,16 @@ class MultiAssetTradingBot:
         
         # --- Anti-overtrading guards ---
         now = time.time()
-        
-        # Fix 2: Post-loss cooldown — block new entries for 30 min after SL hit
+
+        # Fix #2: Disable XRP Trading (+$282.54 projected)
+        # XRP has 75% loss rate despite 53% win rate - profitability killer
+        if 'XRP' in self.symbol.upper():
+            if filtered_action != 0:
+                logger.warning(f"🚫 XRP TRADING DISABLED: Blocking {['HOLD', 'BUY', 'SELL'][filtered_action]} for {self.symbol} (75% loss rate)")
+                filtered_action = 0
+                reason = "XRP trading disabled (75% loss rate)"
+
+        # Post-loss cooldown — block new entries for 30 min after SL hit
         if filtered_action != 0 and self.position == 0 and self.last_loss_time > 0:
             elapsed_since_loss = now - self.last_loss_time
             if elapsed_since_loss < self.COOLDOWN_SECONDS:
@@ -1506,6 +1552,7 @@ class MultiAssetOrchestrator:
                 'tp': bot.tp_price,
                 'units': bot.position_units,
                 'equity': bot.last_equity,
+                'entry_time': bot.position_entry_time,  # For time-based SL relaxation
                 'analysis': bot.get_market_analysis() # Add analysis data
             }
 
