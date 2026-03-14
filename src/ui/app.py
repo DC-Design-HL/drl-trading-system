@@ -2257,8 +2257,8 @@ def main():
                 </div>
                 
                 <!-- Asset Table -->
-                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;overflow:hidden;">
-                    <table style="width:100%;border-collapse:collapse;">
+                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;overflow-x:auto;overflow-y:hidden;">
+                    <table style="width:100%;min-width:1200px;border-collapse:collapse;">
                         <thead>
                             <tr style="border-bottom:1px solid #21262d;">
                                 <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Asset</th>
