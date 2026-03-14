@@ -1279,8 +1279,8 @@ def render_market_analysis_fragment(symbol: str):
         """, unsafe_allow_html=True)
 
     # News Sentiment
-    news_data = market_data.get('news', {})
-    if news_data:
+    news_data = market_data.get('news')
+    if news_data is not None and isinstance(news_data, dict):
         news_sentiment = news_data.get('sentiment', 0)
         news_conf = news_data.get('confidence', 0)
         news_trend = news_data.get('trend', 'unknown')
@@ -1301,6 +1301,17 @@ def render_market_analysis_fragment(symbol: str):
             <div style="color: #888; font-size: 11px;">
                 Confidence: {news_conf:.0%} | Trend: {trend_emoji} {news_trend}<br/>
                 Sources: {news_sources}/3 (CryptoCompare)
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Show placeholder when news data is not available yet
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">📰 News Sentiment</div>
+            <div style="color: #888; font-size: 12px;">Loading...</div>
+            <div style="color: #666; font-size: 10px;">
+                Waiting for first news fetch (takes ~1-2 min)
             </div>
         </div>
         """, unsafe_allow_html=True)
