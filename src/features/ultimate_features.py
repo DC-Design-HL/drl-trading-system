@@ -545,18 +545,8 @@ class UltimateFeatureEngine:
         stealth_vol = df['volume'] > vol_ma
         features['whale_stealth_accumulation'] = (small_body & stealth_vol).astype(float).rolling(10).mean()
         
-        # 2. Capitulation Index (Retail panicking, whales absorbing)
-        # Condition: Massive downward wick (long lower shadow) on huge volume
-        lower_wick = np.minimum(df['open'], df['close']) - df['low']
-        huge_volume = df['volume'] > vol_ma * 2.5
-        capitulation = (lower_wick > (price_range * 0.5)) & huge_volume
-        features['whale_capitulation_index'] = capitulation.astype(float).rolling(5).max() # Persist signal
-        
-        # 3. FOMO Index (Retail buying top, whales distributing)
-        # Condition: Massive upward wick on huge volume
-        upper_wick = df['high'] - np.maximum(df['open'], df['close'])
-        fomo = (upper_wick > (price_range * 0.5)) & huge_volume
-        features['whale_fomo_index'] = fomo.astype(float).rolling(5).max()
+        # NOTE: Removed whale_capitulation_index (Sharpe -8.5, toxic feature)
+        # NOTE: Removed whale_fomo_index (Sharpe -5.4, toxic feature)
         
         # 4. Large Tx Ratio Proxy (Percentage of volume happening in macro-moves)
         large_move = price_range > price_range.rolling(20).mean() * 1.5
@@ -587,24 +577,24 @@ class UltimateFeatureEngine:
         
         # 2. Accumulation/Distribution Detection
         # Accumulation: close > open on high volume (institutional buying)
+        # Distribution: close < open on high volume (institutional selling)
         body_up = (df['close'] > df['open']).astype(float)
         body_down = (df['close'] < df['open']).astype(float)
         high_volume = (df['volume'] > vol_ma * 1.5).astype(float)
-        
-        features['whale_accumulation'] = (body_up * high_volume).rolling(5).sum() / 5
-        features['whale_distribution'] = (body_down * high_volume).rolling(5).sum() / 5
-        features['whale_accumulation_dist_ratio'] = (
-            features['whale_accumulation'] - features['whale_distribution']
-        ).clip(-1, 1)
+
+        # NOTE: Removed whale_accumulation (redundant) and whale_distribution (Sharpe -6.4, toxic)
+        # Compute accumulation_dist_ratio directly (this feature is kept - statistically significant)
+        whale_acc = (body_up * high_volume).rolling(5).sum() / 5
+        whale_dist = (body_down * high_volume).rolling(5).sum() / 5
+        features['whale_accumulation_dist_ratio'] = (whale_acc - whale_dist).clip(-1, 1)
         
         # 3. Crowd Sentiment Proxy (approximates Fear & Greed)
         # Combines RSI extremes with volume for sentiment signal
         rsi = self._calculate_rsi(df['close'], 14)
-        rsi_extreme_fear = (rsi < 30).astype(float)
         rsi_extreme_greed = (rsi > 70).astype(float)
-        
-        # Fear: RSI extreme low + high volume = capitulation
-        features['whale_crowd_fear'] = (rsi_extreme_fear * high_volume).rolling(5).mean()
+
+        # NOTE: Removed whale_crowd_fear (Sharpe -7.4, toxic feature)
+        # Keep whale_crowd_greed - Win Rate 54.5% (best whale feature!)
         features['whale_crowd_greed'] = (rsi_extreme_greed * high_volume).rolling(5).mean()
         
         # Sentiment score: -1 (fear) to +1 (greed)
