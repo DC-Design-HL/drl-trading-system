@@ -2459,10 +2459,10 @@ def main():
                                 
                     with pred_cols[idx]:
                         st.markdown(f'''
-                        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid {color}; height: 140px;">
+                        <div style="background-color: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; border-left: 4px solid {color}; height: 140px; overflow: hidden;">
                             <h4 style="margin: 0; padding: 0; color: #E2E8F0;">{chain}</h4>
                             <h5 style="margin: 5px 0 10px 0; color: {color};">{signal}</h5>
-                            <p style="margin: 0; font-size: 0.85em; color: #94A3B8; line-height: 1.4;">{reason}</p>
+                            <p style="margin: 0; font-size: 0.85em; color: #94A3B8; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;">{reason}</p>
                         </div>
                         ''', unsafe_allow_html=True)
                     idx += 1
