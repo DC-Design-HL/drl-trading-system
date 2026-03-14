@@ -24,6 +24,7 @@ class WhaleWallet:
     wallet_type: str    # "exchange", "accumulator", "institution", "fund"
     notes: str = ""
     active: bool = True  # Set False to disable broken wallets (0 transactions)
+    tier: int = 2        # 1=Elite (>60% hit rate, 3x weight), 2=Strong (55-60%, 1.5x), 3=Experimental (<55%, 0.5x)
 
 
 # ─────────────────────────────────────────────
@@ -118,7 +119,9 @@ ETH_WHALES: List[WhaleWallet] = [
         label="Smart Money Whale 1",
         chain="ETH",
         wallet_type="accumulator",
-        notes="Known ETH accumulator — historically buys before major rallies"
+        notes="Known ETH accumulator — historically buys before major rallies",
+        active=True,
+        tier=1  # ELITE: 89.77% hit rate (w3 from analysis) - 3x weight
     ),
     WhaleWallet(
         address="0x8103683202aa8DA10536036EDef04CDd865C225E",
@@ -474,3 +477,36 @@ def get_address_context(address: str, chain: str) -> str:
         if w.address.lower() == address:
             return w.wallet_type
     return "unknown"
+
+
+def get_wallet_tier(address: str, chain: str) -> int:
+    """Get the tier (1-3) for a specific wallet address."""
+    if not address:
+        return 3  # Default to experimental
+    address = address.lower()
+    wallets = get_wallets_by_chain(chain, active_only=False)  # Check all wallets
+    for w in wallets:
+        if w.address.lower() == address:
+            return w.tier
+    return 3  # Unknown wallets default to experimental
+
+
+def get_tier_weight(tier: int) -> float:
+    """Get the signal weight multiplier for a wallet tier.
+
+    Tier 1 (Elite):        3.0x weight (>60% hit rate)
+    Tier 2 (Strong):       1.5x weight (55-60% hit rate)
+    Tier 3 (Experimental): 0.5x weight (<55% hit rate)
+    """
+    weights = {
+        1: 3.0,   # Elite
+        2: 1.5,   # Strong
+        3: 0.5,   # Experimental
+    }
+    return weights.get(tier, 1.0)
+
+
+def get_wallet_weight(address: str, chain: str) -> float:
+    """Get the weight multiplier for a specific wallet based on its tier."""
+    tier = get_wallet_tier(address, chain)
+    return get_tier_weight(tier)

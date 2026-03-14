@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from src.features.whale_wallet_collector import WhaleWalletCollector, WHALE_DATA_DIR
-from src.features.whale_wallet_registry import get_wallets_by_chain
+from src.features.whale_wallet_registry import get_wallets_by_chain, get_wallet_weight, get_tier_weight
 from src.models.whale_pattern_learner import WhalePatternLearner
 
 logger = logging.getLogger(__name__)
@@ -83,70 +83,75 @@ class WhalePatternPredictor:
             return
 
         try:
-            # Only collect recent data (1 page) to minimize API usage
-            for chain in ["ETH", "SOL", "XRP"]:
-                wallets = get_wallets_by_chain(chain)
-                for wallet in wallets:
-                    try:
-                        if chain == "ETH":
-                            self.collector.eth_collector.collect_wallet(
-                                wallet, max_pages=1
-                            )
-                        elif chain == "SOL":
-                            self.collector.sol_collector.collect_wallet(
-                                wallet, max_sigs=10
-                            )
-                        elif chain == "XRP":
-                            self.collector.xrp_collector.collect_wallet(
-                                wallet, max_pages=1
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            f"Collection failed for {wallet.label}: {e}"
-                        )
-
+            # Massive synchronous scraping here locks up the API server (1000s of requests).
+            # Wallets should be collected async or via background cron, NOT in the prediction path.
+            # We will rely entirely on the local CSV caches that the background collector creates.
+            
             self.last_collection_time = now
-            logger.info("🐋 Whale wallet data refreshed")
+            # logger.info("🐋 Whale wallet data refreshed (Skipped synchronous API blocking)")
 
         except Exception as e:
             logger.error(f"Whale collection error: {e}")
 
     def _compute_wallet_accuracy_weights(self):
         """
-        Rank wallets by historical prediction accuracy using impact features
-        from trained models. Wallets with >55% hit rate get boosted weight.
+        Compute wallet weights using tier-based system + historical hit rates.
+
+        Tier System (baseline):
+        - Tier 1 (Elite): 3.0x weight (>60% hit rate)
+        - Tier 2 (Strong): 1.5x weight (55-60% hit rate)
+        - Tier 3 (Experimental): 0.5x weight (<55% hit rate)
+
+        Historical hit rates can further adjust the tier weight.
         """
         for chain, learner in self.learners.items():
             try:
+                # Get active wallets for this chain
+                chain_wallets = get_wallets_by_chain(chain, active_only=True)
+                if not chain_wallets:
+                    continue
+
+                # Load wallet transaction data
                 wallets = learner._load_wallet_data()
                 if not wallets:
                     continue
 
-                # Use impact features if model has them cached
-                impact = getattr(learner, '_cached_impact_features', {})
-                if not impact:
-                    # Try to compute from stored data
-                    price_data = learner._fetch_price_data(days=30)
-                    if price_data is not None and not price_data.empty:
-                        price_hourly = price_data['close'].resample('1h').last().dropna()
-                        if hasattr(price_hourly.index, 'tz') and price_hourly.index.tz is not None:
-                            price_hourly.index = price_hourly.index.tz_convert(None)
-                        impact = learner._compute_price_impact_features(wallets, price_hourly)
-
                 accuracy = {}
-                for w_idx in range(5):
+
+                # Assign tier-based weights to each wallet
+                for w_idx, wallet_obj in enumerate(chain_wallets):
+                    # Get tier-based baseline weight
+                    tier_weight = get_tier_weight(wallet_obj.tier)
+
+                    # Try to refine with historical hit rate if available
+                    impact = getattr(learner, '_cached_impact_features', {})
+                    if not impact:
+                        # Try to compute from stored data
+                        price_data = learner._fetch_price_data(days=30)
+                        if price_data is not None and not price_data.empty:
+                            price_hourly = price_data['close'].resample('1h').last().dropna()
+                            if hasattr(price_hourly.index, 'tz') and price_hourly.index.tz is not None:
+                                price_hourly.index = price_hourly.index.tz_convert(None)
+                            impact = learner._compute_price_impact_features(wallets, price_hourly)
+
+                    # Refine tier weight with historical hit rate if available
                     hit_rate_key = f"w{w_idx}_hit_rate"
-                    if hit_rate_key in impact:
+                    if impact and hit_rate_key in impact:
                         hr = impact[hit_rate_key]
-                        # Scale: 0.50 (random) → weight 1.0, 0.70 → weight 2.0
-                        weight = max(0.5, 1.0 + (hr - 0.50) * 5.0)
-                        accuracy[f"w{w_idx}"] = min(weight, 3.0)  # Cap at 3x
+                        # Adjust tier weight by ±20% based on recent performance
+                        # Hit rate > 60% → boost, < 50% → reduce
+                        performance_mult = 1.0 + (hr - 0.55) * 0.4  # ±20% adjustment
+                        final_weight = tier_weight * performance_mult
                     else:
-                        accuracy[f"w{w_idx}"] = 1.0  # Default weight
+                        final_weight = tier_weight
+
+                    # Clip to reasonable range
+                    final_weight = float(np.clip(final_weight, 0.3, 3.5))
+                    accuracy[f"w{w_idx}"] = final_weight
 
                 self.wallet_accuracy[chain] = accuracy
                 logger.info(
-                    f"🎯 Wallet accuracy computed for {chain}: "
+                    f"🎯 Wallet weights for {chain}: "
                     f"{', '.join(f'{k}={v:.2f}x' for k, v in accuracy.items())}"
                 )
             except Exception as e:
