@@ -38,6 +38,7 @@ from src.features.mtf_analyzer import MultiTimeframeAnalyzer
 from src.features.risk_manager import AdaptiveRiskManager
 from src.features.order_flow import FundingRateAnalyzer, OrderFlowAnalyzer
 from src.features.on_chain_whales import OnChainWhaleWatcher
+from src.features.crypto_news_aggregator import CryptoNewsAggregator
 from src.data.storage import get_storage
 from src.models.price_forecaster import TFTForecaster
 from src.models.confidence_engine import ConfidenceEngine
@@ -119,6 +120,15 @@ class MultiAssetTradingBot:
 
         # Regime detector (ADX/ATR-based)
         self.regime_detector = MarketRegimeDetector()
+
+        # News sentiment aggregator (CryptoCompare)
+        try:
+            base_symbol = symbol.split('/')[0]  # BTC/USDT -> BTC
+            self.news_aggregator = CryptoNewsAggregator(symbol=base_symbol)
+            logger.info(f"📰 News aggregator initialized for {base_symbol}")
+        except Exception as e:
+            logger.warning(f"⚠️ News aggregator init failed: {e}")
+            self.news_aggregator = None
 
         self.risk_manager = AdaptiveRiskManager()
         self.confidence_engine = ConfidenceEngine()
@@ -209,6 +219,20 @@ class MultiAssetTradingBot:
                 except Exception as e:
                     logger.warning(f"MTF analysis failed for state: {e}")
             
+            # News sentiment
+            news_data = {}
+            try:
+                if hasattr(self, 'news_aggregator') and self.news_aggregator:
+                    news_sentiment = self.news_aggregator.get_aggregated_sentiment()
+                    news_data = {
+                        'sentiment': news_sentiment.get('sentiment', 0),
+                        'confidence': news_sentiment.get('confidence', 0),
+                        'trend': news_sentiment.get('trend', 'unknown'),
+                        'sources': news_sentiment.get('total_sources', 0)
+                    }
+            except Exception as e:
+                logger.warning(f"News sentiment for dashboard failed: {e}")
+
             analysis = {
                 'whale': whale,
                 'funding': funding_data,
@@ -216,7 +240,8 @@ class MultiAssetTradingBot:
                 'mtf': mtf_data,
                 'forecast': getattr(self, 'last_forecast', None),
                 'confidence': getattr(self, 'last_confidence', 0.5),
-                'regime': getattr(self.model.classifier, 'last_regime_info', None) if hasattr(self, 'model') and hasattr(self.model, 'classifier') else None
+                'regime': getattr(self.model.classifier, 'last_regime_info', None) if hasattr(self, 'model') and hasattr(self.model, 'classifier') else None,
+                'news': news_data
             }
             
             self._last_analysis_time = current_time
@@ -431,12 +456,12 @@ class MultiAssetTradingBot:
         scores = {}  # name -> (directional_score, weight)
         details = []  # Human-readable breakdown
         
-        # ── 1. Whale Signals (30% weight) ──────────────────────────────
+        # ── 1. Whale Signals (27% weight) ──────────────────────────────
         try:
             whale = self.whale_tracker.get_whale_signals()
             # FIX: The key returned by whale_tracker is 'combined_score', not 'score'
             whale_score = whale.get('combined_score', 0.0)
-            scores['whale'] = (np.clip(whale_score, -1, 1), 0.30)
+            scores['whale'] = (np.clip(whale_score, -1, 1), 0.27)
             
             # Squeeze Metric Boost
             squeeze = whale.get('squeeze_status', 'none')
@@ -453,12 +478,12 @@ class MultiAssetTradingBot:
             logger.warning(f"Whale score error: {e}")
             scores['whale'] = (0, 0.30)
         
-        # ── 2. Market Regime / ADX (20% weight) ───────────────────────
+        # ── 2. Market Regime / ADX (18% weight) ───────────────────────
         try:
             regime_info = self.regime_detector.detect_regime(df)
             regime_score = regime_info.trend_direction  # Already [-1, +1]
             regime_name = regime_info.regime.value.upper()
-            scores['regime'] = (regime_score, 0.20)
+            scores['regime'] = (regime_score, 0.18)
             details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
             
             # Hard veto: Catching falling knives/fading strong trends
@@ -472,9 +497,9 @@ class MultiAssetTradingBot:
                     return 0, 0.15, f"📈 Uptrend (ADX={regime_info.trend_strength:.0f}) without whale selling — block SHORT"
         except Exception as e:
             logger.warning(f"Regime score error: {e}")
-            scores['regime'] = (0, 0.20)
+            scores['regime'] = (0, 0.18)
         
-        # ── 3. TFT Forecast (20% weight) ──────────────────────────────
+        # ── 3. TFT Forecast (18% weight) ──────────────────────────────
         tft_score = 0.0
         if self.tft_forecaster:
             try:
@@ -489,7 +514,7 @@ class MultiAssetTradingBot:
                 conf_4h = forecast.get('confidence_4h', 0.0)
                 ret_4h = forecast.get('return_4h', 0.0)
                 tft_score = np.clip(consensus, -1, 1)
-                scores['tft'] = (tft_score, 0.20)
+                scores['tft'] = (tft_score, 0.18)
                 details.append(f"🔮 TFT={consensus:+.2f}(c={conf_4h:.1f})")
                 
                 # Hard veto: TFT strongly disagrees with high confidence
@@ -503,22 +528,22 @@ class MultiAssetTradingBot:
         else:
             scores['tft'] = (0, 0.20)
         
-        # ── 4. Funding Rate (15% weight) ──────────────────────────────
+        # ── 4. Funding Rate (13.5% weight) ────────────────────────────
         try:
             funding = self.funding_analyzer.get_signal()
             # Positive funding = longs pay = bearish bias; negative = bullish
             funding_score = np.clip(-funding.rate * 1000, -1, 1)  # Scale rate to [-1,1]
-            scores['funding'] = (funding_score, 0.15)
+            scores['funding'] = (funding_score, 0.135)
             details.append(f"💰 Fund={funding.rate:+.4%}")
         except Exception as e:
             logger.warning(f"Funding score error: {e}")
-            scores['funding'] = (0, 0.15)
+            scores['funding'] = (0, 0.135)
         
-        # ── 5. Order Flow — Enhanced 3-layer (15% weight) ──────────────
+        # ── 5. Order Flow — Enhanced 3-layer (13.5% weight) ────────────
         try:
             of_signal = self.order_flow.get_enhanced_signal(df)
             flow_score = of_signal.get('score', 0.0)
-            scores['order_flow'] = (flow_score, 0.15)
+            scores['order_flow'] = (flow_score, 0.135)
             # Rich detail for logging
             cvd_s = of_signal.get('cvd', {}).get('score', 0)
             taker_s = of_signal.get('taker', {}).get('score', 0)
@@ -526,8 +551,29 @@ class MultiAssetTradingBot:
             details.append(f"📊 Flow={flow_score:+.2f}(cvd={cvd_s:+.1f}/tk={taker_s:+.1f}/lg={notable_s:+.1f})")
         except Exception as e:
             logger.warning(f"Order flow score error: {e}")
-            scores['order_flow'] = (0, 0.15)
-        
+            scores['order_flow'] = (0, 0.135)
+
+        # ── 6. News Sentiment (10% weight) ─────────────────────────────
+        try:
+            if hasattr(self, 'news_aggregator') and self.news_aggregator:
+                news_data = self.news_aggregator.get_aggregated_sentiment()
+                news_score = news_data.get('sentiment', 0.0)  # Already [-1, +1]
+                news_conf = news_data.get('confidence', 0.0)
+                news_sources = news_data.get('total_sources', 0)
+                scores['news'] = (news_score, 0.10)
+                details.append(f"📰 News={news_score:+.2f}(conf={news_conf:.1f},src={news_sources}/3)")
+
+                # Hard veto: Strong opposing news sentiment with high confidence
+                if action == 1 and news_score < -0.5 and news_conf > 0.7:
+                    return 0, 0.1, f"📰 Strong bearish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto BUY"
+                if action == 2 and news_score > 0.5 and news_conf > 0.7:
+                    return 0, 0.1, f"📰 Strong bullish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto SELL"
+            else:
+                scores['news'] = (0, 0.10)
+        except Exception as e:
+            logger.warning(f"News sentiment score error: {e}")
+            scores['news'] = (0, 0.10)
+
         # ── Compute Composite Score ───────────────────────────────────
         total_weight = sum(w for _, w in scores.values())
         composite = sum(s * w for s, w in scores.values()) / total_weight if total_weight > 0 else 0

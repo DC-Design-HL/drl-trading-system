@@ -30,6 +30,11 @@ flask-cors>=3.0.0
 # Data Processing
 # ta-lib removed to avoid build errors (pandas_ta handles this)
 
+# News Sentiment Analysis
+textblob>=0.17.0
+requests>=2.31.0
+praw>=7.7.0  # Reddit API
+
 # Testing
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
