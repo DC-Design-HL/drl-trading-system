@@ -1658,8 +1658,8 @@ def main():
                 st.code(f"Size: {storage.state_file.stat().st_size} bytes")
                 
         # Database Reset (Dev Only)
-        env = os.getenv("ENVIRONMENT", "production")
-        if env == "development":
+        env = os.getenv("ENVIRONMENT", "production").lower()
+        if env in ["dev", "development"]:
             st.divider()
             st.markdown("### 🔄 Database Reset")
             st.warning("⚠️ This will clear all trades and positions!")
