@@ -1,0 +1,1540 @@
+{
+  "state": {
+    "_id": "current_state",
+    "active": true,
+    "assets": {
+      "BTCUSDT": {
+        "price": 71777.59,
+        "entry_price": 70963.49410876192,
+        "position": 1,
+        "balance": 3639.2662576419816,
+        "pnl": -25.15169676754431,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 69726.67659999999,
+        "tp": 75461.31225114675,
+        "units": 0.018889020119077865,
+        "equity": 5000.0,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.14128270542427418,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:57:50.255468",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": -1.7687914179e-06,
+            "signal": "slight_long_favored",
+            "strength": 0.0058959713930000004
+          },
+          "order_flow": {
+            "score": 0.6985748566242147,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 1258.137161830787,
+              "score": 0.4966178570970217,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 255729.58,
+              "sell_volume": 72534.75,
+              "ratio": 0.779,
+              "score": 1.0,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 12,
+              "large_sells": 1,
+              "large_buy_volume": 140701.37,
+              "large_sell_volume": 19978.11,
+              "bias": "bullish",
+              "total_large_volume": 160679.49,
+              "score": 0.751329640378519
+            },
+            "large_buys": 12,
+            "large_sells": 1,
+            "large_buy_volume": 140701.37,
+            "large_sell_volume": 19978.11,
+            "total_large_volume": 160679.49
+          },
+          "mtf": {
+            "bias": "NEUTRAL",
+            "aligned": false,
+            "reason": "\u26a0\ufe0f CONFLICTING: 4h=bullish, 1h=bullish, 15m=neutral",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "neutral"
+          },
+          "forecast": null,
+          "confidence": 0.5,
+          "regime": null
+        }
+      },
+      "ETHUSDT": {
+        "price": 2129.17,
+        "entry_price": 2160.26,
+        "position": 0,
+        "balance": 4930.134357447664,
+        "pnl": -113.88611941947514,
+        "trades": [
+          {
+            "symbol": "ETHUSDT",
+            "timestamp": "2026-03-14T10:41:42.392773",
+            "price": 2066.02,
+            "dry_run": true,
+            "action": "CLOSE_LONG",
+            "pnl": -29.75391565558873
+          }
+        ],
+        "last_action": "CLOSE_LONG",
+        "sl": 2066.328725357562,
+        "tp": 2306.8543561154033,
+        "units": 0,
+        "equity": 4930.134357447664,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.14128270542427418,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:57:57.077869",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 5.3867323278e-05,
+            "signal": "slight_short_favored",
+            "strength": 0.17955774426
+          },
+          "order_flow": {
+            "score": -0.27417830945494637,
+            "bias": "bearish",
+            "cvd": {
+              "cvd": 17791.37980854324,
+              "score": 0.4516433810901072,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 3927.58,
+              "sell_volume": 99376.66,
+              "ratio": 0.038,
+              "score": -1.0,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 0,
+              "large_sells": 2,
+              "large_buy_volume": 0,
+              "large_sell_volume": 15479.9,
+              "bias": "bearish",
+              "total_large_volume": 15479.9,
+              "score": -1.0
+            },
+            "large_buys": 0,
+            "large_sells": 2,
+            "large_buy_volume": 0,
+            "large_sell_volume": 15479.9,
+            "total_large_volume": 15479.9
+          },
+          "mtf": {
+            "bias": "BULLISH",
+            "aligned": true,
+            "reason": "\u2705 ALL BULLISH - Strong LONG setup (strength: 20%)",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "bullish"
+          },
+          "forecast": null,
+          "confidence": 0.5,
+          "regime": null
+        }
+      },
+      "SOLUSDT": {
+        "price": 88.75,
+        "entry_price": 91.3618672358124,
+        "position": 0,
+        "balance": 4948.313676927076,
+        "pnl": 46.936205005146135,
+        "trades": [
+          {
+            "symbol": "SOLUSDT",
+            "timestamp": "2026-03-14T10:41:43.341175",
+            "price": 86.63,
+            "dry_run": true,
+            "action": "CLOSE_LONG",
+            "pnl": -84.88785459355232
+          }
+        ],
+        "last_action": "CLOSE_LONG",
+        "sl": 86.70800323973894,
+        "tp": 99.28294785566723,
+        "units": 0,
+        "equity": 4948.313676927076,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.20273316728079854,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "bearish",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:58:01.760368",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 0.0001,
+            "signal": "slight_short_favored",
+            "strength": 0.33333333333333337
+          },
+          "order_flow": {
+            "score": 0.3237156435999916,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 61745.80163505212,
+              "score": 0.1902145774180472,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 117790.72,
+              "sell_volume": 81070.43,
+              "ratio": 0.592,
+              "score": 0.3693057589158113,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 6,
+              "large_sells": 2,
+              "large_buy_volume": 44644.29,
+              "large_sell_volume": 11544.45,
+              "bias": "bullish",
+              "total_large_volume": 56188.74,
+              "score": 0.5890831360811231
+            },
+            "large_buys": 6,
+            "large_sells": 2,
+            "large_buy_volume": 44644.29,
+            "large_sell_volume": 11544.45,
+            "total_large_volume": 56188.74
+          },
+          "mtf": {
+            "bias": "BULLISH",
+            "aligned": true,
+            "reason": "\u2705 ALL BULLISH - Strong LONG setup (strength: 13%)",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "bullish"
+          },
+          "forecast": null,
+          "confidence": 0.5,
+          "regime": null
+        }
+      },
+      "XRPUSDT": {
+        "price": 1.4186,
+        "entry_price": 0.0,
+        "position": 1,
+        "balance": 4231.065639791453,
+        "pnl": -92.85721876493062,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 0.0,
+        "tp": 0.0,
+        "units": 0.0,
+        "equity": 5000.0,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.16731293020108007,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "bearish",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:58:07.033200",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 0.0001,
+            "signal": "slight_short_favored",
+            "strength": 0.33333333333333337
+          },
+          "order_flow": {
+            "score": 0.45191798139372347,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 5956913.033245634,
+              "score": 0.3967148733995902,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 70617.68,
+              "sell_volume": 59043.17,
+              "ratio": 0.545,
+              "score": 0.17853514897976108,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 2,
+              "large_sells": 0,
+              "large_buy_volume": 13653.42,
+              "large_sell_volume": 0,
+              "bias": "bullish",
+              "total_large_volume": 13653.42,
+              "score": 1.0
+            },
+            "large_buys": 2,
+            "large_sells": 0,
+            "large_buy_volume": 13653.42,
+            "large_sell_volume": 0,
+            "total_large_volume": 13653.42
+          },
+          "mtf": {
+            "bias": "NEUTRAL",
+            "aligned": false,
+            "reason": "\u26a0\ufe0f CONFLICTING: 4h=bullish, 1h=bullish, 15m=neutral",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "neutral"
+          },
+          "forecast": null,
+          "confidence": 0.5,
+          "regime": null
+        }
+      }
+    },
+    "positions": {
+      "BTCUSDT": {
+        "position": 1,
+        "balance": 3639.2662576419816,
+        "pnl": -25.15169676754431
+      },
+      "ETHUSDT": {
+        "position": 0,
+        "balance": 4930.134357447664,
+        "pnl": -113.88611941947514
+      },
+      "SOLUSDT": {
+        "position": 0,
+        "balance": 4948.313676927076,
+        "pnl": 46.936205005146135
+      },
+      "XRPUSDT": {
+        "position": 1,
+        "balance": 4231.065639791453,
+        "pnl": -92.85721876493062
+      }
+    },
+    "timestamp": "2026-03-15T20:57:46.276490",
+    "total_balance": 19878.44803437474,
+    "total_pnl": -184.95882994680392,
+    "whale_alerts": [
+      {
+        "chain": "XRP",
+        "hash": "12C0CE1988890E2BFD0211A8F02A13CE8D3BD6D2184DD286ECA99E9796B328CB",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/12C0CE1988890E2BFD0211A8F02A13CE8D3BD6D2184DD286ECA99E9796B328CB"
+      },
+      {
+        "chain": "XRP",
+        "hash": "16886FF870EB5EA578F0C6885C8F6E3490CE5A9A7EF69ED9CA3FF44F92B2ACA5",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/16886FF870EB5EA578F0C6885C8F6E3490CE5A9A7EF69ED9CA3FF44F92B2ACA5"
+      },
+      {
+        "chain": "XRP",
+        "hash": "3F2E9CBA7B5A06D4C3961A54E9F5AE48DC3053B6D31D19A5C151B8E7161B4790",
+        "from": "rpiVYAVHXuryVv7D3KVTNrJ88c5Zmq3gDk",
+        "to": "rpiVYAVHXuryVv7D3KVTNrJ88c5Zmq3gDk",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/3F2E9CBA7B5A06D4C3961A54E9F5AE48DC3053B6D31D19A5C151B8E7161B4790"
+      },
+      {
+        "chain": "XRP",
+        "hash": "428D1E078ABEC567F5903BA177D2B80F9DDB3AAC99C22D7D9C3D5F1617FD90E3",
+        "from": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "to": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/428D1E078ABEC567F5903BA177D2B80F9DDB3AAC99C22D7D9C3D5F1617FD90E3"
+      },
+      {
+        "chain": "XRP",
+        "hash": "683E844F0D1B2868CB4C29449F02599488A58DFC0B78DC667F57671C01DF7B28",
+        "from": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "to": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/683E844F0D1B2868CB4C29449F02599488A58DFC0B78DC667F57671C01DF7B28"
+      },
+      {
+        "chain": "XRP",
+        "hash": "6A7ABE05A395BA99DD4BED2ADF2C37DF7F4BF18294816E434914292E535FC56C",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/6A7ABE05A395BA99DD4BED2ADF2C37DF7F4BF18294816E434914292E535FC56C"
+      },
+      {
+        "chain": "XRP",
+        "hash": "7BFEF665805E0F7003C230661EEEFDBFA702205E3AB189BEF87872D7E1B54F11",
+        "from": "rUPWQfH9SoNnbYDMjq6cMoawQ4x2or6nGA",
+        "to": "rUPWQfH9SoNnbYDMjq6cMoawQ4x2or6nGA",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/7BFEF665805E0F7003C230661EEEFDBFA702205E3AB189BEF87872D7E1B54F11"
+      },
+      {
+        "chain": "XRP",
+        "hash": "8786A2F939FB90237D0D633D8106F5586DD3ADA04CA3D3B947E743D4C46F697F",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/8786A2F939FB90237D0D633D8106F5586DD3ADA04CA3D3B947E743D4C46F697F"
+      },
+      {
+        "chain": "XRP",
+        "hash": "91DA0D68F8F789D8A3239F9217726F3B00B943117731898150D3B1BD6AA9C273",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/91DA0D68F8F789D8A3239F9217726F3B00B943117731898150D3B1BD6AA9C273"
+      },
+      {
+        "chain": "XRP",
+        "hash": "A4729F515BDAE83A8D9C2F260299B98154436B1098EF23A9FFA218647EDBA8F8",
+        "from": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "to": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/A4729F515BDAE83A8D9C2F260299B98154436B1098EF23A9FFA218647EDBA8F8"
+      },
+      {
+        "chain": "XRP",
+        "hash": "A4BD2ACE96F7D75B454F606543C0BA658E8D172E8C97E81920A12E0317F946DE",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/A4BD2ACE96F7D75B454F606543C0BA658E8D172E8C97E81920A12E0317F946DE"
+      },
+      {
+        "chain": "XRP",
+        "hash": "DC1E8E831F127E1264B994397C6EB1E1E14FF08A68EE055C792F04B9D9A66691",
+        "from": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "to": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/DC1E8E831F127E1264B994397C6EB1E1E14FF08A68EE055C792F04B9D9A66691"
+      },
+      {
+        "chain": "XRP",
+        "hash": "F25AEB0ED069DC79B80F847915DD59930476C52563402EEA11896539FFC84FBF",
+        "from": "rQKzqhDajowbADtRtGXyR5PqXiJr7onDPU",
+        "to": "rQKzqhDajowbADtRtGXyR5PqXiJr7onDPU",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773608122,
+        "link": "https://xrpscan.com/tx/F25AEB0ED069DC79B80F847915DD59930476C52563402EEA11896539FFC84FBF"
+      },
+      {
+        "chain": "XRP",
+        "hash": "071F4C21828FC4CDDAF0E839FCEA52D047D57DD1D5D9A56E0E3D18FB999F648E",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773604490,
+        "link": "https://xrpscan.com/tx/071F4C21828FC4CDDAF0E839FCEA52D047D57DD1D5D9A56E0E3D18FB999F648E"
+      },
+      {
+        "chain": "XRP",
+        "hash": "847746A232E96B4DA3AC15CCFEB83706151088854770D22D1DA53C8EE77BE8A1",
+        "from": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "to": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773604490,
+        "link": "https://xrpscan.com/tx/847746A232E96B4DA3AC15CCFEB83706151088854770D22D1DA53C8EE77BE8A1"
+      },
+      {
+        "chain": "XRP",
+        "hash": "920BC5C484F2DC83B1E4F960B1DB7FD4AF213952FFA6B6A22D0D84791B2E715E",
+        "from": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "to": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773604490,
+        "link": "https://xrpscan.com/tx/920BC5C484F2DC83B1E4F960B1DB7FD4AF213952FFA6B6A22D0D84791B2E715E"
+      },
+      {
+        "chain": "XRP",
+        "hash": "A18F0457224C9177311203BE0504F24488EC78897D2348C6B5D28260C7547838",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773604490,
+        "link": "https://xrpscan.com/tx/A18F0457224C9177311203BE0504F24488EC78897D2348C6B5D28260C7547838"
+      },
+      {
+        "chain": "XRP",
+        "hash": "EF963B471F8CCC916874E58AA437ED5880810EA9931F6E1FE3911C152FCCCC9E",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773604490,
+        "link": "https://xrpscan.com/tx/EF963B471F8CCC916874E58AA437ED5880810EA9931F6E1FE3911C152FCCCC9E"
+      },
+      {
+        "chain": "ETH",
+        "hash": "0xd506f36f3ae86ac4ae5e6f38bd7a719b03588dc5358648f4d69f04be84a3f153",
+        "from": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+        "to": "0xf8191d98ae98d2f7abdfb63a9b0b812b93c873aa",
+        "value": 1228.0,
+        "currency": "ETH",
+        "timestamp": 1773600868,
+        "link": "https://etherscan.io/tx/0xd506f36f3ae86ac4ae5e6f38bd7a719b03588dc5358648f4d69f04be84a3f153"
+      },
+      {
+        "chain": "XRP",
+        "hash": "173A32442D9679D322291E5FD0C487BE5AEF760F13A76D297B07F090B0E3A154",
+        "from": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "to": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/173A32442D9679D322291E5FD0C487BE5AEF760F13A76D297B07F090B0E3A154"
+      },
+      {
+        "chain": "XRP",
+        "hash": "1ADA65E835A2F4F6443527F2E60ECF7933321F76E6C12F24F35E4F37B3210E78",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/1ADA65E835A2F4F6443527F2E60ECF7933321F76E6C12F24F35E4F37B3210E78"
+      },
+      {
+        "chain": "XRP",
+        "hash": "3CA0FAD454864BDA78A8722C86EBC0753B55EF55EF1152DA678A1FCCA6C89AC9",
+        "from": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "to": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/3CA0FAD454864BDA78A8722C86EBC0753B55EF55EF1152DA678A1FCCA6C89AC9"
+      },
+      {
+        "chain": "XRP",
+        "hash": "4105058DF3CD90EC0FF923E92BC57582474410F852FA66BB5B614D346023AD6A",
+        "from": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "to": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/4105058DF3CD90EC0FF923E92BC57582474410F852FA66BB5B614D346023AD6A"
+      },
+      {
+        "chain": "XRP",
+        "hash": "506D12638040AD67C4E4541E34519E3D630511CBE8CF18B5E59A640630A678FE",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/506D12638040AD67C4E4541E34519E3D630511CBE8CF18B5E59A640630A678FE"
+      },
+      {
+        "chain": "XRP",
+        "hash": "7DBC01799EA3E760A38549B386A67D41BF4D1362FB678AA6B62F171938A7BA38",
+        "from": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "to": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/7DBC01799EA3E760A38549B386A67D41BF4D1362FB678AA6B62F171938A7BA38"
+      },
+      {
+        "chain": "XRP",
+        "hash": "CFFBAB92CC2B2298C869FCC6BD44A232F15EDA361DB19F5F4A7451E93FC0CC58",
+        "from": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "to": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/CFFBAB92CC2B2298C869FCC6BD44A232F15EDA361DB19F5F4A7451E93FC0CC58"
+      },
+      {
+        "chain": "XRP",
+        "hash": "DB168E9FD5B1A1669C1B15F14AB55D248A1A337A46EA69281A0B1023E061130D",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773600868,
+        "link": "https://xrpscan.com/tx/DB168E9FD5B1A1669C1B15F14AB55D248A1A337A46EA69281A0B1023E061130D"
+      },
+      {
+        "chain": "XRP",
+        "hash": "018FF69657FDD30E8F9861F84A818D25D769784B49AD37633F70070A3645F991",
+        "from": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "to": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/018FF69657FDD30E8F9861F84A818D25D769784B49AD37633F70070A3645F991"
+      },
+      {
+        "chain": "XRP",
+        "hash": "05FA7EAE9E0A27AAA6550183F242FF96F51663072A428ABAC6A465757DA51282",
+        "from": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "to": "rLhDWnBFitrn8iW8e5m7bVKqFS5raK1NbP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/05FA7EAE9E0A27AAA6550183F242FF96F51663072A428ABAC6A465757DA51282"
+      },
+      {
+        "chain": "XRP",
+        "hash": "204D9BD7D1D5E64C1AF4DC68467D0573B5A74283BE579B3C3355F2AD4420B85A",
+        "from": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "to": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/204D9BD7D1D5E64C1AF4DC68467D0573B5A74283BE579B3C3355F2AD4420B85A"
+      },
+      {
+        "chain": "XRP",
+        "hash": "2200571E29011B36D5C8ECC9374105FF2FFA89C077B96FEDE1761F476115266D",
+        "from": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "to": "rfpG8NYHuMKdCWx8T275rvZBV1wFypudHV",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/2200571E29011B36D5C8ECC9374105FF2FFA89C077B96FEDE1761F476115266D"
+      },
+      {
+        "chain": "XRP",
+        "hash": "2BF3FCD35A546DDD830135F68D37F00F76725C6CA25387D43C337CB4699C39A8",
+        "from": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "to": "rT4WvGngDmwvVaQ5fUkRTMKGkXpisQCJP",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/2BF3FCD35A546DDD830135F68D37F00F76725C6CA25387D43C337CB4699C39A8"
+      },
+      {
+        "chain": "XRP",
+        "hash": "320F267318D3D04EA9F01C3F671540D62074A5717B655820DF6B0EA617E02F0A",
+        "from": "rTWaZ8yXyDZXU8x6CUxEB3CF9wEUSJf5w",
+        "to": "rTWaZ8yXyDZXU8x6CUxEB3CF9wEUSJf5w",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/320F267318D3D04EA9F01C3F671540D62074A5717B655820DF6B0EA617E02F0A"
+      },
+      {
+        "chain": "XRP",
+        "hash": "342D0B9C75810065D1D0A467F276DF92B73EA73158411E93F6F343F784784DEC",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/342D0B9C75810065D1D0A467F276DF92B73EA73158411E93F6F343F784784DEC"
+      },
+      {
+        "chain": "XRP",
+        "hash": "36CDB84CA3CD33934A0318256A93BE7B3F4D47F854E60E216C3586A8309F5855",
+        "from": "rmBdbQFdwTHAC1a98X6SA5BaXzfUcPwe7",
+        "to": "rmBdbQFdwTHAC1a98X6SA5BaXzfUcPwe7",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/36CDB84CA3CD33934A0318256A93BE7B3F4D47F854E60E216C3586A8309F5855"
+      },
+      {
+        "chain": "XRP",
+        "hash": "3C53A32638DBA72E94C6D13855884D54909EEBCC6844AEB9B2240A961F1A41B2",
+        "from": "rTWaZ8yXyDZXU8x6CUxEB3CF9wEUSJf5w",
+        "to": "rTWaZ8yXyDZXU8x6CUxEB3CF9wEUSJf5w",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/3C53A32638DBA72E94C6D13855884D54909EEBCC6844AEB9B2240A961F1A41B2"
+      },
+      {
+        "chain": "XRP",
+        "hash": "417FADA15A4CFA75E980F06ED39840DADF3EACE6E748C5A053FC265FEEC82627",
+        "from": "rmBdbQFdwTHAC1a98X6SA5BaXzfUcPwe7",
+        "to": "rmBdbQFdwTHAC1a98X6SA5BaXzfUcPwe7",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/417FADA15A4CFA75E980F06ED39840DADF3EACE6E748C5A053FC265FEEC82627"
+      },
+      {
+        "chain": "XRP",
+        "hash": "42DA4A45641D4787B184C8D27E86ED0CE5FFDE8D20D058BE23309BA7A9DC2A9E",
+        "from": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "to": "rWCognGQjRK6DEQBEy5FD86tKvcNaDeKh",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/42DA4A45641D4787B184C8D27E86ED0CE5FFDE8D20D058BE23309BA7A9DC2A9E"
+      },
+      {
+        "chain": "XRP",
+        "hash": "50310750E0EA519D15CD69ED4E183A4046C820CA4E890AE9DBE512803A5B3D11",
+        "from": "r1111148LRYpN2dRgHGbctVbTZCnGTSdF",
+        "to": "r1111148LRYpN2dRgHGbctVbTZCnGTSdF",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/50310750E0EA519D15CD69ED4E183A4046C820CA4E890AE9DBE512803A5B3D11"
+      },
+      {
+        "chain": "XRP",
+        "hash": "55AA2766333E73F892CA1044E8CFBB6A9C1A7D3370B9C41A9A526BED5519BAC3",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/55AA2766333E73F892CA1044E8CFBB6A9C1A7D3370B9C41A9A526BED5519BAC3"
+      },
+      {
+        "chain": "XRP",
+        "hash": "57169B5833D488C568562D20391CEF4BC32F882A9352253D9F6D5F512494F460",
+        "from": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "to": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/57169B5833D488C568562D20391CEF4BC32F882A9352253D9F6D5F512494F460"
+      },
+      {
+        "chain": "XRP",
+        "hash": "5D2813F204D2C161CFD459859E4F1F4E226AE0B2F8A3A33D452EB36BB1842366",
+        "from": "rJg42tap9FMTQdjZqeZYvjsrgTunZ4r3co",
+        "to": "rJg42tap9FMTQdjZqeZYvjsrgTunZ4r3co",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/5D2813F204D2C161CFD459859E4F1F4E226AE0B2F8A3A33D452EB36BB1842366"
+      },
+      {
+        "chain": "XRP",
+        "hash": "65CD5B652A2199F45DA81BC725327072D6E05BA96E464B599C1D4674D9F9C728",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/65CD5B652A2199F45DA81BC725327072D6E05BA96E464B599C1D4674D9F9C728"
+      },
+      {
+        "chain": "XRP",
+        "hash": "68B39724567BA43426B1DE87F20DC0DC9F29B81E5D03F54DD76F26EE736CDAAA",
+        "from": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "to": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/68B39724567BA43426B1DE87F20DC0DC9F29B81E5D03F54DD76F26EE736CDAAA"
+      },
+      {
+        "chain": "XRP",
+        "hash": "6C8317A3448083942F6A0E81DC23FD26B0ED03A838DE0A0387759E800915211E",
+        "from": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "to": "rahNQXNFYLZiqgjkMv9S728Ubu5PEn5BRT",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/6C8317A3448083942F6A0E81DC23FD26B0ED03A838DE0A0387759E800915211E"
+      },
+      {
+        "chain": "XRP",
+        "hash": "88C26DF1A4BF6743BA7FE0FA94034A6E5D07BB225FE4B4B6F04890425B262152",
+        "from": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "to": "rSwGFMHCeV2Evo4FbfSaRVLMKDd2r4Cbm",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/88C26DF1A4BF6743BA7FE0FA94034A6E5D07BB225FE4B4B6F04890425B262152"
+      },
+      {
+        "chain": "XRP",
+        "hash": "8B383DD602A353F0CC60947AD94D526464C43909A7195251C61FF0AEBE60C442",
+        "from": "rcM75s3cJXspn77CGV1Ga7BTbomWejcUF",
+        "to": "rcM75s3cJXspn77CGV1Ga7BTbomWejcUF",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/8B383DD602A353F0CC60947AD94D526464C43909A7195251C61FF0AEBE60C442"
+      },
+      {
+        "chain": "XRP",
+        "hash": "B313C69F7DEC62386162403D7B83BE896B23DBC98E9A9497576FB550A0A3F03F",
+        "from": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "to": "r3QxBXQs2XZ9oMPLsjB2fkFgKTcxC5TRMq",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/B313C69F7DEC62386162403D7B83BE896B23DBC98E9A9497576FB550A0A3F03F"
+      },
+      {
+        "chain": "XRP",
+        "hash": "BF8FF0B237F90A901E7A23441A525D6D5C1DB5FDA15E1289B15160117C091F06",
+        "from": "rJg42tap9FMTQdjZqeZYvjsrgTunZ4r3co",
+        "to": "rJg42tap9FMTQdjZqeZYvjsrgTunZ4r3co",
+        "value": 1000000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/BF8FF0B237F90A901E7A23441A525D6D5C1DB5FDA15E1289B15160117C091F06"
+      },
+      {
+        "chain": "XRP",
+        "hash": "C3238CE97AAB6764F5377BBFCDD4FE9A143CACA9BB7E42D06670EC5C4DE6E8B0",
+        "from": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "to": "rErpQ8xnF9ZCTabtiwq6gYgvWgNTnkDTy9",
+        "value": 100000000.0,
+        "currency": "XRP",
+        "timestamp": 1773597237,
+        "link": "https://xrpscan.com/tx/C3238CE97AAB6764F5377BBFCDD4FE9A143CACA9BB7E42D06670EC5C4DE6E8B0"
+      }
+    ],
+    "reset_timestamp": null,
+    "last_fix": {
+      "timestamp": "2026-03-13T12:56:22.693691",
+      "reason": "Manual P&L reconciliation from trade history",
+      "old_pnl": -102.8902905820666,
+      "new_pnl": -92.31516038586793,
+      "correction": 10.575130196198671
+    }
+  },
+  "trades": [
+    {
+      "timestamp": "2026-03-05T21:30:26.982871",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG",
+      "price": 1.4171,
+      "pnl": 0,
+      "balance": 3796.317809591057,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.48 (composite=-0.049) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=RANGING(+0.18) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0044% | \ud83d\udcca Flow=+0.15(cvd=+0.1/tk=+0.4/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-06T10:46:14.294416",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_SHORT",
+      "price": 87.65,
+      "pnl": 0,
+      "balance": 3673.14593134612,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.58 (composite=-0.156) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_DOWN(-0.70) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0116% | \ud83d\udcca Flow=-0.88(cvd=-0.9/tk=-0.8/lg=-0.9)"
+    },
+    {
+      "timestamp": "2026-03-06T13:46:51.391533",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_SHORT",
+      "price": 2046.26,
+      "pnl": 0,
+      "balance": 3747.1355760644756,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.51 (composite=-0.017) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_DOWN(-0.78) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0044% | \ud83d\udcca Flow=+0.30(cvd=-0.2/tk=+0.7/lg=+1.0)"
+    },
+    {
+      "timestamp": "2026-03-06T14:48:01.561845",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_LONG",
+      "price": 1.3548,
+      "pnl": -52.917507912269535,
+      "balance": 4947.08249208773,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-06T18:49:42.146121",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT",
+      "price": 1.3615,
+      "pnl": 0,
+      "balance": 3596.867348575694,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.60 (composite=-0.203) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_DOWN(-1.00) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0217% | \ud83d\udcca Flow=-0.91(cvd=-1.0/tk=-0.7/lg=-1.0)"
+    },
+    {
+      "timestamp": "2026-03-06T21:52:10.025114",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.3648,
+      "pnl": -3.272647795512177,
+      "balance": 4943.809844292218,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-07T05:56:10.812776",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG",
+      "price": 1.3673,
+      "pnl": 0,
+      "balance": 3715.623209862353,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.50 (composite=-0.008) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_UP(+0.20) | \ud83d\udd2e TFT=+0.00(c=1.0) | \ud83d\udcb0 Fund=-0.0124% | \ud83d\udcca Flow=-0.45(cvd=-0.9/tk=+0.1/lg=-0.1)"
+    },
+    {
+      "timestamp": "2026-03-07T13:00:00.455222",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_LONG",
+      "price": 1.3641,
+      "pnl": -2.8744220216305183,
+      "balance": 4940.935422270588,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-07T16:01:26.249586",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT",
+      "price": 1.3569,
+      "pnl": 0,
+      "balance": 3751.3559161022727,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.48 (composite=+0.049) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=RANGING(-0.12) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0146% | \ud83d\udcca Flow=-0.33(cvd=+0.1/tk=-0.9/lg=-0.6)"
+    },
+    {
+      "timestamp": "2026-03-07T21:04:56.048441",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.3548,
+      "pnl": 1.841047212730084,
+      "balance": 4942.776469483318,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-07T22:05:43.469938",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT",
+      "price": 1.3564,
+      "pnl": 0,
+      "balance": 3475.8556685303884,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.66 (composite=-0.327) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_DOWN(-0.74) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0182% | \ud83d\udcca Flow=-0.71(cvd=-0.5/tk=-1.0/lg=-1.0)"
+    },
+    {
+      "timestamp": "2026-03-08T00:06:19.805385",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.3593,
+      "pnl": -3.1362948413177167,
+      "balance": 4939.640174642,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-08T03:08:03.994333",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT",
+      "price": 1.3465,
+      "pnl": 0,
+      "balance": 3434.706261983567,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.68 (composite=-0.363) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_DOWN(-1.00) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0232% | \ud83d\udcca Flow=-0.65(cvd=-0.8/tk=-0.6/lg=-0.4)"
+    },
+    {
+      "timestamp": "2026-03-08T05:09:25.086635",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 82.3,
+      "pnl": 80.98881080773836,
+      "balance": 5080.988810807738,
+      "position": 0,
+      "reason": "TAKE_PROFIT"
+    },
+    {
+      "timestamp": "2026-03-08T09:26:58.789565",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1966.39,
+      "pnl": -8.590153679305496,
+      "balance": 4933.917655979513,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-08T09:27:03.712585",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.3639,
+      "pnl": -6.147149290472436,
+      "balance": 4946.793221089095,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-08T10:08:11.461966",
+      "action": "OPEN_LONG",
+      "price": 67791.14,
+      "pnl": 0,
+      "balance": 19961.699687876346,
+      "position": 1,
+      "reason": "manual",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT"
+    },
+    {
+      "timestamp": "2026-03-08T12:03:49.693406",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG",
+      "price": 67608.14,
+      "pnl": 0,
+      "balance": 3532.8951367403015,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.66 (composite=+0.311) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=TRENDING_UP(+0.26) | \ud83d\udd2e TFT=+1.00(c=1.0) | \ud83d\udcb0 Fund=-0.0021% | \ud83d\udcca Flow=+0.37(cvd=-0.2/tk=+1.0/lg=+0.9)"
+    },
+    {
+      "timestamp": "2026-03-08T17:06:45.002092",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT",
+      "price": 1.3451,
+      "pnl": 0,
+      "balance": 3679.377553722102,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.54 (composite=-0.085) | \ud83d\udc0b Whale=+0.00 | \ud83d\udcca Regime=RANGING(-0.26) | \ud83d\udd2e TFT=+0.00(c=1.0) | \ud83d\udcb0 Fund=-0.0161% | \ud83d\udcca Flow=-0.38(cvd=-0.6/tk=+0.0/lg=-0.6)"
+    },
+    {
+      "timestamp": "2026-03-08T19:07:00.274825",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.3457,
+      "pnl": -0.5653478554903812,
+      "balance": 4946.227873233604,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-08T22:07:35.779608",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_LONG",
+      "price": 66011.15,
+      "pnl": -22.121755024658952,
+      "balance": 4965.345122708935,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-09T00:28:11.186735",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 66067.68,
+      "pnl": 0,
+      "balance": 4331.528153881953,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.54 (composite=-0.077) | \ud83d\udc0b Whale=-0.08 | \ud83d\udcca Regime=RANGING(-1.00) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0000% | \ud83d\udcca Flow=+0.31(cvd=-0.3/tk=+1.0/lg=+0.7)"
+    },
+    {
+      "timestamp": "2026-03-09T05:31:47.640558",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 1989.78,
+      "pnl": 0,
+      "balance": 4357.632902025951,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.46 (composite=+0.087) | \ud83d\udc0b Whale=-0.05 | \ud83d\udcca Regime=HIGH_VOLATILITY(+0.64) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0018% | \ud83d\udcca Flow=+0.53(cvd=+0.3/tk=+0.9/lg=+0.5)"
+    },
+    {
+      "timestamp": "2026-03-09T09:32:49.989163",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 84.24,
+      "pnl": 0,
+      "balance": 4377.466224994683,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.61 (composite=+0.226) | \ud83d\udc0b Whale=-0.07 | \ud83d\udcca Regime=HIGH_VOLATILITY(+0.45) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0082% | \ud83d\udcca Flow=+0.29(cvd=+0.4/tk=+0.4/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-09T16:42:12.400646",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 2027.4,
+      "pnl": -24.21502536048548,
+      "balance": 4904.3221158636625,
+      "position": 0,
+      "reason": "\u2696\ufe0f PPO signal (market neutral, conf=0.52)"
+    },
+    {
+      "timestamp": "2026-03-09T17:43:22.086273",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 2009.96,
+      "pnl": 0,
+      "balance": 4248.832147237468,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.58 (composite=+0.169) | \ud83d\udc0b Whale=-0.10 | \ud83d\udcca Regime=TRENDING_UP(+0.95) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0003% | \ud83d\udcca Flow=+0.73(cvd=+0.6/tk=+1.0/lg=+0.7)"
+    },
+    {
+      "timestamp": "2026-03-09T17:43:23.048606",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "CLOSE_LONG",
+      "price": 84.38,
+      "pnl": 17.633717270332987,
+      "balance": 5091.022747058486,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-09T19:45:12.658583",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 68942.96,
+      "pnl": -27.683751755293002,
+      "balance": 4961.266340062569,
+      "position": 0,
+      "reason": "\ud83e\udd1d PPO+Signal agree: BUY (conf=0.62)"
+    },
+    {
+      "timestamp": "2026-03-09T20:22:27.210428",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 68948.68,
+      "pnl": 0,
+      "balance": 4257.801582408783,
+      "position": 1,
+      "reason": "\ud83e\udd1d PPO+Signal agree: BUY (conf=0.63)"
+    },
+    {
+      "timestamp": "2026-03-09T23:10:38.363172",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 1.366,
+      "pnl": 0,
+      "balance": 4332.096159426008,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.50 (composite=-0.009) | \ud83d\udc0b Whale=-0.24 | \ud83d\udcca Regime=TRENDING_UP(+0.66) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0085% | \ud83d\udcca Flow=+0.29(cvd=+0.3/tk=+0.8/lg=-0.5)"
+    },
+    {
+      "timestamp": "2026-03-10T04:13:50.803055",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_LONG",
+      "price": 1.3757,
+      "pnl": 4.3609645856029084,
+      "balance": 4950.588837819208,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-10T14:33:04.951128",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_LONG",
+      "price": 69819.92,
+      "pnl": 8.889,
+      "balance": 4970.155366443614,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-10T14:33:05.940691",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_LONG",
+      "price": 2025.88,
+      "pnl": -11.215297827347177,
+      "balance": 4909.513960627006,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-10T15:33:41.114907",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 2077.06,
+      "pnl": 0,
+      "balance": 4250.442449174864,
+      "position": 1,
+      "reason": "\ud83e\udd1d PPO+Signal agree: BUY (conf=0.59)"
+    },
+    {
+      "timestamp": "2026-03-10T15:33:45.527947",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 88.2,
+      "pnl": 0,
+      "balance": 4347.565030993026,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.65 (composite=+0.305) | \ud83d\udc0b Whale=-0.17 | \ud83d\udcca Regime=TRENDING_UP(+0.65) | \ud83d\udd2e TFT=+1.00(c=1.0) | \ud83d\udcb0 Fund=+0.0090% | \ud83d\udcca Flow=+0.25(cvd=+0.3/tk=+0.4/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-10T22:02:06.501276",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 1.3858,
+      "pnl": 0,
+      "balance": 4270.999354304468,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.61 (composite=-0.213) | \ud83d\udc0b Whale=-0.15 | \ud83d\udcca Regime=TRENDING_DOWN(-0.24) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0062% | \ud83d\udcca Flow=-0.07(cvd=-0.4/tk=+0.4/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-11T18:04:15.292543",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 70850.45,
+      "pnl": 0,
+      "balance": 4374.537730826564,
+      "position": 1,
+      "reason": "\u2696\ufe0f PPO signal (market neutral, conf=0.47)"
+    },
+    {
+      "timestamp": "2026-03-12T03:59:52.670085",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 2023.45,
+      "pnl": 0,
+      "balance": 4325.745661230638,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.59 (composite=-0.184) | \ud83d\udc0b Whale=-0.09 | \ud83d\udcca Regime=TRENDING_DOWN(-0.57) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0028% | \ud83d\udcca Flow=+0.40(cvd=+0.4/tk=+0.3/lg=+0.6)"
+    },
+    {
+      "timestamp": "2026-03-12T03:59:57.665972",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 1.3738,
+      "pnl": 0,
+      "balance": 4320.29778581469,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.60 (composite=-0.197) | \ud83d\udc0b Whale=-0.01 | \ud83d\udcca Regime=TRENDING_DOWN(-0.63) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0054% | \ud83d\udcca Flow=+0.15(cvd=+0.3/tk=-0.2/lg=+0.2)"
+    },
+    {
+      "timestamp": "2026-03-12T11:03:55.138928",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 2070.63,
+      "pnl": -25.29866295928531,
+      "balance": 4974.701337040715,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-12T14:05:11.765265",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_SHORT_SPLIT",
+      "price": 2078.41,
+      "pnl": 0,
+      "balance": 4337.935665515135,
+      "position": -1,
+      "reason": "\u2705 SELL approved: confidence=0.54 (composite=-0.083) | \ud83d\udc0b Whale=-0.11 | \ud83d\udcca Regime=RANGING(+0.56) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0017% | \ud83d\udcca Flow=-0.40(cvd=+0.1/tk=-1.0/lg=-0.7)"
+    },
+    {
+      "timestamp": "2026-03-12T14:05:15.979026",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 87.11,
+      "pnl": 0,
+      "balance": 4342.04192363466,
+      "position": 1,
+      "reason": "\ud83e\udd1d PPO+Signal agree: BUY (conf=0.57)"
+    },
+    {
+      "timestamp": "2026-03-13T01:07:19.229135",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 2126.76,
+      "pnl": -14.813063937462948,
+      "balance": 4959.888273103253,
+      "position": 0,
+      "reason": "TRAILING_STOP"
+    },
+    {
+      "timestamp": "2026-03-13T01:07:22.585209",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_SHORT",
+      "price": 1.4142,
+      "pnl": -36.37915152236824,
+      "balance": 4963.620848477632,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-13T02:08:36.474647",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 1.4113,
+      "pnl": 0,
+      "balance": 4254.181886320141,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.64 (composite=+0.274) | \ud83d\udc0b Whale=+0.02 | \ud83d\udcca Regime=RANGING(+0.57) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0100% | \ud83d\udcca Flow=+0.46(cvd=+0.9/tk=-0.1/lg=+0.1)"
+    },
+    {
+      "timestamp": "2026-03-13T07:10:15.329307",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "CLOSE_LONG",
+      "price": 88.6,
+      "pnl": 33.201531520627114,
+      "balance": 5033.201531520628,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-13T12:11:28.800161",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_LONG",
+      "price": 1.4237,
+      "pnl": 6.233290675797392,
+      "balance": 4969.854139153429,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-13T12:43:52.873680",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 1.4295,
+      "pnl": 0,
+      "balance": 4231.065639791453,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.66 (composite=+0.330) | \ud83d\udc0b Whale=-0.08 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0100% | \ud83d\udcca Flow=+0.46(cvd=+0.8/tk=+0.3/lg=-0.2)"
+    },
+    {
+      "timestamp": "2026-03-13T13:52:38.402601",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 91.9,
+      "pnl": 0,
+      "balance": 4213.70338049341,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.73 (composite=+0.451) | \ud83d\udc0b Whale=-0.09 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=+1.00(c=0.9) | \ud83d\udcb0 Fund=+0.0005% | \ud83d\udcca Flow=+0.52(cvd=+1.0/tk=+0.0/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-13T14:53:30.755390",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 2160.26,
+      "pnl": 0,
+      "balance": 4277.840375881882,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.61 (composite=+0.216) | \ud83d\udc0b Whale=-0.11 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0018% | \ud83d\udcca Flow=+0.98(cvd=+1.0/tk=+1.0/lg=+0.9)"
+    },
+    {
+      "timestamp": "2026-03-13T15:46:53.712826",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_LONG",
+      "price": 71985.47,
+      "pnl": 9.541759138834918,
+      "balance": 4979.697125582449,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-13T18:16:33.632173",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_LONG",
+      "price": 71590.7,
+      "pnl": 6.223050873572732,
+      "balance": 4976.378417317187,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-13T17:48:12.099412",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 71149.67,
+      "pnl": 0,
+      "balance": 4309.481691612215,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.59 (composite=+0.181) | \ud83d\udc0b Whale=-0.12 | \ud83d\udcca Regime=TRENDING_UP(+0.39) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0028% | \ud83d\udcca Flow=+0.28(cvd=+0.2/tk=+0.4/lg=+0.1)"
+    },
+    {
+      "timestamp": "2026-03-13T19:58:03.185620",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 70933.59,
+      "pnl": 0,
+      "balance": 4312.854712069344,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.58 (composite=+0.164) | \ud83d\udc0b Whale=-0.18 | \ud83d\udcca Regime=TRENDING_UP(+0.19) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0025% | \ud83d\udcca Flow=+0.56(cvd=+0.2/tk=+1.0/lg=+0.8)"
+    },
+    {
+      "timestamp": "2026-03-14T10:41:42.393605",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_LONG",
+      "price": 2066.02,
+      "pnl": -29.75391565558873,
+      "balance": 4930.134357447664,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-14T10:41:43.341974",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "CLOSE_LONG",
+      "price": 86.63,
+      "pnl": -84.88785459355232,
+      "balance": 4948.313676927076,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-15T15:23:30.972763",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "CLOSE_LONG",
+      "price": 71398.91,
+      "pnl": 12.970241122257878,
+      "balance": 4989.348658439445,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    }
+  ],
+  "backup_time": "20260315_225820",
+  "environment": "production"
+}

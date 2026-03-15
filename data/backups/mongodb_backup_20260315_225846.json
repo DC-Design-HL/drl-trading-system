@@ -1,0 +1,644 @@
+{
+  "state": {
+    "_id": "current_state",
+    "active": true,
+    "assets": {
+      "BTCUSDT": {
+        "price": 71535.67,
+        "entry_price": 73066.18,
+        "position": 1,
+        "balance": 4227.579715026229,
+        "pnl": 0.0,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 70976.3487939406,
+        "tp": 77450.1508,
+        "units": 0.010571515918497053,
+        "equity": 4967.6403783431615,
+        "entry_time": 1773528009.351111,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.11176090180809141,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:56:20.493053",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": -1.8958661159e-06,
+            "signal": "slight_long_favored",
+            "strength": 0.006319553719666667
+          },
+          "order_flow": {
+            "score": -0.04873664442303374,
+            "bias": "neutral",
+            "cvd": {
+              "cvd": 1253.6326121955246,
+              "score": 0.49510600815622485,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 42878.36,
+              "sell_volume": 59271.67,
+              "ratio": 0.42,
+              "score": -0.32096549500382054,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 0,
+              "large_sells": 3,
+              "large_buy_volume": 0,
+              "large_sell_volume": 37395.89,
+              "bias": "bearish",
+              "total_large_volume": 37395.89,
+              "score": -1.0
+            },
+            "large_buys": 0,
+            "large_sells": 3,
+            "large_buy_volume": 0,
+            "large_sell_volume": 37395.89,
+            "total_large_volume": 37395.89
+          },
+          "mtf": {
+            "bias": "NEUTRAL",
+            "aligned": false,
+            "reason": "\u26a0\ufe0f CONFLICTING: 4h=bullish, 1h=bullish, 15m=neutral",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "neutral"
+          },
+          "forecast": {
+            "direction_consensus": 1.0,
+            "feature_importance": [
+              0.05474799871444702,
+              0.015037264674901962,
+              0.01055912859737873,
+              0.0053063249215483665,
+              0.015183023177087307,
+              0.009348937310278416,
+              0.012392833828926086,
+              0.017074808478355408,
+              0.007373101077973843,
+              0.00416543148458004,
+              0.010189377702772617,
+              0.008122729137539864,
+              0.5839728713035583,
+              0.008659649640321732,
+              0.019232021644711494,
+              0.05802355706691742,
+              0.016351956874132156,
+              0.02291332371532917,
+              0.007971515879034996,
+              0.04341292008757591,
+              0.005179420113563538,
+              0.003921481315046549,
+              0.010503839701414108,
+              0.00956211518496275,
+              0.013788968324661255,
+              0.027005404233932495
+            ],
+            "return_1h": 0.00032663624733686447,
+            "confidence_1h": 0.9852266907691956,
+            "return_4h": 0.0011567743495106697,
+            "confidence_4h": 0.9866883158683777,
+            "return_12h": 0.0009139641188085079,
+            "confidence_12h": 0.961149275302887,
+            "return_24h": 0.005335099995136261,
+            "confidence_24h": 0.9296119213104248
+          },
+          "confidence": 0.5,
+          "regime": null,
+          "news": {
+            "sentiment": 0.10275955988455988,
+            "confidence": 0.8165497425184404,
+            "trend": "stable",
+            "sources": 1
+          }
+        }
+      },
+      "ETHUSDT": {
+        "price": 2112.29,
+        "entry_price": 2190.26,
+        "position": 0,
+        "balance": 4978.30164758935,
+        "pnl": -21.69835241065028,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 2137.6029227236186,
+        "tp": 2326.3423323152256,
+        "units": 0,
+        "equity": 4978.30164758935,
+        "entry_time": 0,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.11176090180809141,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:56:28.829212",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 5.36895616148e-05,
+            "signal": "slight_short_favored",
+            "strength": 0.1789652053826667
+          },
+          "order_flow": {
+            "score": 0.723976372636596,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 17609.749208819612,
+              "score": 0.44795274527319207,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 83461.29,
+              "sell_volume": 12985.69,
+              "ratio": 0.865,
+              "score": 1.0,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 7,
+              "large_sells": 0,
+              "large_buy_volume": 47529.52,
+              "large_sell_volume": 0,
+              "bias": "bullish",
+              "total_large_volume": 47529.52,
+              "score": 1.0
+            },
+            "large_buys": 7,
+            "large_sells": 0,
+            "large_buy_volume": 47529.52,
+            "large_sell_volume": 0,
+            "total_large_volume": 47529.52
+          },
+          "mtf": {
+            "bias": "BULLISH",
+            "aligned": true,
+            "reason": "\u2705 ALL BULLISH - Strong LONG setup (strength: 20%)",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "bullish"
+          },
+          "forecast": {
+            "direction_consensus": -0.5,
+            "feature_importance": [
+              0.044695064425468445,
+              0.580855131149292,
+              0.007714982610195875,
+              0.006779949646443129,
+              0.0069516622461378574,
+              0.01955176703631878,
+              0.03892604261636734,
+              0.006011889316141605,
+              0.007327796891331673,
+              0.005151877645403147,
+              0.022629596292972565,
+              0.005478149279952049,
+              0.009037523530423641,
+              0.03207102045416832,
+              0.009714076295495033,
+              0.019227417185902596,
+              0.0068791029043495655,
+              0.008840763010084629,
+              0.028133941814303398,
+              0.033491093665361404,
+              0.023170405998826027,
+              0.010032478719949722,
+              0.0069536990486085415,
+              0.011623857542872429,
+              0.03348970040678978,
+              0.015261007472872734
+            ],
+            "return_1h": 0.001524715917184949,
+            "confidence_1h": 0.9927678108215332,
+            "return_4h": -0.0010919268243014812,
+            "confidence_4h": 0.9853126406669617,
+            "return_12h": -0.006860101595520973,
+            "confidence_12h": 0.956011950969696,
+            "return_24h": -0.00479377806186676,
+            "confidence_24h": 0.9431043863296509
+          },
+          "confidence": 0.5,
+          "regime": null,
+          "news": {
+            "sentiment": 0.09251473063973063,
+            "confidence": 0.8291539468206333,
+            "trend": "stable",
+            "sources": 1
+          }
+        }
+      },
+      "SOLUSDT": {
+        "price": 88.12,
+        "entry_price": 90.34,
+        "position": 0,
+        "balance": 5002.10053560064,
+        "pnl": 2.100535600640312,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 91.57000000000001,
+        "tp": 97.17067246422641,
+        "units": 0,
+        "equity": 5002.10053560064,
+        "entry_time": 1773528009.3512585,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.13224438909359956,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:56:32.792566",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 0.0001,
+            "signal": "slight_short_favored",
+            "strength": 0.33333333333333337
+          },
+          "order_flow": {
+            "score": 0.4404374825462949,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 60532.153762621674,
+              "score": 0.18657702426376657,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 164074.56,
+              "sell_volume": 85178.93,
+              "ratio": 0.658,
+              "score": 0.6330553190033248,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 14,
+              "large_sells": 2,
+              "large_buy_volume": 96429.28,
+              "large_sell_volume": 11544.45,
+              "bias": "bullish",
+              "total_large_volume": 107973.73,
+              "score": 0.7861618735670707
+            },
+            "large_buys": 14,
+            "large_sells": 2,
+            "large_buy_volume": 96429.28,
+            "large_sell_volume": 11544.45,
+            "total_large_volume": 107973.73
+          },
+          "mtf": {
+            "bias": "BULLISH",
+            "aligned": true,
+            "reason": "\u2705 ALL BULLISH - Strong LONG setup (strength: 13%)",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "bullish"
+          },
+          "forecast": {
+            "direction_consensus": 1.0,
+            "feature_importance": [
+              0.05116632208228111,
+              0.07548541575670242,
+              0.042402785271406174,
+              0.007466732524335384,
+              0.05138272047042847,
+              0.03319866210222244,
+              0.009491752833127975,
+              0.0056675695814192295,
+              0.018635911867022514,
+              0.0035773185081779957,
+              0.022717876359820366,
+              0.012950608506798744,
+              0.23321162164211273,
+              0.04902692511677742,
+              0.016783878207206726,
+              0.008610568009316921,
+              0.014965400099754333,
+              0.015428481623530388,
+              0.09783675521612167,
+              0.13153105974197388,
+              0.007892876863479614,
+              0.008406543172895908,
+              0.010143397375941277,
+              0.02613234892487526,
+              0.019726518541574478,
+              0.026159970089793205
+            ],
+            "return_1h": 0.003654160536825657,
+            "confidence_1h": 0.9829597473144531,
+            "return_4h": 0.0010248469188809395,
+            "confidence_4h": 0.9606278538703918,
+            "return_12h": 0.010276000946760178,
+            "confidence_12h": 0.9451761245727539,
+            "return_24h": 0.0045542530715465546,
+            "confidence_24h": 0.8906250596046448
+          },
+          "confidence": 0.5,
+          "regime": null,
+          "news": {
+            "sentiment": 0.0607152356902357,
+            "confidence": 0.8337450040723006,
+            "trend": "stable",
+            "sources": 1
+          }
+        }
+      },
+      "XRPUSDT": {
+        "price": 1.4118,
+        "entry_price": 1.4266,
+        "position": 0,
+        "balance": 4980.256044866635,
+        "pnl": -19.743955133365045,
+        "trades": [],
+        "last_action": "NONE",
+        "sl": 1.3908169703533613,
+        "tp": 1.512455623291991,
+        "units": 0,
+        "equity": 4980.256044866635,
+        "entry_time": 1773528009.3512855,
+        "analysis": {
+          "whale": {
+            "flow": 0,
+            "binance_ls": -1.0,
+            "oi_trend": 0,
+            "large_txns": 0,
+            "fear_greed": 0.8,
+            "combined_score": -0.12043764340036005,
+            "confidence": 0.2857142857142857,
+            "signal_agreement": 2,
+            "total_signals": 7,
+            "bullish_signals": 1,
+            "bearish_signals": 2,
+            "high_confidence": false,
+            "recommendation": "neutral",
+            "squeeze_status": "none",
+            "exchange_reserve": 0,
+            "timestamp": "2026-03-15T20:56:36.808888",
+            "flow_metrics": {
+              "buy_vol": 0.0,
+              "sell_vol": 0.0,
+              "net_flow": 0.0,
+              "buy_count": 0,
+              "sell_count": 0,
+              "last_whale_trade": null
+            }
+          },
+          "funding": {
+            "rate": 0.0001,
+            "signal": "slight_short_favored",
+            "strength": 0.33333333333333337
+          },
+          "order_flow": {
+            "score": 0.4136224448287067,
+            "bias": "bullish",
+            "cvd": {
+              "cvd": 5964426.912714027,
+              "score": 0.39734466933786733,
+              "trend": "bullish"
+            },
+            "taker": {
+              "buy_volume": 56454.9,
+              "sell_volume": 53709.94,
+              "ratio": 0.512,
+              "score": 0.04983370053257685,
+              "total_trades": 1000
+            },
+            "notable": {
+              "large_buys": 1,
+              "large_sells": 0,
+              "large_buy_volume": 8652.15,
+              "large_sell_volume": 0,
+              "bias": "bullish",
+              "total_large_volume": 8652.15,
+              "score": 1.0
+            },
+            "large_buys": 1,
+            "large_sells": 0,
+            "large_buy_volume": 8652.15,
+            "large_sell_volume": 0,
+            "total_large_volume": 8652.15
+          },
+          "mtf": {
+            "bias": "NEUTRAL",
+            "aligned": false,
+            "reason": "\u26a0\ufe0f CONFLICTING: 4h=bullish, 1h=bullish, 15m=neutral",
+            "4h": "bullish",
+            "1h": "bullish",
+            "15m": "neutral"
+          },
+          "forecast": {
+            "direction_consensus": -0.5,
+            "feature_importance": [
+              0.010577787645161152,
+              0.007701906841248274,
+              0.01654740422964096,
+              0.003576952498406172,
+              0.007570267654955387,
+              0.005847340449690819,
+              0.007438182830810547,
+              0.009130697697401047,
+              0.011094359681010246,
+              0.0098370760679245,
+              0.010776746086776257,
+              0.015124996192753315,
+              0.005960886366665363,
+              0.003367020981386304,
+              0.009256217628717422,
+              0.03247806057333946,
+              0.009892892092466354,
+              0.009261460974812508,
+              0.015738792717456818,
+              0.06430874019861221,
+              0.018287815153598785,
+              0.006604293826967478,
+              0.004988981410861015,
+              0.6730630397796631,
+              0.01614762656390667,
+              0.015420408919453621
+            ],
+            "return_1h": 0.0010730959475040436,
+            "confidence_1h": 0.9850136637687683,
+            "return_4h": -0.0006349068135023117,
+            "confidence_4h": 0.9772984385490417,
+            "return_12h": -0.00045774132013320923,
+            "confidence_12h": 0.9551274180412292,
+            "return_24h": -0.004882387816905975,
+            "confidence_24h": 0.942421019077301
+          },
+          "confidence": 0.15,
+          "regime": null,
+          "news": {
+            "sentiment": 0.08103179613596281,
+            "confidence": 0.7736788985609983,
+            "trend": "stable",
+            "sources": 1
+          }
+        }
+      }
+    },
+    "positions": {
+      "BTCUSDT": {
+        "position": 1,
+        "balance": 4227.579715026229,
+        "pnl": 0.0
+      },
+      "ETHUSDT": {
+        "position": 0,
+        "balance": 4978.30164758935,
+        "pnl": -21.69835241065028
+      },
+      "SOLUSDT": {
+        "position": 0,
+        "balance": 5002.10053560064,
+        "pnl": 2.100535600640312
+      },
+      "XRPUSDT": {
+        "position": 0,
+        "balance": 4980.256044866635,
+        "pnl": -19.743955133365045
+      }
+    },
+    "reset_timestamp": null,
+    "timestamp": "2026-03-15T20:57:40.699907",
+    "total_balance": 19928.29860639979,
+    "total_pnl": -39.34177194337501,
+    "whale_alerts": []
+  },
+  "trades": [
+    {
+      "timestamp": "2026-03-13T11:19:39.480407",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 1.4266,
+      "pnl": 0,
+      "balance": 4256.8146070380335,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.66 (composite=+0.329) | \ud83d\udc0b Whale=-0.06 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0100% | \ud83d\udcca Flow=+0.42(cvd=+0.9/tk=+0.1/lg=-0.4)"
+    },
+    {
+      "timestamp": "2026-03-13T12:17:58.157114",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 90.34,
+      "pnl": 0,
+      "balance": 4297.176347548709,
+      "position": 1,
+      "reason": "\ud83e\udd1d PPO+Signal agree: BUY (conf=0.62)"
+    },
+    {
+      "timestamp": "2026-03-13T13:42:20.085274",
+      "symbol": "BTCUSDT",
+      "asset": "BTCUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 73066.18,
+      "pnl": 0,
+      "balance": 4227.579715026229,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.69 (composite=+0.382) | \ud83d\udc0b Whale=-0.21 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=+0.50(c=1.0) | \ud83d\udcb0 Fund=+0.0041% | \ud83d\udcca Flow=+1.00(cvd=+1.0/tk=+1.0/lg=+1.0)"
+    },
+    {
+      "timestamp": "2026-03-13T14:39:23.794414",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "OPEN_LONG_SPLIT",
+      "price": 2190.26,
+      "pnl": 0,
+      "balance": 4335.592991039413,
+      "position": 1,
+      "reason": "\u2705 BUY approved: confidence=0.58 (composite=+0.158) | \ud83d\udc0b Whale=-0.14 | \ud83d\udcca Regime=TRENDING_UP(+1.00) | \ud83d\udd2e TFT=-0.50(c=1.0) | \ud83d\udcb0 Fund=-0.0014% | \ud83d\udcca Flow=+0.65(cvd=+1.0/tk=+0.5/lg=+0.0)"
+    },
+    {
+      "timestamp": "2026-03-13T15:04:19.128710",
+      "symbol": "SOLUSDT",
+      "asset": "SOLUSDT",
+      "action": "CLOSE_LONG",
+      "price": 90.61,
+      "pnl": 2.100535600640312,
+      "balance": 5002.10053560064,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-14T06:46:20.101206",
+      "symbol": "XRPUSDT",
+      "asset": "XRPUSDT",
+      "action": "CLOSE_LONG",
+      "price": 1.3887,
+      "pnl": -19.743955133365045,
+      "balance": 4980.256044866635,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    },
+    {
+      "timestamp": "2026-03-15T12:04:51.087420",
+      "symbol": "ETHUSDT",
+      "asset": "ETHUSDT",
+      "action": "CLOSE_LONG",
+      "price": 2118.73,
+      "pnl": -21.69835241065028,
+      "balance": 4978.30164758935,
+      "position": 0,
+      "reason": "STOP_LOSS"
+    }
+  ],
+  "backup_time": "20260315_225846",
+  "environment": "dev"
+}
