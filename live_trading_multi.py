@@ -396,9 +396,9 @@ class MultiAssetTradingBot:
             return 0, "Already SHORT — ignoring SELL signal"
         
         # Determine market-preferred direction from composite score
-        if composite_score > 0.10:
+        if composite_score > 0.05:  # Lowered from 0.10 (more responsive)
             market_action = 1  # Market says BUY
-        elif composite_score < -0.10:
+        elif composite_score < -0.05:  # Lowered from -0.10 (more responsive)
             market_action = 2  # Market says SELL
         else:
             market_action = 0  # Market is neutral
@@ -412,7 +412,7 @@ class MultiAssetTradingBot:
         action_names = {0: "HOLD", 1: "BUY", 2: "SELL"}
         
         # --- Tier 1: SIGNAL OVERRIDE (strong signals) ---
-        if confidence >= 0.65 and market_action != 0:
+        if confidence >= 0.60 and market_action != 0:  # Lowered from 0.65 (less strict)
             logger.info(
                 f"🎯 SIGNAL OVERRIDE for {self.symbol}: {action_names[market_action]} "
                 f"(conf={confidence:.2f}, composite={composite_score:+.3f}, PPO={action_names[raw_action]})"
@@ -420,7 +420,7 @@ class MultiAssetTradingBot:
             return market_action, f"🎯 SIGNAL OVERRIDE: {action_names[market_action]} (conf={confidence:.2f})"
         
         # --- Tier 2: CONSENSUS (moderate signals + PPO agrees) ---
-        if confidence >= 0.45:
+        if confidence >= 0.40:  # Lowered from 0.45 (less strict)
             if raw_action == market_action and market_action != 0:
                 logger.info(
                     f"🤝 CONSENSUS for {self.symbol}: {action_names[raw_action]} "
@@ -467,12 +467,12 @@ class MultiAssetTradingBot:
         scores = {}  # name -> (directional_score, weight)
         details = []  # Human-readable breakdown
         
-        # ── 1. Whale Signals (27% weight) ──────────────────────────────
+        # ── 1. Whale Signals (20% weight, was 27%) ────────────────────
         try:
             whale = self.whale_tracker.get_whale_signals()
             # FIX: The key returned by whale_tracker is 'combined_score', not 'score'
             whale_score = whale.get('combined_score', 0.0)
-            scores['whale'] = (np.clip(whale_score, -1, 1), 0.27)
+            scores['whale'] = (np.clip(whale_score, -1, 1), 0.20)  # Reduced from 0.27 (stale data)
             
             # Squeeze Metric Boost
             squeeze = whale.get('squeeze_status', 'none')
@@ -484,17 +484,17 @@ class MultiAssetTradingBot:
                 details.append("🚨 LONG SQUEEZE(-1.00)")
             else:
                 details.append(f"🐋 Whale={whale_score:+.2f}")
-                
+
         except Exception as e:
             logger.warning(f"Whale score error: {e}")
-            scores['whale'] = (0, 0.30)
+            scores['whale'] = (0, 0.20)  # Reduced from 0.30 (stale data issue)
         
-        # ── 2. Market Regime / ADX (21% weight, was 18%) ──────────────
+        # ── 2. Market Regime / ADX (23% weight, was 21%) ──────────────
         try:
             regime_info = self.regime_detector.detect_regime(df)
             regime_score = regime_info.trend_direction  # Already [-1, +1]
             regime_name = regime_info.regime.value.upper()
-            scores['regime'] = (regime_score, 0.21)  # Increased from 0.18 (news disabled)
+            scores['regime'] = (regime_score, 0.23)  # Increased from 0.21 (whale reduced)
             details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
             
             # Hard veto: Catching falling knives/fading strong trends
@@ -508,9 +508,9 @@ class MultiAssetTradingBot:
                     return 0, 0.15, f"📈 Uptrend (ADX={regime_info.trend_strength:.0f}) without whale selling — block SHORT"
         except Exception as e:
             logger.warning(f"Regime score error: {e}")
-            scores['regime'] = (0, 0.21)  # Increased from 0.18 (news disabled)
+            scores['regime'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
         
-        # ── 3. TFT Forecast (21% weight, was 18%) ────────────────────
+        # ── 3. TFT Forecast (23% weight, was 21%) ────────────────────
         tft_score = 0.0
         if self.tft_forecaster:
             try:
@@ -525,7 +525,7 @@ class MultiAssetTradingBot:
                 conf_4h = forecast.get('confidence_4h', 0.0)
                 ret_4h = forecast.get('return_4h', 0.0)
                 tft_score = np.clip(consensus, -1, 1)
-                scores['tft'] = (tft_score, 0.21)  # Increased from 0.18 (news disabled)
+                scores['tft'] = (tft_score, 0.23)  # Increased from 0.21 (whale reduced)
                 details.append(f"🔮 TFT={consensus:+.2f}(c={conf_4h:.1f})")
                 
                 # Hard veto: TFT strongly disagrees with high confidence
@@ -535,26 +535,26 @@ class MultiAssetTradingBot:
                     return 0, 0.1, f"🔮 TFT strong bullish (consensus={consensus:.2f}, conf={conf_4h:.2f}) — veto SELL"
             except Exception as e:
                 logger.warning(f"TFT score error: {e}")
-                scores['tft'] = (0, 0.21)  # Increased from 0.18 (news disabled)
+                scores['tft'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
         else:
-            scores['tft'] = (0, 0.21)  # Increased from 0.18 (news disabled)
+            scores['tft'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
         
-        # ── 4. Funding Rate (15% weight, was 13.5%) ───────────────────
+        # ── 4. Funding Rate (17% weight, was 15%) ────────────────────
         try:
             funding = self.funding_analyzer.get_signal()
             # Positive funding = longs pay = bearish bias; negative = bullish
             funding_score = np.clip(-funding.rate * 1000, -1, 1)  # Scale rate to [-1,1]
-            scores['funding'] = (funding_score, 0.15)  # Increased from 0.135 (news disabled)
+            scores['funding'] = (funding_score, 0.17)  # Increased from 0.15 (whale reduced)
             details.append(f"💰 Fund={funding.rate:+.4%}")
         except Exception as e:
             logger.warning(f"Funding score error: {e}")
-            scores['funding'] = (0, 0.15)  # Increased from 0.135 (news disabled)
+            scores['funding'] = (0, 0.17)  # Increased from 0.15 (whale reduced)
         
-        # ── 5. Order Flow — Enhanced 3-layer (15% weight, was 13.5%) ──
+        # ── 5. Order Flow — Enhanced 3-layer (17% weight, was 15%) ───
         try:
             of_signal = self.order_flow.get_enhanced_signal(df)
             flow_score = of_signal.get('score', 0.0)
-            scores['order_flow'] = (flow_score, 0.15)  # Increased from 0.135 (news disabled)
+            scores['order_flow'] = (flow_score, 0.17)  # Increased from 0.15 (whale reduced)
             # Rich detail for logging
             cvd_s = of_signal.get('cvd', {}).get('score', 0)
             taker_s = of_signal.get('taker', {}).get('score', 0)
@@ -562,7 +562,7 @@ class MultiAssetTradingBot:
             details.append(f"📊 Flow={flow_score:+.2f}(cvd={cvd_s:+.1f}/tk={taker_s:+.1f}/lg={notable_s:+.1f})")
         except Exception as e:
             logger.warning(f"Order flow score error: {e}")
-            scores['order_flow'] = (0, 0.15)  # Increased from 0.135 (news disabled)
+            scores['order_flow'] = (0, 0.17)  # Increased from 0.15 (whale reduced)
 
         # ── 6. News Sentiment (DISABLED - not reliable) ───────────────
         # News sentiment disabled per user request - not working reliably
