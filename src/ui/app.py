@@ -1505,12 +1505,14 @@ def render_position_fragment(symbol: str):
         asset_state = state
         
     # NORMALIZE STATE: Ensure position_price is set for P&L calc
-    # Agent state usually has 'price' as entry price
+    # CRITICAL: entry_price is the actual entry price, price is the current price
+    # Must prioritize entry_price over price to avoid showing current price as entry
     if asset_state:
-        if 'position_price' not in asset_state and 'price' in asset_state:
-            asset_state['position_price'] = asset_state['price']
         if 'position_price' not in asset_state and 'entry_price' in asset_state:
             asset_state['position_price'] = asset_state['entry_price']
+        elif 'position_price' not in asset_state and 'price' in asset_state:
+            # Only use 'price' if entry_price is not available (legacy compatibility)
+            asset_state['position_price'] = asset_state['price']
             
     render_position_card(asset_state, current_price, symbol)
     
