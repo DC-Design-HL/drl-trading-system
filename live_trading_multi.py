@@ -489,12 +489,12 @@ class MultiAssetTradingBot:
             logger.warning(f"Whale score error: {e}")
             scores['whale'] = (0, 0.30)
         
-        # ── 2. Market Regime / ADX (18% weight) ───────────────────────
+        # ── 2. Market Regime / ADX (21% weight, was 18%) ──────────────
         try:
             regime_info = self.regime_detector.detect_regime(df)
             regime_score = regime_info.trend_direction  # Already [-1, +1]
             regime_name = regime_info.regime.value.upper()
-            scores['regime'] = (regime_score, 0.18)
+            scores['regime'] = (regime_score, 0.21)  # Increased from 0.18 (news disabled)
             details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
             
             # Hard veto: Catching falling knives/fading strong trends
@@ -508,9 +508,9 @@ class MultiAssetTradingBot:
                     return 0, 0.15, f"📈 Uptrend (ADX={regime_info.trend_strength:.0f}) without whale selling — block SHORT"
         except Exception as e:
             logger.warning(f"Regime score error: {e}")
-            scores['regime'] = (0, 0.18)
+            scores['regime'] = (0, 0.21)  # Increased from 0.18 (news disabled)
         
-        # ── 3. TFT Forecast (18% weight) ──────────────────────────────
+        # ── 3. TFT Forecast (21% weight, was 18%) ────────────────────
         tft_score = 0.0
         if self.tft_forecaster:
             try:
@@ -520,12 +520,12 @@ class MultiAssetTradingBot:
                     self.last_forecast = forecast
                 else:
                     forecast = self.last_forecast
-                
+
                 consensus = forecast.get('direction_consensus', 0.0)
                 conf_4h = forecast.get('confidence_4h', 0.0)
                 ret_4h = forecast.get('return_4h', 0.0)
                 tft_score = np.clip(consensus, -1, 1)
-                scores['tft'] = (tft_score, 0.18)
+                scores['tft'] = (tft_score, 0.21)  # Increased from 0.18 (news disabled)
                 details.append(f"🔮 TFT={consensus:+.2f}(c={conf_4h:.1f})")
                 
                 # Hard veto: TFT strongly disagrees with high confidence
@@ -535,26 +535,26 @@ class MultiAssetTradingBot:
                     return 0, 0.1, f"🔮 TFT strong bullish (consensus={consensus:.2f}, conf={conf_4h:.2f}) — veto SELL"
             except Exception as e:
                 logger.warning(f"TFT score error: {e}")
-                scores['tft'] = (0, 0.20)
+                scores['tft'] = (0, 0.21)  # Increased from 0.18 (news disabled)
         else:
-            scores['tft'] = (0, 0.20)
+            scores['tft'] = (0, 0.21)  # Increased from 0.18 (news disabled)
         
-        # ── 4. Funding Rate (13.5% weight) ────────────────────────────
+        # ── 4. Funding Rate (15% weight, was 13.5%) ───────────────────
         try:
             funding = self.funding_analyzer.get_signal()
             # Positive funding = longs pay = bearish bias; negative = bullish
             funding_score = np.clip(-funding.rate * 1000, -1, 1)  # Scale rate to [-1,1]
-            scores['funding'] = (funding_score, 0.135)
+            scores['funding'] = (funding_score, 0.15)  # Increased from 0.135 (news disabled)
             details.append(f"💰 Fund={funding.rate:+.4%}")
         except Exception as e:
             logger.warning(f"Funding score error: {e}")
-            scores['funding'] = (0, 0.135)
+            scores['funding'] = (0, 0.15)  # Increased from 0.135 (news disabled)
         
-        # ── 5. Order Flow — Enhanced 3-layer (13.5% weight) ────────────
+        # ── 5. Order Flow — Enhanced 3-layer (15% weight, was 13.5%) ──
         try:
             of_signal = self.order_flow.get_enhanced_signal(df)
             flow_score = of_signal.get('score', 0.0)
-            scores['order_flow'] = (flow_score, 0.135)
+            scores['order_flow'] = (flow_score, 0.15)  # Increased from 0.135 (news disabled)
             # Rich detail for logging
             cvd_s = of_signal.get('cvd', {}).get('score', 0)
             taker_s = of_signal.get('taker', {}).get('score', 0)
@@ -562,28 +562,30 @@ class MultiAssetTradingBot:
             details.append(f"📊 Flow={flow_score:+.2f}(cvd={cvd_s:+.1f}/tk={taker_s:+.1f}/lg={notable_s:+.1f})")
         except Exception as e:
             logger.warning(f"Order flow score error: {e}")
-            scores['order_flow'] = (0, 0.135)
+            scores['order_flow'] = (0, 0.15)  # Increased from 0.135 (news disabled)
 
-        # ── 6. News Sentiment (10% weight) ─────────────────────────────
+        # ── 6. News Sentiment (DISABLED - not reliable) ───────────────
+        # News sentiment disabled per user request - not working reliably
+        # Will re-enable when news aggregation is fixed
         try:
             if hasattr(self, 'news_aggregator') and self.news_aggregator:
                 news_data = self.news_aggregator.get_aggregated_sentiment()
                 news_score = news_data.get('sentiment', 0.0)  # Already [-1, +1]
                 news_conf = news_data.get('confidence', 0.0)
                 news_sources = news_data.get('total_sources', 0)
-                scores['news'] = (news_score, 0.10)
-                details.append(f"📰 News={news_score:+.2f}(conf={news_conf:.1f},src={news_sources}/3)")
+                scores['news'] = (news_score, 0.00)  # DISABLED: was 0.10
+                details.append(f"📰 News={news_score:+.2f}(conf={news_conf:.1f},src={news_sources}/3)[DISABLED]")
 
-                # Hard veto: Strong opposing news sentiment with high confidence
-                if action == 1 and news_score < -0.5 and news_conf > 0.7:
-                    return 0, 0.1, f"📰 Strong bearish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto BUY"
-                if action == 2 and news_score > 0.5 and news_conf > 0.7:
-                    return 0, 0.1, f"📰 Strong bullish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto SELL"
+                # Hard veto: DISABLED - news not reliable enough
+                # if action == 1 and news_score < -0.5 and news_conf > 0.7:
+                #     return 0, 0.1, f"📰 Strong bearish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto BUY"
+                # if action == 2 and news_score > 0.5 and news_conf > 0.7:
+                #     return 0, 0.1, f"📰 Strong bullish news (sent={news_score:.2f}, conf={news_conf:.2f}) — veto SELL"
             else:
-                scores['news'] = (0, 0.10)
+                scores['news'] = (0, 0.00)  # DISABLED: was 0.10
         except Exception as e:
             logger.warning(f"News sentiment score error: {e}")
-            scores['news'] = (0, 0.10)
+            scores['news'] = (0, 0.00)  # DISABLED: was 0.10
 
         # ── Compute Composite Score ───────────────────────────────────
         total_weight = sum(w for _, w in scores.values())
