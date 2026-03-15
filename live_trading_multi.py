@@ -472,7 +472,7 @@ class MultiAssetTradingBot:
             whale = self.whale_tracker.get_whale_signals()
             # FIX: The key returned by whale_tracker is 'combined_score', not 'score'
             whale_score = whale.get('combined_score', 0.0)
-            scores['whale'] = (np.clip(whale_score, -1, 1), 0.20)  # Reduced from 0.27 (stale data)
+            scores['whale'] = (np.clip(whale_score, -1, 1), 0.15)  # Reduced from 0.20 (stale data, favor real-time signals)
             
             # Squeeze Metric Boost
             squeeze = whale.get('squeeze_status', 'none')
@@ -487,14 +487,14 @@ class MultiAssetTradingBot:
 
         except Exception as e:
             logger.warning(f"Whale score error: {e}")
-            scores['whale'] = (0, 0.20)  # Reduced from 0.30 (stale data issue)
+            scores['whale'] = (0, 0.15)  # Reduced from 0.20 (stale data issue)
         
         # ── 2. Market Regime / ADX (23% weight, was 21%) ──────────────
         try:
             regime_info = self.regime_detector.detect_regime(df)
             regime_score = regime_info.trend_direction  # Already [-1, +1]
             regime_name = regime_info.regime.value.upper()
-            scores['regime'] = (regime_score, 0.23)  # Increased from 0.21 (whale reduced)
+            scores['regime'] = (regime_score, 0.28)  # Increased from 0.23 (most reliable signal)
             details.append(f"📊 Regime={regime_name}({regime_score:+.2f})")
             
             # Hard veto: Catching falling knives/fading strong trends
@@ -508,7 +508,7 @@ class MultiAssetTradingBot:
                     return 0, 0.15, f"📈 Uptrend (ADX={regime_info.trend_strength:.0f}) without whale selling — block SHORT"
         except Exception as e:
             logger.warning(f"Regime score error: {e}")
-            scores['regime'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
+            scores['regime'] = (0, 0.28)  # Increased from 0.23 (most reliable signal)
         
         # ── 3. TFT Forecast (23% weight, was 21%) ────────────────────
         tft_score = 0.0
@@ -525,7 +525,7 @@ class MultiAssetTradingBot:
                 conf_4h = forecast.get('confidence_4h', 0.0)
                 ret_4h = forecast.get('return_4h', 0.0)
                 tft_score = np.clip(consensus, -1, 1)
-                scores['tft'] = (tft_score, 0.23)  # Increased from 0.21 (whale reduced)
+                scores['tft'] = (tft_score, 0.15)  # Reduced from 0.23 (lagging indicator, less veto power)
                 details.append(f"🔮 TFT={consensus:+.2f}(c={conf_4h:.1f})")
                 
                 # Hard veto: TFT strongly disagrees with high confidence
@@ -535,26 +535,26 @@ class MultiAssetTradingBot:
                     return 0, 0.1, f"🔮 TFT strong bullish (consensus={consensus:.2f}, conf={conf_4h:.2f}) — veto SELL"
             except Exception as e:
                 logger.warning(f"TFT score error: {e}")
-                scores['tft'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
+                scores['tft'] = (0, 0.15)  # Reduced from 0.23 (lagging indicator)
         else:
-            scores['tft'] = (0, 0.23)  # Increased from 0.21 (whale reduced)
+            scores['tft'] = (0, 0.15)  # Reduced from 0.23 (lagging indicator)
         
         # ── 4. Funding Rate (17% weight, was 15%) ────────────────────
         try:
             funding = self.funding_analyzer.get_signal()
             # Positive funding = longs pay = bearish bias; negative = bullish
             funding_score = np.clip(-funding.rate * 1000, -1, 1)  # Scale rate to [-1,1]
-            scores['funding'] = (funding_score, 0.17)  # Increased from 0.15 (whale reduced)
+            scores['funding'] = (funding_score, 0.20)  # Increased from 0.17 (real-time signal)
             details.append(f"💰 Fund={funding.rate:+.4%}")
         except Exception as e:
             logger.warning(f"Funding score error: {e}")
-            scores['funding'] = (0, 0.17)  # Increased from 0.15 (whale reduced)
+            scores['funding'] = (0, 0.20)  # Increased from 0.17 (real-time signal)
         
         # ── 5. Order Flow — Enhanced 3-layer (17% weight, was 15%) ───
         try:
             of_signal = self.order_flow.get_enhanced_signal(df)
             flow_score = of_signal.get('score', 0.0)
-            scores['order_flow'] = (flow_score, 0.17)  # Increased from 0.15 (whale reduced)
+            scores['order_flow'] = (flow_score, 0.22)  # Increased from 0.17 (best real-time predictor)
             # Rich detail for logging
             cvd_s = of_signal.get('cvd', {}).get('score', 0)
             taker_s = of_signal.get('taker', {}).get('score', 0)
@@ -562,7 +562,7 @@ class MultiAssetTradingBot:
             details.append(f"📊 Flow={flow_score:+.2f}(cvd={cvd_s:+.1f}/tk={taker_s:+.1f}/lg={notable_s:+.1f})")
         except Exception as e:
             logger.warning(f"Order flow score error: {e}")
-            scores['order_flow'] = (0, 0.17)  # Increased from 0.15 (whale reduced)
+            scores['order_flow'] = (0, 0.22)  # Increased from 0.17 (best real-time predictor)
 
         # ── 6. News Sentiment (DISABLED - not reliable) ───────────────
         # News sentiment disabled per user request - not working reliably
