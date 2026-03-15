@@ -1667,7 +1667,7 @@ def main():
             if st.button("🗑️ Reset All Trades", type="primary"):
                 try:
                     import subprocess
-                    reset_script = project_root / "reset_dev_mongo.py"
+                    reset_script = project_root / "reset_all_storage.py"
                     if reset_script.exists():
                         result = subprocess.run(
                             [sys.executable, str(reset_script)],

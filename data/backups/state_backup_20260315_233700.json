@@ -1,0 +1,264 @@
+{
+  "total_balance": 10093.312133841184,
+  "total_pnl": 126.51788433642002,
+  "positions": {
+    "BTCUSDT": {
+      "position": 0,
+      "balance": 2553.9192250812002,
+      "pnl": 53.91922508120092
+    },
+    "ETHUSDT": {
+      "position": 1,
+      "balance": 1294.8665919459002,
+      "pnl": 89.73318389180015
+    },
+    "SOLUSDT": {
+      "position": 1,
+      "balance": 1238.855159482982,
+      "pnl": -22.289681034036334
+    },
+    "XRPUSDT": {
+      "position": 1,
+      "balance": 1252.5775781987277,
+      "pnl": 5.155156397455304
+    }
+  },
+  "timestamp": "2026-02-11T12:42:47.945683",
+  "active": true,
+  "assets": {
+    "BTCUSDT": {
+      "price": 0,
+      "position": 0,
+      "balance": 2553.9192250812002,
+      "pnl": 53.91922508120092,
+      "trades": [
+        {
+          "symbol": "BTCUSDT",
+          "timestamp": "2026-02-10T09:46:15.680281",
+          "price": 68889.2,
+          "dry_run": true,
+          "action": "CLOSE_SHORT",
+          "pnl": 28.128729153985034
+        },
+        {
+          "symbol": "BTCUSDT",
+          "timestamp": "2026-02-10T09:56:08.578247",
+          "price": 68893.0,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 0.01834822644647486,
+          "sl": 68062.10698806516,
+          "tp": 70277.82168655808
+        },
+        {
+          "symbol": "BTCUSDT",
+          "timestamp": "2026-02-10T16:04:49.785396",
+          "price": 68851.8,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": -0.7559469295947108
+        },
+        {
+          "symbol": "BTCUSDT",
+          "timestamp": "2026-02-10T16:14:48.148120",
+          "price": 69100.3,
+          "dry_run": true,
+          "action": "OPEN_SHORT",
+          "units": 0.01828771208102128,
+          "sl": 69898.62343593617,
+          "tp": 67769.76094010641
+        },
+        {
+          "symbol": "BTCUSDT",
+          "timestamp": "2026-02-11T06:29:06.489944",
+          "price": 67648.7,
+          "dry_run": true,
+          "action": "CLOSE_SHORT",
+          "pnl": 26.546442856810597
+        }
+      ],
+      "last_action": "CLOSE_SHORT",
+      "sl": 69898.62343593617,
+      "tp": 67769.76094010641,
+      "units": 0,
+      "equity": 2553.9192250812002
+    },
+    "ETHUSDT": {
+      "price": 1949.01,
+      "position": 1,
+      "balance": 1294.8665919459002,
+      "pnl": 89.73318389180015,
+      "trades": [
+        {
+          "symbol": "ETHUSDT",
+          "timestamp": "2026-02-10T13:06:10.452032",
+          "price": 2012.07,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 0.6342050136115305,
+          "sl": 1986.3026143398235,
+          "tp": 2055.0156427669604
+        },
+        {
+          "symbol": "ETHUSDT",
+          "timestamp": "2026-02-10T23:19:20.172974",
+          "price": 2013.23,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": 0.7356778157894273
+        },
+        {
+          "symbol": "ETHUSDT",
+          "timestamp": "2026-02-10T23:29:18.609887",
+          "price": 2007.38,
+          "dry_run": true,
+          "action": "OPEN_SHORT",
+          "units": 0.6358700000225401,
+          "sl": 2032.7992557963169,
+          "tp": 1965.0145736728055
+        },
+        {
+          "symbol": "ETHUSDT",
+          "timestamp": "2026-02-11T10:02:38.893985",
+          "price": 1949.4,
+          "dry_run": true,
+          "action": "CLOSE_SHORT",
+          "pnl": 36.86774260130689
+        },
+        {
+          "symbol": "ETHUSDT",
+          "timestamp": "2026-02-11T10:22:47.821257",
+          "price": 1949.01,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 0.664371445988425,
+          "sl": 1926.0230950084726,
+          "tp": 1987.3215083192122
+        }
+      ],
+      "last_action": "OPEN_LONG",
+      "sl": 1926.0230950084726,
+      "tp": 1987.3215083192122,
+      "units": 0.664371445988425,
+      "equity": 2573.5358080386027
+    },
+    "SOLUSDT": {
+      "price": 80.76,
+      "position": 1,
+      "balance": 1238.855159482982,
+      "pnl": -22.289681034036334,
+      "trades": [
+        {
+          "symbol": "SOLUSDT",
+          "timestamp": "2026-02-10T22:19:54.629533",
+          "price": 82.77,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 15.102090129273892,
+          "sl": 81.64284342761535,
+          "tp": 84.64859428730773
+        },
+        {
+          "symbol": "SOLUSDT",
+          "timestamp": "2026-02-10T23:19:23.845344",
+          "price": 82.76,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": -0.15102090129260157
+        },
+        {
+          "symbol": "SOLUSDT",
+          "timestamp": "2026-02-10T23:29:23.201504",
+          "price": 82.43,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 15.163465844344941,
+          "sl": 81.29054649060252,
+          "tp": 84.32908918232916
+        },
+        {
+          "symbol": "SOLUSDT",
+          "timestamp": "2026-02-11T10:02:40.267664",
+          "price": 80.97,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": -22.138660132743734
+        },
+        {
+          "symbol": "SOLUSDT",
+          "timestamp": "2026-02-11T10:13:01.509394",
+          "price": 80.76,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 15.339959874727363,
+          "sl": 79.63673205226992,
+          "tp": 82.63211324621683
+        }
+      ],
+      "last_action": "OPEN_LONG",
+      "sl": 79.63673205226992,
+      "tp": 82.63211324621683,
+      "units": 15.339959874727363,
+      "equity": 2473.7219293985345
+    },
+    "XRPUSDT": {
+      "price": 1.3661,
+      "position": 1,
+      "balance": 1252.5775781987277,
+      "pnl": 5.155156397455304,
+      "trades": [
+        {
+          "symbol": "XRPUSDT",
+          "timestamp": "2026-02-10T13:56:13.213351",
+          "price": 1.4066,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 903.425792194222,
+          "sl": 1.3906361927572857,
+          "tp": 1.433206345404524
+        },
+        {
+          "symbol": "XRPUSDT",
+          "timestamp": "2026-02-11T06:39:13.726848",
+          "price": 1.3869,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": -17.79748810622622
+        },
+        {
+          "symbol": "XRPUSDT",
+          "timestamp": "2026-02-11T06:49:15.621244",
+          "price": 1.3866,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 910.0389263286309,
+          "sl": 1.367146923327154,
+          "tp": 1.4190217944547432
+        },
+        {
+          "symbol": "XRPUSDT",
+          "timestamp": "2026-02-11T10:02:41.614421",
+          "price": 1.3662,
+          "dry_run": true,
+          "action": "CLOSE_LONG",
+          "pnl": -18.564794097104045
+        },
+        {
+          "symbol": "XRPUSDT",
+          "timestamp": "2026-02-11T10:23:05.733909",
+          "price": 1.3661,
+          "dry_run": true,
+          "action": "OPEN_LONG",
+          "units": 916.9003573667576,
+          "sl": 1.3482037621175935,
+          "tp": 1.3959270631373446
+        }
+      ],
+      "last_action": "OPEN_LONG",
+      "sl": 1.3482037621175935,
+      "tp": 1.3959270631373446,
+      "units": 916.9003573667576,
+      "equity": 2492.135171322847
+    }
+  }
+}
