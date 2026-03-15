@@ -967,7 +967,7 @@ class MultiAssetTradingBot:
                     if self.highest_price > self.position_price:
                         gain = self.highest_price - self.position_price
                         gain_pct = gain / self.position_price
-                        
+
                         # Only start locking in profits if gain is over 1.5% from entry
                         if gain_pct > 0.015:
                             new_trailing_sl = self.position_price + gain * 0.6  # Lock in 60% of peak gain
@@ -976,7 +976,27 @@ class MultiAssetTradingBot:
                                 self.sl_price = new_trailing_sl
                                 if abs(new_trailing_sl - old_sl) > 1:  # Only log meaningful moves
                                     logger.info(f"📈 TRAIL UP for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
-                    
+
+                    # Trailing TP: Tighten TP as price approaches target
+                    if self.tp_price > 0 and current_price > self.position_price:
+                        profit_pct = (current_price - self.position_price) / self.position_price
+                        target_pct = (self.tp_price - self.position_price) / self.position_price
+
+                        # Activate trailing TP after 50% progress toward target OR 3% profit (whichever comes first)
+                        activation_threshold = min(target_pct * 0.5, 0.03)
+
+                        if profit_pct >= activation_threshold:
+                            # Tighten TP by reducing remaining distance by 40%
+                            remaining_distance = self.tp_price - current_price
+                            new_trailing_tp = current_price + (remaining_distance * 0.6)
+
+                            # Only trail down (tighten), never widen TP
+                            if new_trailing_tp < self.tp_price and new_trailing_tp > current_price:
+                                old_tp = self.tp_price
+                                self.tp_price = new_trailing_tp
+                                if abs(old_tp - new_trailing_tp) > 1:  # Only log meaningful moves
+                                    logger.info(f"🎯 TRAIL TP DOWN for {self.symbol}: ${old_tp:.2f} → ${self.tp_price:.2f} (tightened by 40%)")
+
                     # Check if trailing stop hit
                     if current_price <= self.sl_price and self.sl_price > self.position_price * 0.99:
                         hit_trailing = True
@@ -1024,7 +1044,7 @@ class MultiAssetTradingBot:
                     if self.lowest_price < self.position_price and self.lowest_price > 0:
                         gain = self.position_price - self.lowest_price
                         gain_pct = gain / self.position_price
-                        
+
                         # Only start locking in profits if gain is over 1.5% from entry
                         if gain_pct > 0.015:
                             new_trailing_sl = self.position_price - gain * 0.6  # Lock in 60% of peak gain
@@ -1033,7 +1053,27 @@ class MultiAssetTradingBot:
                                 self.sl_price = new_trailing_sl
                                 if abs(new_trailing_sl - old_sl) > 0.001:
                                     logger.info(f"📉 TRAIL DOWN for {self.symbol}: SL ${old_sl:.2f} → ${self.sl_price:.2f} (60% of ${gain:.2f} gain)")
-                    
+
+                    # Trailing TP for SHORT: Tighten TP as price drops toward target
+                    if self.tp_price > 0 and current_price < self.position_price:
+                        profit_pct = (self.position_price - current_price) / self.position_price
+                        target_pct = (self.position_price - self.tp_price) / self.position_price
+
+                        # Activate trailing TP after 50% progress toward target OR 3% profit (whichever comes first)
+                        activation_threshold = min(target_pct * 0.5, 0.03)
+
+                        if profit_pct >= activation_threshold:
+                            # Tighten TP by reducing remaining distance by 40%
+                            remaining_distance = current_price - self.tp_price
+                            new_trailing_tp = current_price - (remaining_distance * 0.6)
+
+                            # Only trail up (tighten), never widen TP for SHORT
+                            if new_trailing_tp > self.tp_price and new_trailing_tp < current_price:
+                                old_tp = self.tp_price
+                                self.tp_price = new_trailing_tp
+                                if abs(old_tp - new_trailing_tp) > 1:  # Only log meaningful moves
+                                    logger.info(f"🎯 TRAIL TP UP for {self.symbol}: ${old_tp:.2f} → ${self.tp_price:.2f} (tightened by 40%)")
+
                     # Check if trailing stop hit
                     if current_price >= self.sl_price and self.sl_price < self.position_price * 1.01:
                         hit_trailing = True
