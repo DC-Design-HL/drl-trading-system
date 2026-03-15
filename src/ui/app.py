@@ -2078,8 +2078,9 @@ def main():
                 })
             
             # Overall metrics
-            # FIX: Use number of assets with trades, not assets in state
-            initial_capital = max(len(assets_by_symbol), 1) * 5000
+            # Fixed: Always use 4 assets (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT)
+            # Previously used len(assets_by_symbol) which only counted assets with trades
+            initial_capital = 4 * 5000  # 4 assets × $5,000 = $20,000
 
             # Calculate from trades (single source of truth) - same logic as Agent Status sidebar
             lp_grand_total_pnl = realized_pnl_total + open_pnl_total
