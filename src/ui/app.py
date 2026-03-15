@@ -1278,43 +1278,44 @@ def render_market_analysis_fragment(symbol: str):
         </div>
         """, unsafe_allow_html=True)
 
-    # News Sentiment
-    news_data = market_data.get('news')
-    if news_data is not None and isinstance(news_data, dict):
-        news_sentiment = news_data.get('sentiment', 0)
-        news_conf = news_data.get('confidence', 0)
-        news_trend = news_data.get('trend', 'unknown')
-        news_sources = news_data.get('sources', 0)
-
-        # Sentiment color and emoji
-        news_color = "#26a69a" if news_sentiment > 0.1 else "#ef5350" if news_sentiment < -0.1 else "#888"
-        news_emoji = "🟢" if news_sentiment > 0.1 else "🔴" if news_sentiment < -0.1 else "⚪"
-        sentiment_label = "Bullish" if news_sentiment > 0.1 else "Bearish" if news_sentiment < -0.1 else "Neutral"
-
-        # Trend indicator
-        trend_emoji = "📈" if news_trend == "improving" else "📉" if news_trend == "deteriorating" else "➡️"
-
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">📰 News Sentiment</div>
-            <div style="color: {news_color}; font-size: 14px;">{news_emoji} {sentiment_label} ({news_sentiment:+.2f})</div>
-            <div style="color: #888; font-size: 11px;">
-                Confidence: {news_conf:.0%} | Trend: {trend_emoji} {news_trend}<br/>
-                Sources: {news_sources}/3 (CryptoCompare)
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        # Show placeholder when news data is not available yet
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">📰 News Sentiment</div>
-            <div style="color: #888; font-size: 12px;">Loading...</div>
-            <div style="color: #666; font-size: 10px;">
-                Waiting for first news fetch (takes ~1-2 min)
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    # News Sentiment - DISABLED (not reliable, removed per user request)
+    # Commented out - news sentiment disabled in trading logic
+    # news_data = market_data.get('news')
+    # if news_data is not None and isinstance(news_data, dict):
+    #     news_sentiment = news_data.get('sentiment', 0)
+    #     news_conf = news_data.get('confidence', 0)
+    #     news_trend = news_data.get('trend', 'unknown')
+    #     news_sources = news_data.get('sources', 0)
+    #
+    #     # Sentiment color and emoji
+    #     news_color = "#26a69a" if news_sentiment > 0.1 else "#ef5350" if news_sentiment < -0.1 else "#888"
+    #     news_emoji = "🟢" if news_sentiment > 0.1 else "🔴" if news_sentiment < -0.1 else "⚪"
+    #     sentiment_label = "Bullish" if news_sentiment > 0.1 else "Bearish" if news_sentiment < -0.1 else "Neutral"
+    #
+    #     # Trend indicator
+    #     trend_emoji = "📈" if news_trend == "improving" else "📉" if news_trend == "deteriorating" else "➡️"
+    #
+    #     st.markdown(f"""
+    #     <div class="metric-card">
+    #         <div class="metric-label">📰 News Sentiment</div>
+    #         <div style="color: {news_color}; font-size: 14px;">{news_emoji} {sentiment_label} ({news_sentiment:+.2f})</div>
+    #         <div style="color: #888; font-size: 11px;">
+    #             Confidence: {news_conf:.0%} | Trend: {trend_emoji} {news_trend}<br/>
+    #             Sources: {news_sources}/3 (CryptoCompare)
+    #         </div>
+    #     </div>
+    #     """, unsafe_allow_html=True)
+    # else:
+    #     # Show placeholder when news data is not available yet
+    #     st.markdown(f"""
+    #     <div class="metric-card">
+    #         <div class="metric-label">📰 News Sentiment</div>
+    #         <div style="color: #888; font-size: 12px;">Loading...</div>
+    #         <div style="color: #666; font-size: 10px;">
+    #             Waiting for first news fetch (takes ~1-2 min)
+    #         </div>
+    #     </div>
+    #     """, unsafe_allow_html=True)
 
     # HMM Regime
     regime_data = market_data.get('regime', {})

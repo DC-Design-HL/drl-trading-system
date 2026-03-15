@@ -334,15 +334,16 @@ def get_market_analysis():
         if regime_data:
              result['regime'] = regime_data
 
-        # News Sentiment
-        news_data = state_analysis.get('news', {})
-        if news_data:
-            result['news'] = {
-                'sentiment': round(news_data.get('sentiment', 0), 3),
-                'confidence': round(news_data.get('confidence', 0), 3),
-                'trend': news_data.get('trend', 'unknown'),
-                'sources': news_data.get('sources', 0)
-            }
+        # News Sentiment - DISABLED (not reliable, removed per user request)
+        # Commented out - news sentiment disabled in trading logic
+        # news_data = state_analysis.get('news', {})
+        # if news_data:
+        #     result['news'] = {
+        #         'sentiment': round(news_data.get('sentiment', 0), 3),
+        #         'confidence': round(news_data.get('confidence', 0), 3),
+        #         'trend': news_data.get('trend', 'unknown'),
+        #         'sources': news_data.get('sources', 0)
+        #     }
 
     # Fallbacks and Regime (Regime is not in state yet, calculate it)
     # ... (Keep existing regime calculation as it's fast) ...
