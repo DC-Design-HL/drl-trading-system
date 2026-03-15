@@ -1657,6 +1657,35 @@ def main():
             if storage.state_file.exists():
                 st.code(f"Size: {storage.state_file.stat().st_size} bytes")
                 
+        # Database Reset (Dev Only)
+        env = os.getenv("ENVIRONMENT", "production")
+        if env == "development":
+            st.divider()
+            st.markdown("### 🔄 Database Reset")
+            st.warning("⚠️ This will clear all trades and positions!")
+
+            if st.button("🗑️ Reset All Trades", type="primary"):
+                try:
+                    import subprocess
+                    reset_script = project_root / "reset_dev_trades.py"
+                    if reset_script.exists():
+                        result = subprocess.run(
+                            [sys.executable, str(reset_script)],
+                            capture_output=True,
+                            text=True,
+                            cwd=str(project_root)
+                        )
+                        if result.returncode == 0:
+                            st.success("✅ Database reset successful!")
+                            st.code(result.stdout)
+                            st.info("🔄 Refresh the page to see changes")
+                        else:
+                            st.error(f"❌ Reset failed: {result.stderr}")
+                    else:
+                        st.error(f"❌ Reset script not found at {reset_script}")
+                except Exception as e:
+                    st.error(f"❌ Error running reset: {e}")
+
         if st.checkbox("Show System Inspector"):
             st.markdown("#### 🕵️ System Inspector")
             
