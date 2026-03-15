@@ -308,7 +308,12 @@ def get_market_analysis():
                 'large_buys': of_data.get('large_buys', 0),
                 'large_sells': of_data.get('large_sells', 0),
                 'bias': of_data.get('bias', 'neutral'),
-                'net_flow': of_data.get('large_buy_volume', 0) - of_data.get('large_sell_volume', 0)
+                'net_flow': of_data.get('large_buy_volume', 0) - of_data.get('large_sell_volume', 0),
+                'score': of_data.get('score', 0),
+                # Layer details (enhanced signal)
+                'cvd': of_data.get('cvd', {}),
+                'taker': of_data.get('taker', {}),
+                'notable': of_data.get('notable', {})
             }
             
         # Forecast
@@ -409,9 +414,9 @@ def get_market_analysis():
         regime_type = getattr(regime_result, 'regime', 'UNKNOWN')
         result['regime'] = {
             'type': str(regime_type.name) if hasattr(regime_type, 'name') else str(regime_type),
-            'adx': round(getattr(regime_result, 'adx', 0), 1),
-            'direction': str(getattr(regime_result, 'direction', 'NEUTRAL')),
-            'volatility': round(getattr(regime_result, 'volatility_multiplier', 1), 2)
+            'adx': round(getattr(regime_result, 'trend_strength', 0), 1),
+            'direction': str(getattr(regime_result, 'trend_direction', 'NEUTRAL')),
+            'volatility': round(getattr(regime_result, 'volatility_ratio', 1), 2)
         }
     except Exception as e:
         logger.error(f"Market data fetch error: {e}")
@@ -454,16 +459,25 @@ def get_market_analysis():
         try:
             from src.features.order_flow import OrderFlowAnalyzer
             oa = OrderFlowAnalyzer(symbol=clean_symbol)
-            of = oa.analyze_large_orders()
+            # Use enhanced signal instead of just large orders
+            enhanced = oa.get_enhanced_signal(df)
             result['order_flow'] = {
-                'large_buys': of.get('large_buys', 0),
-                'large_sells': of.get('large_sells', 0),
-                'bias': of.get('bias', 'neutral'),
-                'net_flow': of.get('large_buy_volume', 0) - of.get('large_sell_volume', 0)
+                'large_buys': enhanced.get('large_buys', 0),
+                'large_sells': enhanced.get('large_sells', 0),
+                'bias': enhanced.get('bias', 'neutral'),
+                'net_flow': enhanced.get('large_buy_volume', 0) - enhanced.get('large_sell_volume', 0),
+                'score': enhanced.get('score', 0),
+                # Layer details
+                'cvd': enhanced.get('cvd', {}),
+                'taker': enhanced.get('taker', {}),
+                'notable': enhanced.get('notable', {})
             }
         except Exception as e:
             logger.error(f"OrderFlow fallback error: {e}")
-            result['order_flow'] = {'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0}
+            result['order_flow'] = {
+                'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0,
+                'score': 0, 'cvd': {}, 'taker': {'ratio': 0.5}, 'notable': {}
+            }
 
     # API Server should NOT perform heavy ML analysis on the fly.
     # TFT Forecast (Phase 11.1) requires massive PyTorch model loading that hangs the main thread.

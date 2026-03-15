@@ -129,9 +129,22 @@ class WhalePatternPredictor:
                         # Try to compute from stored data
                         price_data = learner._fetch_price_data(days=30)
                         if price_data is not None and not price_data.empty:
+                            # Ensure index is DatetimeIndex before resampling
+                            if not isinstance(price_data.index, pd.DatetimeIndex):
+                                logger.warning(f"Price data index is not DatetimeIndex, skipping impact features for {chain}")
+                                continue
+
                             price_hourly = price_data['close'].resample('1h').last().dropna()
+
+                            # Remove timezone if present
                             if hasattr(price_hourly.index, 'tz') and price_hourly.index.tz is not None:
                                 price_hourly.index = price_hourly.index.tz_convert(None)
+
+                            # Verify the index is still DatetimeIndex after processing
+                            if not isinstance(price_hourly.index, pd.DatetimeIndex):
+                                logger.warning(f"Resampled price data lost DatetimeIndex for {chain}, skipping impact features")
+                                continue
+
                             impact = learner._compute_price_impact_features(wallets, price_hourly)
 
                     # Refine tier weight with historical hit rate if available
