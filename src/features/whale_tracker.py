@@ -964,12 +964,12 @@ class WhaleTracker:
         # Calculate weighted score
         weights = {
             'flow': 0.20,             # Real-time whale buying/selling
-            'binance_ls': 0.12,       # Smart money positioning (imbalance)
-            'oi_trend': 0.08,         # Smart money interest
-            'large_txns': 0.08,       # Whale activity
-            'fear_greed': 0.07,       # Market sentiment
-            'whale_patterns': 0.30,   # Learned whale wallet patterns
-            'exchange_reserve': 0.15, # Exchange reserve delta (NEW)
+            'binance_ls': 0.15,       # Smart money positioning (imbalance) [INCREASED from 0.12]
+            'oi_trend': 0.10,         # Smart money interest [INCREASED from 0.08]
+            'large_txns': 0.10,       # Whale activity [INCREASED from 0.08]
+            'fear_greed': 0.08,       # Market sentiment [INCREASED from 0.07]
+            'whale_patterns': 0.10,   # Learned whale wallet patterns [REDUCED from 0.30 - data may be stale]
+            'exchange_reserve': 0.27, # Exchange reserve delta [INCREASED from 0.15 - more reliable real-time signal]
         }
         
         total_weight = 0
