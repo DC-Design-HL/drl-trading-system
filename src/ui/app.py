@@ -803,21 +803,45 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             
             let volumeData = {json.dumps(volume_data)};
             volumeSeries.setData(volumeData);
-            
+
+            // Track whether user is hovering over a specific candle
+            let isHoveringCandle = false;
+            let hoverTimeout = null;
+
             // Update OHLC on crosshair move
             chart.subscribeCrosshairMove((param) => {{
                 if (param.time) {{
                     const data = param.seriesData.get(candlestickSeries);
                     if (data) {{
+                        // User is hovering over a candle
+                        isHoveringCandle = true;
+
+                        // Clear any existing timeout
+                        if (hoverTimeout) {{
+                            clearTimeout(hoverTimeout);
+                        }}
+
+                        // Reset hover flag after 2 seconds of inactivity
+                        hoverTimeout = setTimeout(() => {{
+                            isHoveringCandle = false;
+                        }}, 2000);
+
                         document.getElementById('o-val').textContent = data.open.toFixed(2);
                         document.getElementById('h-val').textContent = data.high.toFixed(2);
                         document.getElementById('l-val').textContent = data.low.toFixed(2);
                         document.getElementById('c-val').textContent = data.close.toFixed(2);
-                        
+
                         const change = ((data.close - data.open) / data.open * 100).toFixed(2);
                         const changeEl = document.getElementById('change-val');
                         changeEl.textContent = (change >= 0 ? '+' : '') + change + '%';
                         changeEl.style.color = change >= 0 ? '#26a69a' : '#ef5350';
+                    }}
+                }} else {{
+                    // User moved cursor away from chart
+                    isHoveringCandle = false;
+                    if (hoverTimeout) {{
+                        clearTimeout(hoverTimeout);
+                        hoverTimeout = null;
                     }}
                 }}
             }});
@@ -896,12 +920,20 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     
                     // Share price with sidebar via localStorage
                     localStorage.setItem('{clean_symbol}_live_price', candle.close.toFixed(2));
-                    
-                    // Update OHLC display for current candle
-                    document.getElementById('o-val').textContent = candle.open.toFixed(2);
-                    document.getElementById('h-val').textContent = candle.high.toFixed(2);
-                    document.getElementById('l-val').textContent = candle.low.toFixed(2);
-                    document.getElementById('c-val').textContent = candle.close.toFixed(2);
+
+                    // Update OHLC display for current candle (only if user is not hovering over a historical candle)
+                    if (!isHoveringCandle) {{
+                        document.getElementById('o-val').textContent = candle.open.toFixed(2);
+                        document.getElementById('h-val').textContent = candle.high.toFixed(2);
+                        document.getElementById('l-val').textContent = candle.low.toFixed(2);
+                        document.getElementById('c-val').textContent = candle.close.toFixed(2);
+
+                        // Update change display as well
+                        const change = ((candle.close - candle.open) / candle.open * 100).toFixed(2);
+                        const changeEl = document.getElementById('change-val');
+                        changeEl.textContent = (change >= 0 ? '+' : '') + change + '%';
+                        changeEl.style.color = change >= 0 ? '#26a69a' : '#ef5350';
+                    }}
                 }};
             }}
             
@@ -944,8 +976,16 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
         side = "LONG" if is_long else "SHORT"
         icon = "📈" if is_long else "📉"
         
-        # Get entry price from state
-        entry_price = state.get('position_price', current_price)
+        # Get entry price from state - check multiple field names for compatibility
+        # Priority: position_price > entry_price > price (last trade price fallback)
+        entry_price = state.get('position_price') or state.get('entry_price') or state.get('price', current_price)
+
+        # Validation: Entry price must be reasonable (within 50% of current price)
+        if entry_price > 0 and current_price > 0:
+            price_diff_pct = abs(entry_price - current_price) / current_price
+            if price_diff_pct > 0.5:  # More than 50% difference is suspicious
+                logger.warning(f"Entry price ${entry_price:,.2f} is {price_diff_pct*100:.1f}% different from current ${current_price:,.2f} - using current price")
+                entry_price = current_price
         
         # Get SL/TP from state (preferred) or calculate
         sl_price = state.get('sl', 0)
