@@ -61,27 +61,52 @@ class BinanceConnector:
         self.exchange = ccxt.binance(config)
 
         if testnet:
-            # Auto-detect which testnet to use based on environment variable
-            # Default to new demo API (demo-api.binance.com) for better compatibility
-            use_legacy_testnet = os.getenv('USE_LEGACY_TESTNET', 'false').lower() == 'true'
+            # Check if using Cloudflare Workers proxy to bypass geo-restrictions
+            proxy_url = os.getenv('BINANCE_TESTNET_PROXY_URL', '').strip()
 
-            if use_legacy_testnet:
-                # Legacy testnet (testnet.binance.vision) - use CCXT's built-in test URLs
-                self.exchange.urls['api'] = self.exchange.urls['test']
-                logger.info("Using legacy Binance testnet (testnet.binance.vision)")
+            if proxy_url:
+                # Use Cloudflare Workers proxy
+                # Remove trailing slash if present
+                proxy_url = proxy_url.rstrip('/')
+
+                # Replace all Binance testnet URLs with the proxy
+                self.exchange.urls['api'] = {
+                    'public': proxy_url,
+                    'private': proxy_url,
+                    'web': proxy_url,
+                    'sapi': proxy_url,
+                    'sapiV2': proxy_url,
+                    'sapiV3': proxy_url,
+                    'sapiV4': proxy_url,
+                    'v1': proxy_url,
+                    'v3': proxy_url,
+                }
+                logger.info(f"🌐 Using Cloudflare Workers proxy: {proxy_url}")
             else:
-                # New demo API (demo-api.binance.com) - use CCXT's built-in demo URLs
-                self.exchange.urls['api'] = self.exchange.urls['demo']
+                # No proxy - try direct connection (may be geo-restricted)
+                # Auto-detect which testnet to use based on environment variable
+                # Default to legacy testnet (testnet.binance.vision)
+                use_legacy_testnet = os.getenv('USE_LEGACY_TESTNET', 'true').lower() == 'true'
 
-                # Disable sapi endpoints (not supported on demo API)
-                # Redirect sapi to regular API to prevent errors
-                demo_spot_url = 'https://demo-api.binance.com/api/v3'
-                self.exchange.urls['api']['sapi'] = demo_spot_url
-                self.exchange.urls['api']['sapiV2'] = demo_spot_url
-                self.exchange.urls['api']['sapiV3'] = demo_spot_url
-                self.exchange.urls['api']['sapiV4'] = demo_spot_url
+                if use_legacy_testnet:
+                    # Legacy testnet (testnet.binance.vision) - use CCXT's built-in test URLs
+                    self.exchange.urls['api'] = self.exchange.urls['test']
+                    logger.info("Using legacy Binance testnet (testnet.binance.vision)")
+                else:
+                    # New demo API (demo-api.binance.com) - use CCXT's built-in demo URLs
+                    self.exchange.urls['api'] = self.exchange.urls['demo']
 
-                logger.info("Using new Binance Demo API (demo-api.binance.com)")
+                    # Disable sapi endpoints (not supported on demo API)
+                    # Redirect sapi to regular API to prevent errors
+                    demo_spot_url = 'https://demo-api.binance.com/api/v3'
+                    self.exchange.urls['api']['sapi'] = demo_spot_url
+                    self.exchange.urls['api']['sapiV2'] = demo_spot_url
+                    self.exchange.urls['api']['sapiV3'] = demo_spot_url
+                    self.exchange.urls['api']['sapiV4'] = demo_spot_url
+
+                    logger.info("Using new Binance Demo API (demo-api.binance.com)")
+
+                logger.warning("⚠️ No proxy configured - direct connection may fail due to geo-restrictions")
 
         # Timeframe mapping
         self.timeframe_map = {
