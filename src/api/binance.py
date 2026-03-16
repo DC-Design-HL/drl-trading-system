@@ -3,6 +3,7 @@ Binance Connector
 Handles connectivity to Binance Testnet via ccxt.
 """
 
+import os
 import ccxt
 import pandas as pd
 import numpy as np
@@ -51,22 +52,37 @@ class BinanceConnector:
             'options': {
                 'defaultType': 'spot',
                 'adjustForTimeDifference': True,
+                'fetchCurrencies': False,  # Disable fetching currency info (uses sapi)
+                'fetchMarkets': True,  # Keep market fetching (uses spot API)
             }
         }
         
+        # Create exchange
+        self.exchange = ccxt.binance(config)
+
         if testnet:
-            config['urls'] = {
-                'api': {
-                    'public': 'https://testnet.binance.vision/api/v3',
-                    'private': 'https://testnet.binance.vision/api/v3',
-                },
-            }
-            # Use sandbox mode for testnet
-            self.exchange = ccxt.binance(config)
-            self.exchange.set_sandbox_mode(True)
-        else:
-            self.exchange = ccxt.binance(config)
-            
+            # Auto-detect which testnet to use based on environment variable
+            # Default to new demo API (demo-api.binance.com) for better compatibility
+            use_legacy_testnet = os.getenv('USE_LEGACY_TESTNET', 'false').lower() == 'true'
+
+            if use_legacy_testnet:
+                # Legacy testnet (testnet.binance.vision) - use CCXT's built-in test URLs
+                self.exchange.urls['api'] = self.exchange.urls['test']
+                logger.info("Using legacy Binance testnet (testnet.binance.vision)")
+            else:
+                # New demo API (demo-api.binance.com) - use CCXT's built-in demo URLs
+                self.exchange.urls['api'] = self.exchange.urls['demo']
+
+                # Disable sapi endpoints (not supported on demo API)
+                # Redirect sapi to regular API to prevent errors
+                demo_spot_url = 'https://demo-api.binance.com/api/v3'
+                self.exchange.urls['api']['sapi'] = demo_spot_url
+                self.exchange.urls['api']['sapiV2'] = demo_spot_url
+                self.exchange.urls['api']['sapiV3'] = demo_spot_url
+                self.exchange.urls['api']['sapiV4'] = demo_spot_url
+
+                logger.info("Using new Binance Demo API (demo-api.binance.com)")
+
         # Timeframe mapping
         self.timeframe_map = {
             '1m': 60,
@@ -87,37 +103,55 @@ class BinanceConnector:
     ) -> pd.DataFrame:
         """
         Fetch OHLCV candlestick data.
-        
+
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
             timeframe: Candle timeframe (e.g., '1h', '4h', '1d')
             since: Start datetime for data
             limit: Maximum number of candles
-            
+
         Returns:
             DataFrame with OHLCV data
         """
-        since_ts = None
-        if since:
-            since_ts = int(since.timestamp() * 1000)
-            
         try:
-            ohlcv = self.exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=timeframe,
-                since=since_ts,
-                limit=limit,
-            )
-            
+            # Convert symbol format: 'BTC/USDT' -> 'BTCUSDT'
+            market_symbol = symbol.replace('/', '')
+
+            # Prepare parameters
+            params = {
+                'symbol': market_symbol,
+                'interval': timeframe,
+                'limit': limit,
+            }
+
+            if since:
+                params['startTime'] = int(since.timestamp() * 1000)
+
+            # Use basic spot API klines endpoint
+            ohlcv = self.exchange.public_get_klines(params)
+
+            # Parse response
             df = pd.DataFrame(
                 ohlcv,
-                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
+                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume',
+                        'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+                        'taker_buy_quote', 'ignore']
             )
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+
+            # Convert types and select relevant columns
+            df['timestamp'] = pd.to_datetime(pd.to_numeric(df['timestamp']), unit='ms')
+            df['open'] = pd.to_numeric(df['open'])
+            df['high'] = pd.to_numeric(df['high'])
+            df['low'] = pd.to_numeric(df['low'])
+            df['close'] = pd.to_numeric(df['close'])
+            df['volume'] = pd.to_numeric(df['volume'])
+
+            # Select and set index
+            df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
             df.set_index('timestamp', inplace=True)
-            
+
             return df
-            
+
         except Exception as e:
             logger.error(f"Error fetching OHLCV: {e}")
             raise
@@ -192,36 +226,67 @@ class BinanceConnector:
         logger.info(f"Fetched {len(result)} candles")
         return result
         
+    def _fetch_account_info(self) -> Dict:
+        """
+        Fetch account information using basic spot API.
+        Uses direct API call to avoid CCXT's sapi/margin dependencies.
+        """
+        try:
+            # Use CCXT's private_get_account method which directly calls /api/v3/account
+            account = self.exchange.private_get_account()
+            return account
+        except Exception as e:
+            logger.error(f"Error fetching account info: {e}")
+            return {}
+
     def get_balance(self, currency: str = 'USDT') -> float:
         """
         Get account balance for a currency.
-        
+
         Args:
             currency: Currency symbol (e.g., 'USDT', 'BTC')
-            
+
         Returns:
             Available balance
         """
         try:
-            balance = self.exchange.fetch_balance()
-            return float(balance.get(currency, {}).get('free', 0.0))
+            # Use basic spot API account endpoint
+            account = self._fetch_account_info()
+            balances = account.get('balances', [])
+
+            for balance in balances:
+                if balance.get('asset') == currency:
+                    return float(balance.get('free', 0.0))
+            return 0.0
         except Exception as e:
             logger.error(f"Error fetching balance: {e}")
             return 0.0
-            
+
     def get_all_balances(self) -> Dict[str, Dict[str, float]]:
         """
         Get all non-zero balances.
-        
+
         Returns:
             Dictionary of currency -> {free, used, total}
         """
         try:
-            balance = self.exchange.fetch_balance()
+            # Use basic spot API account endpoint
+            account = self._fetch_account_info()
+            balances = account.get('balances', [])
+
             non_zero = {}
-            for currency, amounts in balance.items():
-                if isinstance(amounts, dict) and amounts.get('total', 0) > 0:
-                    non_zero[currency] = amounts
+            for balance in balances:
+                asset = balance.get('asset')
+                free = float(balance.get('free', 0))
+                locked = float(balance.get('locked', 0))
+                total = free + locked
+
+                if total > 0:
+                    non_zero[asset] = {
+                        'free': free,
+                        'used': locked,
+                        'total': total
+                    }
             return non_zero
         except Exception as e:
             logger.error(f"Error fetching balances: {e}")
@@ -230,23 +295,28 @@ class BinanceConnector:
     def get_ticker(self, symbol: str = 'BTC/USDT') -> Dict[str, Any]:
         """
         Get current ticker data.
-        
+
         Args:
             symbol: Trading pair
-            
+
         Returns:
             Ticker data including last price, bid, ask, etc.
         """
         try:
-            ticker = self.exchange.fetch_ticker(symbol)
+            # Convert symbol format: 'BTC/USDT' -> 'BTCUSDT'
+            market_symbol = symbol.replace('/', '')
+
+            # Use basic spot API ticker endpoint
+            ticker = self.exchange.public_get_ticker_24hr({'symbol': market_symbol})
+
             return {
                 'symbol': symbol,
-                'last': ticker['last'],
-                'bid': ticker['bid'],
-                'ask': ticker['ask'],
-                'high': ticker['high'],
-                'low': ticker['low'],
-                'volume': ticker['baseVolume'],
+                'last': float(ticker['lastPrice']),
+                'bid': float(ticker['bidPrice']),
+                'ask': float(ticker['askPrice']),
+                'high': float(ticker['highPrice']),
+                'low': float(ticker['lowPrice']),
+                'volume': float(ticker['volume']),
                 'timestamp': datetime.now(),
             }
         except Exception as e:
@@ -338,15 +408,21 @@ class BinanceConnector:
     def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict]:
         """
         Get all open orders.
-        
+
         Args:
             symbol: Optional trading pair to filter
-            
+
         Returns:
             List of open orders
         """
         try:
-            orders = self.exchange.fetch_open_orders(symbol)
+            # Use basic spot API open orders endpoint
+            params = {}
+            if symbol:
+                # Convert symbol format: 'BTC/USDT' -> 'BTCUSDT'
+                params['symbol'] = symbol.replace('/', '')
+
+            orders = self.exchange.private_get_openorders(params)
             return orders
         except Exception as e:
             logger.error(f"Error fetching orders: {e}")
