@@ -145,7 +145,7 @@ def render_testnet_tab(api_key: str, api_secret: str):
         <script>
             const API_KEY = '{api_key}';
             const API_SECRET = '{api_secret}';
-            const BASE_URL = 'https://demo-api.binance.com';
+            const BASE_URL = 'https://testnet.binance.vision';
 
             // Generate HMAC SHA256 signature
             function generateSignature(queryString) {{
