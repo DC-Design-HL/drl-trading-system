@@ -41,25 +41,42 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
         st.info(f"🔑 API Key Length: {len(api_key)} chars (first 8: {api_key[:8]}..., last 4: ...{api_key[-4:]})")
         st.info(f"🔐 Secret Length: {len(api_secret)} chars")
 
-        # Create connector
+        # Try to create connector (prefer ccxt)
+        testnet = None
+        use_http_proxy = False
+
         try:
             testnet = BinanceConnector(
                 api_key=api_key,
                 api_secret=api_secret,
                 testnet=True
             )
-            st.success("✅ BinanceConnector created successfully")
+            st.success("✅ BinanceConnector (ccxt) created successfully")
         except Exception as e:
-            st.error(f"❌ Failed to create BinanceConnector: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-            return
+            st.warning(f"⚠️ BinanceConnector failed: {e}")
+            st.info("🔄 Trying HTTP proxy fallback...")
+
+            # Try HTTP proxy fallback
+            try:
+                from src.api.http_proxy import BinanceHTTPProxy
+                testnet = BinanceHTTPProxy(
+                    api_key=api_key,
+                    api_secret=api_secret
+                )
+                use_http_proxy = True
+                st.success("✅ Using HTTP Proxy fallback")
+            except Exception as e2:
+                st.error(f"❌ HTTP Proxy also failed: {e2}")
+                import traceback
+                st.code(traceback.format_exc())
+                return
 
         # Test connectivity
         try:
             connectivity = testnet.test_connectivity()
             if connectivity:
-                st.success("✅ Connected to Binance Testnet (testnet.binance.vision)")
+                connector_type = "HTTP Proxy" if use_http_proxy else "ccxt"
+                st.success(f"✅ Connected to Binance Testnet ({connector_type})")
             else:
                 st.warning("⚠️ Connectivity test returned false, but trying anyway...")
         except Exception as e:
