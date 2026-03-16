@@ -2639,186 +2639,186 @@ API Key (masked): {testnet_api_key[:10] + '...' if testnet_api_key else 'None'}
                             # Get account balances
                             balances = testnet.get_all_balances()
 
-                        # Calculate portfolio value
-                        portfolio_value = 0.0
-                        positions_data = []
+                            # Calculate portfolio value
+                            portfolio_value = 0.0
+                            positions_data = []
 
-                        for currency, amounts in balances.items():
-                            total = float(amounts.get('total', 0))
-                            if total > 0:
-                                if currency == 'USDT':
-                                    portfolio_value += total
-                                else:
-                                    # Get current price
-                                    try:
-                                        ticker = testnet.get_ticker(f"{currency}/USDT")
-                                        price = float(ticker.get('last', 0))
-                                        value_usdt = total * price
-                                        portfolio_value += value_usdt
+                            for currency, amounts in balances.items():
+                                total = float(amounts.get('total', 0))
+                                if total > 0:
+                                    if currency == 'USDT':
+                                        portfolio_value += total
+                                    else:
+                                        # Get current price
+                                        try:
+                                            ticker = testnet.get_ticker(f"{currency}/USDT")
+                                            price = float(ticker.get('last', 0))
+                                            value_usdt = total * price
+                                            portfolio_value += value_usdt
 
-                                        positions_data.append({
-                                            'Asset': currency,
-                                            'Amount': f"{total:.6f}",
-                                            'Price': f"${price:,.2f}",
-                                            'Value (USDT)': f"${value_usdt:,.2f}"
-                                        })
-                                    except:
-                                        pass
+                                            positions_data.append({
+                                                'Asset': currency,
+                                                'Amount': f"{total:.6f}",
+                                                'Price': f"${price:,.2f}",
+                                                'Value (USDT)': f"${value_usdt:,.2f}"
+                                            })
+                                        except:
+                                            pass
 
-                        # Portfolio overview
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric(
-                                label="💰 Portfolio Value",
-                                value=f"${portfolio_value:,.2f}",
-                                delta=f"{portfolio_value - 10000:.2f} USDT" if portfolio_value != 10000 else None
-                            )
-                        with col2:
-                            usdt_balance = balances.get('USDT', {}).get('free', 0)
-                            st.metric(
-                                label="💵 USDT Balance",
-                                value=f"${float(usdt_balance):,.2f}"
-                            )
-                        with col3:
-                            pnl_pct = ((portfolio_value - 10000) / 10000) * 100 if portfolio_value > 0 else 0
-                            st.metric(
-                                label="📊 Total P&L %",
-                                value=f"{pnl_pct:+.2f}%",
-                                delta=f"${portfolio_value - 10000:+,.2f}"
-                            )
-
-                        st.markdown("---")
-
-                        # Current positions
-                        if positions_data:
-                            st.markdown("### 📊 Current Positions")
-                            import pandas as pd
-                            positions_df = pd.DataFrame(positions_data)
-                            st.dataframe(positions_df, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No open positions. Portfolio is 100% USDT")
-
-                        st.markdown("---")
-
-                        # Trading controls
-                        st.markdown("### 🎮 Trading Controls")
-
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            trade_symbol = st.selectbox(
-                                "Select Pair",
-                                options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
-                                key="testnet_symbol"
-                            )
-
-                        with col2:
-                            trade_amount = st.number_input(
-                                "Amount (USDT)",
-                                min_value=10.0,
-                                max_value=float(usdt_balance),
-                                value=100.0,
-                                step=10.0,
-                                key="testnet_amount"
-                            )
-
-                        col1, col2, col3 = st.columns(3)
-
-                        if col1.button("🟢 BUY (Market)", key="testnet_buy", use_container_width=True):
-                            try:
-                                ticker = testnet.get_ticker(trade_symbol)
-                                current_price = float(ticker['last'])
-                                amount_base = trade_amount / current_price
-
-                                order = testnet.place_market_order(
-                                    symbol=trade_symbol,
-                                    side='buy',
-                                    amount=amount_base
+                            # Portfolio overview
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric(
+                                    label="💰 Portfolio Value",
+                                    value=f"${portfolio_value:,.2f}",
+                                    delta=f"{portfolio_value - 10000:.2f} USDT" if portfolio_value != 10000 else None
+                                )
+                            with col2:
+                                usdt_balance = balances.get('USDT', {}).get('free', 0)
+                                st.metric(
+                                    label="💵 USDT Balance",
+                                    value=f"${float(usdt_balance):,.2f}"
+                                )
+                            with col3:
+                                pnl_pct = ((portfolio_value - 10000) / 10000) * 100 if portfolio_value > 0 else 0
+                                st.metric(
+                                    label="📊 Total P&L %",
+                                    value=f"{pnl_pct:+.2f}%",
+                                    delta=f"${portfolio_value - 10000:+,.2f}"
                                 )
 
-                                if order:
-                                    st.success(f"✅ BUY order placed: {amount_base:.6f} {trade_symbol.split('/')[0]} @ ${current_price:,.2f}")
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Order failed: {e}")
+                            st.markdown("---")
 
-                        if col2.button("🔴 SELL (Market)", key="testnet_sell", use_container_width=True):
-                            try:
-                                base_currency = trade_symbol.split('/')[0]
-                                base_balance = balances.get(base_currency, {}).get('free', 0)
+                            # Current positions
+                            if positions_data:
+                                st.markdown("### 📊 Current Positions")
+                                import pandas as pd
+                                positions_df = pd.DataFrame(positions_data)
+                                st.dataframe(positions_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No open positions. Portfolio is 100% USDT")
 
-                                if float(base_balance) == 0:
-                                    st.warning(f"No {base_currency} to sell")
-                                else:
+                            st.markdown("---")
+
+                            # Trading controls
+                            st.markdown("### 🎮 Trading Controls")
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                trade_symbol = st.selectbox(
+                                    "Select Pair",
+                                    options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
+                                    key="testnet_symbol"
+                                )
+
+                            with col2:
+                                trade_amount = st.number_input(
+                                    "Amount (USDT)",
+                                    min_value=10.0,
+                                    max_value=float(usdt_balance),
+                                    value=100.0,
+                                    step=10.0,
+                                    key="testnet_amount"
+                                )
+
+                            col1, col2, col3 = st.columns(3)
+
+                            if col1.button("🟢 BUY (Market)", key="testnet_buy", use_container_width=True):
+                                try:
+                                    ticker = testnet.get_ticker(trade_symbol)
+                                    current_price = float(ticker['last'])
+                                    amount_base = trade_amount / current_price
+
                                     order = testnet.place_market_order(
                                         symbol=trade_symbol,
-                                        side='sell',
-                                        amount=float(base_balance)
+                                        side='buy',
+                                        amount=amount_base
                                     )
 
                                     if order:
-                                        st.success(f"✅ SELL order placed: {base_balance} {base_currency}")
+                                        st.success(f"✅ BUY order placed: {amount_base:.6f} {trade_symbol.split('/')[0]} @ ${current_price:,.2f}")
                                         st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Order failed: {e}")
+                                except Exception as e:
+                                    st.error(f"❌ Order failed: {e}")
 
-                        if col3.button("📋 Open Orders", key="testnet_orders", use_container_width=True):
-                            open_orders = testnet.get_open_orders()
-                            if open_orders:
-                                st.write(open_orders)
-                            else:
-                                st.info("No open orders")
+                            if col2.button("🔴 SELL (Market)", key="testnet_sell", use_container_width=True):
+                                try:
+                                    base_currency = trade_symbol.split('/')[0]
+                                    base_balance = balances.get(base_currency, {}).get('free', 0)
 
-                        st.markdown("---")
+                                    if float(base_balance) == 0:
+                                        st.warning(f"No {base_currency} to sell")
+                                    else:
+                                        order = testnet.place_market_order(
+                                            symbol=trade_symbol,
+                                            side='sell',
+                                            amount=float(base_balance)
+                                        )
 
-                        # Bot controls
-                        st.markdown("### 🤖 Automated Trading Bot")
+                                        if order:
+                                            st.success(f"✅ SELL order placed: {base_balance} {base_currency}")
+                                            st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Order failed: {e}")
 
-                        bot_col1, bot_col2 = st.columns(2)
+                            if col3.button("📋 Open Orders", key="testnet_orders", use_container_width=True):
+                                open_orders = testnet.get_open_orders()
+                                if open_orders:
+                                    st.write(open_orders)
+                                else:
+                                    st.info("No open orders")
 
-                        with bot_col1:
-                            bot_symbol = st.selectbox(
-                                "Bot Trading Pair",
-                                options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
-                                key="testnet_bot_symbol"
-                            )
+                            st.markdown("---")
 
-                        with bot_col2:
-                            bot_interval = st.selectbox(
-                                "Check Interval",
-                                options=['5 min', '15 min', '30 min', '1 hour'],
-                                key="testnet_bot_interval"
-                            )
+                            # Bot controls
+                            st.markdown("### 🤖 Automated Trading Bot")
 
-                        st.info("💡 The bot uses the trained PPO model to make trading decisions automatically")
+                            bot_col1, bot_col2 = st.columns(2)
 
-                        if st.button("🚀 Start Testnet Bot", key="start_testnet_bot", use_container_width=True):
-                            interval_map = {'5 min': 300, '15 min': 900, '30 min': 1800, '1 hour': 3600}
-                            st.code(f"python testnet_trader.py --symbol {bot_symbol} --interval {interval_map[bot_interval]}")
-                            st.success("Run the command above in a terminal to start the bot!")
+                            with bot_col1:
+                                bot_symbol = st.selectbox(
+                                    "Bot Trading Pair",
+                                    options=['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
+                                    key="testnet_bot_symbol"
+                                )
 
-                        # Info boxes
-                        st.markdown("---")
-                        st.markdown("### ℹ️ Testnet Information")
+                            with bot_col2:
+                                bot_interval = st.selectbox(
+                                    "Check Interval",
+                                    options=['5 min', '15 min', '30 min', '1 hour'],
+                                    key="testnet_bot_interval"
+                                )
 
-                        info_col1, info_col2 = st.columns(2)
+                            st.info("💡 The bot uses the trained PPO model to make trading decisions automatically")
 
-                        with info_col1:
-                            st.info("""
-                            **About Testnet:**
-                            - Zero real money risk
-                            - Resets monthly (~10,000 USDT)
-                            - Same API as production
-                            - Perfect for strategy testing
-                            """)
+                            if st.button("🚀 Start Testnet Bot", key="start_testnet_bot", use_container_width=True):
+                                interval_map = {'5 min': 300, '15 min': 900, '30 min': 1800, '1 hour': 3600}
+                                st.code(f"python testnet_trader.py --symbol {bot_symbol} --interval {interval_map[bot_interval]}")
+                                st.success("Run the command above in a terminal to start the bot!")
 
-                        with info_col2:
-                            st.warning("""
-                            **Important Notes:**
-                            - Testnet prices may lag real market
-                            - Lower liquidity than mainnet
-                            - Use for testing only
-                            - API keys from testnet.binance.vision
-                            """)
+                            # Info boxes
+                            st.markdown("---")
+                            st.markdown("### ℹ️ Testnet Information")
+
+                            info_col1, info_col2 = st.columns(2)
+
+                            with info_col1:
+                                st.info("""
+                                **About Testnet:**
+                                - Zero real money risk
+                                - Resets monthly (~10,000 USDT)
+                                - Same API as production
+                                - Perfect for strategy testing
+                                """)
+
+                            with info_col2:
+                                st.warning("""
+                                **Important Notes:**
+                                - Testnet prices may lag real market
+                                - Lower liquidity than mainnet
+                                - Use for testing only
+                                - API keys from demo-api.binance.com
+                                """)
 
                         except Exception as balance_error:
                             st.error(f"❌ Error fetching testnet data: {str(balance_error)}")
