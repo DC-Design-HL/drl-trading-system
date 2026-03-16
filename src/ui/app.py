@@ -2585,9 +2585,9 @@ def main():
             st.markdown("### 🧪 Binance Testnet Trading")
             st.markdown("Execute real trades on Binance testnet with zero risk!")
 
-            # Get API keys from environment
-            testnet_api_key = os.getenv('BINANCE_TESTNET_API_KEY')
-            testnet_secret = os.getenv('BINANCE_TESTNET_API_SECRET')
+            # Get API keys from environment (strip whitespace)
+            testnet_api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
+            testnet_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
 
             if not testnet_api_key or not testnet_secret:
                 st.error("⚠️ Testnet API keys not found!")

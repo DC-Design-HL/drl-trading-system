@@ -18,6 +18,19 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
     os.environ['USE_LEGACY_TESTNET'] = 'true'
 
     try:
+        # Strip whitespace from API credentials (defensive)
+        api_key = api_key.strip() if api_key else ''
+        api_secret = api_secret.strip() if api_secret else ''
+
+        # Validate API keys
+        if not api_key or not api_secret:
+            st.error("❌ API keys are empty after sanitization!")
+            return
+
+        if len(api_key) < 20 or len(api_secret) < 20:
+            st.error(f"❌ API keys seem too short (key: {len(api_key)}, secret: {len(api_secret)})")
+            return
+
         # Debug: Show configuration
         proxy_url = os.getenv('BINANCE_TESTNET_PROXY_URL', '').strip()
         if proxy_url:
@@ -25,7 +38,8 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
         else:
             st.warning("⚠️ No proxy configured - direct connection (may be geo-blocked)")
 
-        st.info(f"🔑 Using API Key: {api_key[:4]}...{api_key[-4:]}")
+        st.info(f"🔑 API Key Length: {len(api_key)} chars (first 8: {api_key[:8]}..., last 4: ...{api_key[-4:]})")
+        st.info(f"🔐 Secret Length: {len(api_secret)} chars")
 
         # Create connector
         try:
