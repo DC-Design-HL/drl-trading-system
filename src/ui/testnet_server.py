@@ -18,24 +18,48 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
     os.environ['USE_LEGACY_TESTNET'] = 'true'
 
     try:
+        # Debug: Show API key status (first/last 4 chars only)
+        st.info(f"🔑 Using API Key: {api_key[:4]}...{api_key[-4:]}")
+
         # Create connector
-        testnet = BinanceConnector(
-            api_key=api_key,
-            api_secret=api_secret,
-            testnet=True
-        )
+        try:
+            testnet = BinanceConnector(
+                api_key=api_key,
+                api_secret=api_secret,
+                testnet=True
+            )
+            st.success("✅ BinanceConnector created successfully")
+        except Exception as e:
+            st.error(f"❌ Failed to create BinanceConnector: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+            return
 
         # Test connectivity
-        if testnet.test_connectivity():
-            st.success("✅ Connected to Binance Testnet (testnet.binance.vision)")
-        else:
-            st.warning("⚠️ Connectivity test returned false, but trying anyway...")
+        try:
+            connectivity = testnet.test_connectivity()
+            if connectivity:
+                st.success("✅ Connected to Binance Testnet (testnet.binance.vision)")
+            else:
+                st.warning("⚠️ Connectivity test returned false, but trying anyway...")
+        except Exception as e:
+            st.error(f"❌ Connectivity test failed with error: {e}")
+            import traceback
+            st.code(traceback.format_exc())
 
         # Get balances
-        balances = testnet.get_all_balances()
+        try:
+            balances = testnet.get_all_balances()
+            st.info(f"📊 Retrieved {len(balances) if balances else 0} balance entries")
+        except Exception as e:
+            st.error(f"❌ Failed to get balances: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+            return
 
         if not balances:
             st.error("❌ No balances found. Account might be empty or API keys invalid.")
+            st.warning("💡 Tip: Go to testnet.binance.vision and claim test funds")
             return
 
         # Calculate portfolio value

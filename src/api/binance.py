@@ -237,7 +237,8 @@ class BinanceConnector:
             return account
         except Exception as e:
             logger.error(f"Error fetching account info: {e}")
-            return {}
+            # Re-raise the exception so it can be handled upstream with full error details
+            raise
 
     def get_balance(self, currency: str = 'USDT') -> float:
         """
