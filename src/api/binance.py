@@ -61,16 +61,13 @@ class BinanceConnector:
             }
         }
 
-        # If using proxy, set custom hostname
-        if proxy_url:
-            proxy_url = proxy_url.rstrip('/')
-            # Extract hostname from proxy URL (e.g., frosty-lake-46b0.chen470.workers.dev)
-            proxy_hostname = proxy_url.replace('https://', '').replace('http://', '')
-            config['hostname'] = proxy_hostname
-            logger.info(f"🌐 Configuring Cloudflare Workers proxy: {proxy_url}")
-
         # Create exchange
         self.exchange = ccxt.binance(config)
+
+        # Log proxy configuration if using one
+        if proxy_url:
+            proxy_url = proxy_url.rstrip('/')
+            logger.info(f"🌐 Will configure Cloudflare Workers proxy: {proxy_url}")
 
         if testnet:
             if proxy_url:
