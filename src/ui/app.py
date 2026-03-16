@@ -2611,6 +2611,9 @@ API Key (masked): {testnet_api_key[:10] + '...' if testnet_api_key else 'None'}
                     4. Restart the Space
                     """)
                 else:
+                    testnet = None
+                    connectivity_test = False
+
                     try:
                         # Create connector
                         testnet = BinanceConnector(
@@ -2634,7 +2637,7 @@ API Key (masked): {testnet_api_key[:10] + '...' if testnet_api_key else 'None'}
                         testnet = None
 
                     # Only proceed if testnet object was created
-                    if testnet and (connectivity_test or True):  # Try anyway even if test fails
+                    if testnet is not None:
                         try:
                             # Get account balances
                             balances = testnet.get_all_balances()
