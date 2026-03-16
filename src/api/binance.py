@@ -43,7 +43,10 @@ class BinanceConnector:
             rate_limit: Whether to enable rate limiting
         """
         self.testnet = testnet
-        
+
+        # Check if using Cloudflare Workers proxy to bypass geo-restrictions
+        proxy_url = os.getenv('BINANCE_TESTNET_PROXY_URL', '').strip() if testnet else None
+
         # Initialize ccxt Binance
         config = {
             'apiKey': api_key,
@@ -56,32 +59,40 @@ class BinanceConnector:
                 'fetchMarkets': True,  # Keep market fetching (uses spot API)
             }
         }
-        
+
+        # If using proxy, set custom hostname
+        if proxy_url:
+            proxy_url = proxy_url.rstrip('/')
+            # Extract hostname from proxy URL (e.g., frosty-lake-46b0.chen470.workers.dev)
+            proxy_hostname = proxy_url.replace('https://', '').replace('http://', '')
+            config['hostname'] = proxy_hostname
+            logger.info(f"🌐 Configuring Cloudflare Workers proxy: {proxy_url}")
+
         # Create exchange
         self.exchange = ccxt.binance(config)
 
         if testnet:
-            # Check if using Cloudflare Workers proxy to bypass geo-restrictions
-            proxy_url = os.getenv('BINANCE_TESTNET_PROXY_URL', '').strip()
-
             if proxy_url:
                 # Use Cloudflare Workers proxy
-                # Remove trailing slash if present
-                proxy_url = proxy_url.rstrip('/')
+                # ccxt expects urls['api'] to be a dict with public/private keys
+                # OR we can use the simpler approach: just replace the hostname
+                proxy_hostname = proxy_url.replace('https://', '').replace('http://', '').rstrip('/')
 
-                # Replace all Binance testnet URLs with the proxy
-                self.exchange.urls['api'] = {
-                    'public': proxy_url,
-                    'private': proxy_url,
-                    'web': proxy_url,
-                    'sapi': proxy_url,
-                    'sapiV2': proxy_url,
-                    'sapiV3': proxy_url,
-                    'sapiV4': proxy_url,
-                    'v1': proxy_url,
-                    'v3': proxy_url,
-                }
-                logger.info(f"🌐 Using Cloudflare Workers proxy: {proxy_url}")
+                # First, set to testnet URLs
+                self.exchange.urls['api'] = self.exchange.urls['test']
+
+                # Then replace the hostname in all testnet URLs with our proxy
+                for key in self.exchange.urls['api']:
+                    if isinstance(self.exchange.urls['api'][key], str):
+                        # Replace testnet.binance.vision with our proxy hostname
+                        self.exchange.urls['api'][key] = self.exchange.urls['api'][key].replace(
+                            'testnet.binance.vision',
+                            proxy_hostname
+                        )
+
+                logger.info(f"✅ Using Cloudflare Workers proxy: {proxy_url}")
+                logger.info(f"   Public API: {self.exchange.urls['api'].get('public', 'N/A')}")
+                logger.info(f"   Private API: {self.exchange.urls['api'].get('private', 'N/A')}")
             else:
                 # No proxy - try direct connection (may be geo-restricted)
                 # Auto-detect which testnet to use based on environment variable
