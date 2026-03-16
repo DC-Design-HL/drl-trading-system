@@ -55,6 +55,7 @@ class BinanceConnector:
             'options': {
                 'defaultType': 'spot',
                 'adjustForTimeDifference': True,
+                'recvWindow': 60000,  # 60 seconds - max allowed by Binance (handles proxy latency)
                 'fetchCurrencies': False,  # Disable fetching currency info (uses sapi)
                 'fetchMarkets': True,  # Keep market fetching (uses spot API)
             }
