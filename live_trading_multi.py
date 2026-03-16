@@ -745,7 +745,7 @@ class MultiAssetTradingBot:
                 # Calculate SL/TP for LONG position (structural)
                 try:
                     df = self.fetch_data(days=3)
-                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "long")
+                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "long", self.symbol)
 
                     # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
                     try:
@@ -838,7 +838,7 @@ class MultiAssetTradingBot:
                 # Calculate SL/TP for SHORT position (structural)
                 try:
                     df = self.fetch_data(days=3)
-                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "short")
+                    sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "short", self.symbol)
 
                     # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
                     try:

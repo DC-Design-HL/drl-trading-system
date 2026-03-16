@@ -67,9 +67,32 @@ class AdaptiveRiskManager:
         
         # Trade history for Kelly calculation
         self.trade_history: list = []
-        
+
         logger.info(f"📊 AdaptiveRiskManager initialized (Kelly={use_kelly}, Trailing={use_trailing})")
-    
+
+    def get_asset_specific_params(self, symbol: str) -> Tuple[float, float]:
+        """
+        Get asset-specific SL/TP base parameters based on typical volatility.
+
+        BTC: Lower volatility → Tighter stops (1.5% SL, 3.5% TP)
+        ETH: Medium volatility → Standard stops (2.0% SL, 5.0% TP)
+        SOL: Higher volatility → Wider stops (2.5% SL, 6.0% TP)
+        XRP: Medium-high volatility → Medium-wide stops (2.0% SL, 5.5% TP)
+        """
+        symbol_upper = symbol.upper().replace('USDT', '')
+
+        asset_params = {
+            'BTC': (0.015, 0.035),  # 1.5% SL, 3.5% TP (lowest volatility)
+            'ETH': (0.020, 0.050),  # 2.0% SL, 5.0% TP (medium volatility)
+            'SOL': (0.025, 0.060),  # 2.5% SL, 6.0% TP (highest volatility)
+            'XRP': (0.020, 0.055),  # 2.0% SL, 5.5% TP (medium-high volatility)
+        }
+
+        sl_pct, tp_pct = asset_params.get(symbol_upper, (self.base_sl_pct, self.base_tp_pct))
+
+        logger.info(f"📊 Asset-specific params for {symbol_upper}: SL={sl_pct:.2%}, TP={tp_pct:.2%}")
+        return sl_pct, tp_pct
+
     def calculate_atr(self, df: pd.DataFrame, period: int = None) -> float:
         """Calculate Average True Range."""
         period = period or self.atr_period
@@ -119,14 +142,19 @@ class AdaptiveRiskManager:
             logger.warning(f"Failed to calc ATR-based SL/TP: {e}. Using base defaults.")
             return self.base_sl_pct, self.base_tp_pct
 
-    def get_structural_sl_tp(self, df: pd.DataFrame, trade_type: str = "long") -> Tuple[float, float]:
+    def get_structural_sl_tp(self, df: pd.DataFrame, trade_type: str = "long", symbol: str = "") -> Tuple[float, float]:
         """
         Calculate Structural SL/TP using VWAP and recent swing highs/lows.
         Places the stop loss just beyond the nearest structural support/resistance
         to prevent being wicked out by noise.
+
+        Uses asset-specific base parameters for min/max clamping.
         """
         if len(df) < 24:
             return self.get_adaptive_sl_tp(df, trade_type)
+
+        # Get asset-specific base parameters for appropriate min/max clamping
+        asset_sl_base, asset_tp_base = self.get_asset_specific_params(symbol) if symbol else (self.base_sl_pct, self.base_tp_pct)
             
         current_price = df['close'].iloc[-1]
         
@@ -179,12 +207,23 @@ class AdaptiveRiskManager:
                 tp_price = min(recent_low, current_price - (atr * 4))
                 tp_pct = (current_price - tp_price) / current_price
                 
-            # Hard safety limits (e.g. max 4%, min 1%)
-            sl_pct = np.clip(sl_pct, self.min_sl_pct, self.max_sl_pct)
-            tp_pct = np.clip(tp_pct, self.min_tp_pct, self.max_tp_pct)
-            
+            # Asset-specific soft clamping (allow some flexibility around base params)
+            # Use base params as anchor, but allow 50% flexibility
+            if symbol:
+                min_sl = asset_sl_base * 0.5  # e.g., BTC 1.5% → min 0.75%
+                max_sl = asset_sl_base * 2.0  # e.g., BTC 1.5% → max 3.0%
+                min_tp = asset_tp_base * 0.6  # e.g., BTC 3.5% → min 2.1%
+                max_tp = asset_tp_base * 2.0  # e.g., BTC 3.5% → max 7.0%
+
+                sl_pct = np.clip(sl_pct, min_sl, max_sl)
+                tp_pct = np.clip(tp_pct, min_tp, max_tp)
+            else:
+                # Fallback to global limits if no symbol provided
+                sl_pct = np.clip(sl_pct, self.min_sl_pct, self.max_sl_pct)
+                tp_pct = np.clip(tp_pct, self.min_tp_pct, self.max_tp_pct)
+
             logger.info(
-                f"🏛️ Structural SL/TP (VWAP: ${vwap:.2f}): "
+                f"🏛️ Structural SL/TP [{symbol or 'UNKNOWN'}] (VWAP: ${vwap:.2f}): "
                 f"SL={sl_pct:.2%} (${sl_price:.2f}), TP={tp_pct:.2%} (${tp_price:.2f})"
             )
             return sl_pct, tp_pct
