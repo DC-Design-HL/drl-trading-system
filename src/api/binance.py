@@ -91,8 +91,12 @@ class BinanceConnector:
                         )
 
                 logger.info(f"✅ Using Cloudflare Workers proxy: {proxy_url}")
-                logger.info(f"   Public API: {self.exchange.urls['api'].get('public', 'N/A')}")
-                logger.info(f"   Private API: {self.exchange.urls['api'].get('private', 'N/A')}")
+                logger.info(f"   Proxy hostname: {proxy_hostname}")
+
+                # Log all API URLs for debugging
+                for key, value in self.exchange.urls['api'].items():
+                    if isinstance(value, str):
+                        logger.info(f"   {key}: {value}")
             else:
                 # No proxy - try direct connection (may be geo-restricted)
                 # Auto-detect which testnet to use based on environment variable
