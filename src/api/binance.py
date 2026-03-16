@@ -331,7 +331,8 @@ class BinanceConnector:
             return non_zero
         except Exception as e:
             logger.error(f"Error fetching balances: {e}")
-            return {}
+            # Re-raise so we can see the actual error in the UI
+            raise
             
     def get_ticker(self, symbol: str = 'BTC/USDT') -> Dict[str, Any]:
         """
