@@ -2584,32 +2584,29 @@ def main():
         with tab_testnet:
             st.markdown("### 🧪 Binance Testnet Trading")
             st.markdown("Execute real trades on Binance testnet with zero risk!")
-            st.info("ℹ️ **Client-Side Implementation**: API calls are made directly from your browser to bypass geo-restrictions. Your API keys stay secure in HuggingFace Secrets.")
 
             # Get API keys from environment
             testnet_api_key = os.getenv('BINANCE_TESTNET_API_KEY')
             testnet_secret = os.getenv('BINANCE_TESTNET_API_SECRET')
 
-            try:
-                from src.ui.testnet_client import render_testnet_tab
-
-                if not testnet_api_key or not testnet_secret:
-                    st.error("⚠️ Testnet API keys not found!")
-                    st.info("""
-                    **How to add keys to HuggingFace:**
-                    1. Go to Space Settings → Repository Secrets
-                    2. Add: `BINANCE_TESTNET_API_KEY`
-                    3. Add: `BINANCE_TESTNET_API_SECRET`
-                    4. Restart the Space
-                    """)
-                else:
-                    # Render client-side testnet interface
-                    render_testnet_tab(testnet_api_key, testnet_secret)
-
-            except Exception as e:
-                st.error(f"❌ Error loading testnet: {e}")
-                import traceback
-                st.code(traceback.format_exc())
+            if not testnet_api_key or not testnet_secret:
+                st.error("⚠️ Testnet API keys not found!")
+                st.info("""
+                **How to add keys to HuggingFace:**
+                1. Go to Space Settings → Repository Secrets
+                2. Add: `BINANCE_TESTNET_API_KEY`
+                3. Add: `BINANCE_TESTNET_API_SECRET`
+                4. Restart the Space
+                """)
+            else:
+                try:
+                    from src.ui.testnet_server import render_testnet_tab_server
+                    # Render server-side testnet interface
+                    render_testnet_tab_server(testnet_api_key, testnet_secret)
+                except Exception as e:
+                    st.error(f"❌ Error loading testnet: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
             st.markdown("### Run Backtest")
             
             col1, col2 = st.columns(2)
