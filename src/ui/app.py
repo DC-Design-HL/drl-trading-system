@@ -2593,22 +2593,51 @@ def main():
                 testnet_api_key = os.getenv('BINANCE_TESTNET_API_KEY')
                 testnet_secret = os.getenv('BINANCE_TESTNET_API_SECRET')
 
+                # Debug: Show if keys are loaded
+                if st.checkbox("🔍 Show Debug Info", key="testnet_debug"):
+                    st.code(f"""
+API Key: {'✅ Found' if testnet_api_key else '❌ Not Found'}
+Secret: {'✅ Found' if testnet_secret else '❌ Not Found'}
+API Key (masked): {testnet_api_key[:10] + '...' if testnet_api_key else 'None'}
+                    """)
+
                 if not testnet_api_key or not testnet_secret:
-                    st.error("⚠️ Testnet API keys not found! Please set BINANCE_TESTNET_API_KEY and BINANCE_TESTNET_API_SECRET in .env")
+                    st.error("⚠️ Testnet API keys not found!")
+                    st.info("""
+                    **How to add keys to HuggingFace:**
+                    1. Go to Space Settings → Repository Secrets
+                    2. Add: `BINANCE_TESTNET_API_KEY`
+                    3. Add: `BINANCE_TESTNET_API_SECRET`
+                    4. Restart the Space
+                    """)
                 else:
-                    # Create connector
-                    testnet = BinanceConnector(
-                        api_key=testnet_api_key,
-                        api_secret=testnet_secret,
-                        testnet=True
-                    )
+                    try:
+                        # Create connector
+                        testnet = BinanceConnector(
+                            api_key=testnet_api_key,
+                            api_secret=testnet_secret,
+                            testnet=True
+                        )
 
-                    # Test connectivity
-                    if testnet.test_connectivity():
-                        st.success("✅ Connected to Binance Testnet")
+                        # Test connectivity with better error handling
+                        connectivity_test = testnet.test_connectivity()
 
-                        # Get account balances
-                        balances = testnet.get_all_balances()
+                        if connectivity_test:
+                            st.success("✅ Connected to Binance Testnet")
+                        else:
+                            st.error("❌ Connectivity test failed. Trying to fetch balance anyway...")
+                            # Try anyway - sometimes test fails but API works
+
+                    except Exception as conn_error:
+                        st.error(f"❌ Connection Error: {str(conn_error)}")
+                        st.code(f"Error type: {type(conn_error).__name__}")
+                        testnet = None
+
+                    # Only proceed if testnet object was created
+                    if testnet and (connectivity_test or True):  # Try anyway even if test fails
+                        try:
+                            # Get account balances
+                            balances = testnet.get_all_balances()
 
                         # Calculate portfolio value
                         portfolio_value = 0.0
@@ -2790,6 +2819,10 @@ def main():
                             - Use for testing only
                             - API keys from testnet.binance.vision
                             """)
+
+                        except Exception as balance_error:
+                            st.error(f"❌ Error fetching testnet data: {str(balance_error)}")
+                            st.code(f"Error: {balance_error}")
 
                     else:
                         st.error("❌ Failed to connect to Binance Testnet. Check your API keys.")
