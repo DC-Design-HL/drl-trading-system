@@ -18,7 +18,13 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
     os.environ['USE_LEGACY_TESTNET'] = 'true'
 
     try:
-        # Debug: Show API key status (first/last 4 chars only)
+        # Debug: Show configuration
+        proxy_url = os.getenv('BINANCE_TESTNET_PROXY_URL', '').strip()
+        if proxy_url:
+            st.success(f"🌐 Using Cloudflare Proxy: {proxy_url}")
+        else:
+            st.warning("⚠️ No proxy configured - direct connection (may be geo-blocked)")
+
         st.info(f"🔑 Using API Key: {api_key[:4]}...{api_key[-4:]}")
 
         # Create connector
