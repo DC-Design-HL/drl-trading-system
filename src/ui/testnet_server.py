@@ -17,6 +17,21 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
     # Force use of legacy testnet
     os.environ['USE_LEGACY_TESTNET'] = 'true'
 
+    # Show platform info
+    import platform
+    is_huggingface = os.path.exists('/app')  # HuggingFace Spaces use /app directory
+
+    if is_huggingface:
+        st.info("""
+        💡 **Testnet Tab - Local Development Feature**
+
+        This tab is designed for **local development** but has limitations on HuggingFace:
+        - Binance geo-blocks HuggingFace's datacenter (HTTP 451)
+        - External proxies can't be reached (DNS restrictions)
+
+        ✅ **Works locally** when you run: `streamlit run src/ui/app.py`
+        """)
+
     try:
         # Strip whitespace from API credentials (defensive)
         api_key = api_key.strip() if api_key else ''
@@ -89,10 +104,47 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
             balances = testnet.get_all_balances()
             st.info(f"📊 Retrieved {len(balances) if balances else 0} balance entries")
         except Exception as e:
-            st.error(f"❌ Failed to get balances: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-            return
+            error_str = str(e)
+
+            # Check if it's a geo-restriction or DNS error
+            if "451" in error_str or "restricted location" in error_str:
+                st.error("🚫 Binance Testnet is geo-blocked from HuggingFace servers")
+                st.warning("""
+                **HuggingFace Limitation:**
+
+                Binance blocks access from HuggingFace's datacenter location (HTTP 451 - Legal Restriction).
+
+                **Options:**
+                1. **Run locally** - Clone the repo and run on your machine
+                2. **Use Live Trading** - The main dashboard works with live data
+                3. **Deploy elsewhere** - Use Render, Railway, or other platforms
+
+                This is a Binance geo-restriction, not a bug in the code.
+                """)
+                return
+
+            elif "gaierror" in error_str or "Failed to resolve" in error_str or "No address associated" in error_str:
+                st.error("🌐 HuggingFace cannot reach external proxy (DNS restriction)")
+                st.warning("""
+                **HuggingFace Limitation:**
+
+                HuggingFace Spaces cannot resolve DNS for Cloudflare Workers or external proxies.
+
+                **Options:**
+                1. **Run locally** - Works perfectly on your local machine
+                2. **Use Live Trading** - Main features work without testnet
+                3. **Different platform** - Deploy on Render/Railway/etc.
+
+                This is a HuggingFace network policy, not a code issue.
+                """)
+                return
+
+            else:
+                # Unknown error
+                st.error(f"❌ Failed to get balances: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+                return
 
         if not balances:
             st.error("❌ No balances found. Account might be empty or API keys invalid.")
