@@ -21,6 +21,15 @@ sys.path.insert(0, str(project_root))
 from src.backtest.data_loader import DataLoader, BinanceHistoricalDataFetcher
 from src.data.storage import get_storage, JsonFileStorage
 
+# API server URL — configurable for remote (local server) or local deployments
+def get_api_url() -> str:
+    """Return the base URL of the Flask API server.
+
+    Set API_SERVER_URL env var to point at a remote local server
+    (e.g. https://abc123.ngrok.io). Defaults to localhost:5001.
+    """
+    return os.environ.get('API_SERVER_URL', 'http://127.0.0.1:5001').rstrip('/')
+
 # Initialize storage with caching
 @st.cache_resource
 def get_app_storage():
@@ -1180,7 +1189,7 @@ def render_sidebar_metrics_fragment():
     try:
         # Fetch State
         try:
-            state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+            state_resp = requests.get(f'{get_api_url()}/api/state', timeout=1)
             if state_resp.status_code == 200:
                 api_state = state_resp.json()
                 # Update session state with API data (optional, but good for other parts)
@@ -1218,7 +1227,7 @@ def render_market_analysis_fragment(symbol: str):
     market_data = {}
     try:
         api_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=15)
+        market_resp = requests.get(f'{get_api_url()}/api/market?symbol={api_symbol}', timeout=15)
         if market_resp.status_code == 200:
             market_data = market_resp.json()
     except Exception as e:
@@ -1424,7 +1433,7 @@ def render_position_fragment(symbol: str):
     # 1. Fetch Trading State
     state = {}
     try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+        state_resp = requests.get(f'{get_api_url()}/api/state', timeout=1)
         if state_resp.status_code == 200:
             state = state_resp.json()
     except Exception as e:
@@ -1435,7 +1444,7 @@ def render_position_fragment(symbol: str):
     try:
         # Try to get price from market API first (faster)
         clean_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=5)
+        market_resp = requests.get(f'{get_api_url()}/api/market?symbol={clean_symbol}', timeout=5)
         if market_resp.status_code == 200:
             m_data = market_resp.json()
             if 'price' in m_data:
@@ -1456,7 +1465,7 @@ def render_position_fragment(symbol: str):
     # 3. Fetch ALL Trades early to calculate perfectly mathematically synced global Portfolio Value
     all_trades = []
     try:
-        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=2)
+        trades_resp = requests.get(f'{get_api_url()}/api/trades', timeout=2)
         if trades_resp.status_code == 200:
             all_trades = trades_resp.json()
     except Exception as e:
@@ -1536,7 +1545,7 @@ def render_agent_status_fragment():
     # Fetch State
     state = {}
     try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+        state_resp = requests.get(f'{get_api_url()}/api/state', timeout=1)
         if state_resp.status_code == 200:
             state = state_resp.json()
     except Exception as e:
@@ -1550,7 +1559,7 @@ def render_agent_status_fragment():
     # Fetch trades explicitly for mathematical accuracy
     all_trades = state.get('trades', [])
     try:
-        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=1)
+        trades_resp = requests.get(f'{get_api_url()}/api/trades', timeout=1)
         if trades_resp.status_code == 200:
             all_trades = trades_resp.json()
     except Exception as e:

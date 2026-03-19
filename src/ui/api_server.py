@@ -11,6 +11,13 @@ from datetime import datetime
 import time
 
 app = Flask(__name__)
+CORS(app, origins="*")
+
+@app.route('/api/ping')
+def ping():
+    """Lightweight connectivity check for remote clients."""
+    return jsonify({"ok": True, "timestamp": datetime.now().isoformat()})
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for system status."""
