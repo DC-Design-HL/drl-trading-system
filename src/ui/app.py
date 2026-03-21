@@ -24,6 +24,13 @@ try:
 except ImportError:
     _HAS_BACKTEST = False
 from src.data.storage import get_storage, JsonFileStorage
+from src.ui.design_system import (
+    GLOBAL_CSS, BG_PRIMARY, BG_CARD, BG_CARD_ALT, ACCENT, SUCCESS, DANGER,
+    WARNING, TEXT_PRIMARY, TEXT_MUTED, BORDER, SUCCESS_DIM, DANGER_DIM,
+    metric_card, status_badge, pnl_text, section_header, styled_table,
+    card_container, loading_card, error_card, position_badge, metric_row,
+    progress_bar, _pnl_color, _pnl_sign, _format_number, _esc,
+)
 
 # True when running as a client-only HF Space (API_SERVER_URL points at remote server)
 IS_CLIENT_MODE = bool(os.environ.get('API_SERVER_URL'))
@@ -52,233 +59,8 @@ def get_app_storage():
 
 storage = get_app_storage()
 
-# Custom CSS — Premium Dark Theme (matches Live Portfolio aesthetic)
-st.markdown("""
-<style>
-    /* ═══ Foundation ═══ */
-    .stApp {
-        background-color: #0d1117;
-        color: #e6edf3;
-    }
-    
-    /* ═══ Sidebar ═══ */
-    div[data-testid="stSidebarContent"] {
-        background-color: #0d1117;
-        border-right: 1px solid #21262d;
-    }
-    div[data-testid="stSidebarContent"] .stMarkdown h3 {
-        color: #8b949e;
-        font-size: 14px;
-        font-weight: 600;
-        letter-spacing: 0.5px;
-    }
-    
-    /* ═══ Metric Cards (native st.metric) ═══ */
-    div[data-testid="stMetric"] {
-        background: #151b23;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 16px 18px;
-    }
-    div[data-testid="stMetric"] label {
-        color: #8b949e !important;
-        font-size: 11px !important;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-    }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: #fff !important;
-        font-weight: 700;
-    }
-    div[data-testid="stMetricDelta"] svg { display: none; }
-    
-    /* ═══ Custom metric-card class (sidebar panels) ═══ */
-    .metric-card {
-        background: #151b23;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-        padding: 16px 18px;
-        margin-bottom: 12px;
-    }
-    .metric-label {
-        color: #8b949e;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        margin-bottom: 6px;
-    }
-    .metric-value {
-        font-size: 24px;
-        font-weight: 700;
-        color: #fff;
-    }
-    .metric-delta-positive { color: #00e676; }
-    .metric-delta-negative { color: #ff5252; }
-    
-    /* ═══ Tabs ═══ */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        border-bottom: 1px solid #21262d;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: transparent;
-        color: #8b949e;
-        border-radius: 6px 6px 0 0;
-        padding: 8px 16px;
-        font-size: 13px;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #e6edf3;
-        background-color: rgba(255,255,255,0.04);
-    }
-    .stTabs [aria-selected="true"] {
-        color: #fff !important;
-        font-weight: 600;
-        border-bottom: 2px solid #00e676;
-    }
-    .stTabs [data-baseweb="tab-highlight"] {
-        background-color: #00e676 !important;
-    }
-    .stTabs [data-baseweb="tab-border"] {
-        display: none;
-    }
-    
-    /* ═══ Buttons ═══ */
-    .stButton > button {
-        background: #151b23;
-        border: 1px solid #21262d;
-        color: #e6edf3;
-        border-radius: 6px;
-        font-weight: 500;
-        transition: all 0.15s ease;
-    }
-    .stButton > button:hover {
-        background: #1c2333;
-        border-color: #388bfd;
-        color: #fff;
-    }
-    .stButton > button[kind="primary"],
-    .stButton > button[data-testid="stBaseButton-primary"] {
-        background: #1a6b3c;
-        border-color: #1a6b3c;
-        color: #00e676;
-    }
-    .stButton > button[kind="primary"]:hover,
-    .stButton > button[data-testid="stBaseButton-primary"]:hover {
-        background: #217a45;
-        border-color: #00e676;
-    }
-    
-    /* ═══ Inputs, Selects, Date Pickers ═══ */
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div,
-    .stDateInput > div > div > input,
-    .stTextInput > div > div > input,
-    .stSelectbox > div > div {
-        background-color: #151b23 !important;
-        border-color: #21262d !important;
-        color: #e6edf3 !important;
-    }
-    
-    /* ═══ Text Areas ═══ */
-    .stTextArea textarea {
-        background-color: #151b23 !important;
-        border-color: #21262d !important;
-        color: #e6edf3 !important;
-        border-radius: 6px;
-    }
-    
-    /* ═══ Code Blocks ═══ */
-    .stCodeBlock, code, pre {
-        background-color: #151b23 !important;
-        border: 1px solid #21262d;
-        border-radius: 6px;
-    }
-    
-    /* ═══ Expanders ═══ */
-    .streamlit-expanderHeader {
-        background: #151b23;
-        border: 1px solid #21262d;
-        border-radius: 6px;
-        color: #e6edf3;
-    }
-    details {
-        background: #151b23;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-    }
-    
-    /* ═══ Dividers ═══ */
-    hr {
-        border-color: #21262d !important;
-    }
-    
-    /* ═══ Checkboxes & Toggles ═══ */
-    .stCheckbox label span {
-        color: #8b949e;
-    }
-    
-    /* ═══ Dataframes ═══ */
-    .stDataFrame {
-        border: 1px solid #21262d;
-        border-radius: 8px;
-        overflow: hidden;
-    }
-    
-    /* ═══ Alerts ═══ */
-    .stAlert {
-        background: #151b23;
-        border: 1px solid #21262d;
-        border-radius: 8px;
-    }
-    
-    /* ═══ Caption ═══ */
-    .stCaption {
-        color: #8b949e !important;
-    }
-    
-    /* ═══ Scrollbar ═══ */
-    ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-        background: #0d1117;
-    }
-    ::-webkit-scrollbar-thumb {
-        background: #21262d;
-        border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background: #30363d;
-    }
-    
-    /* ═══ Hide defaults ═══ */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* ═══ Timeframe buttons (custom) ═══ */
-    .timeframe-btn {
-        background: #151b23;
-        border: 1px solid #21262d;
-        color: #8b949e;
-        padding: 5px 12px;
-        margin: 2px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 12px;
-    }
-    .timeframe-btn.active {
-        background: #1a6b3c;
-        color: #00e676;
-        border-color: #1a6b3c;
-    }
-    .timeframe-btn:hover {
-        background: #1c2333;
-        border-color: #388bfd;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Inject design system global CSS
+st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 
 # Timeframe options
@@ -953,13 +735,13 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
     TP_PCT = 0.025  # 2.5% (matches live_trading.py)
     
     if position == 0:
-        st.markdown(f"""
-        <div class="metric-card" style="text-align: center;">
-            <div class="metric-label">Current Position</div>
-            <div style="font-size: 24px; color: #555; margin-top: 10px;">No Position (FLAT)</div>
-            <div style="font-size: 12px; color: #888; margin-top: 5px;">Current Price: ${current_price:,.2f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(card_container(
+            f'<div style="text-align:center;">'
+            f'<div class="ds-card-label">Current Position</div>'
+            f'<div style="font-size:24px;color:{TEXT_MUTED};margin-top:10px;">No Position (FLAT)</div>'
+            f'<div style="font-size:12px;color:{TEXT_MUTED};margin-top:5px;font-family:monospace;">Current Price: ${current_price:,.2f}</div>'
+            f'</div>'
+        ), unsafe_allow_html=True)
     else:
         # DEBUG: Inspect state to find units key
         # st.write(f"Debug State for P&L: {state}")
@@ -1074,7 +856,7 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
 
 def render_trade_history(trades: list):
     """Render real trade history."""
-    st.markdown('<div class="metric-label">Recent Trades</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="ds-card-label">Recent Trades</div>', unsafe_allow_html=True)
     
     action_trades = [t for t in trades if 'action' in t and t['action'] != 'HOLD']
     
@@ -1234,30 +1016,23 @@ def render_sidebar_metrics_fragment():
     import logging
     logger = logging.getLogger(__name__)
     try:
-        # Fetch State
         try:
             state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
             if state_resp.status_code == 200:
                 api_state = state_resp.json()
-                # Update session state with API data (optional, but good for other parts)
                 if 'balance' in api_state:
                      st.session_state.portfolio_balance = api_state.get('balance', 0)
                      st.session_state.total_pnl = api_state.get('total_pnl', 0)
-            
-            # Render
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value">{f'${st.session_state["portfolio_balance"]:,.2f}' if st.session_state.get('portfolio_balance') is not None else '—'}</div>
-                <div class="metric-delta" style="color: {'#26a69a' if float(st.session_state.get('total_pnl') or 0) >= 0 else '#ef5350'}">
-                    P&L: {'+' if float(st.session_state.get('total_pnl') or 0) >= 0 else ''}${float(st.session_state.get('total_pnl') or 0):,.2f}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.markdown(f"<div style='color: #ef5350'>Connection Error</div>", unsafe_allow_html=True)
 
+            bal = st.session_state.get('portfolio_balance')
+            pnl = float(st.session_state.get('total_pnl') or 0)
+            bal_str = f"${bal:,.2f}" if bal is not None else "—"
+            st.markdown(
+                metric_card("Portfolio Value", bal_str, delta=pnl, icon="💰"),
+                unsafe_allow_html=True,
+            )
+        except Exception as e:
+            st.markdown(error_card("Connection Error", str(e)), unsafe_allow_html=True)
     except Exception as e:
         logger.error(f"Sidebar data fetch error: {e}")
 
@@ -1540,16 +1315,11 @@ def render_position_fragment(symbol: str):
     else:
         total_pnl = state.get('total_pnl', state.get('realized_pnl', 0))
     balance = state.get('total_balance', state.get('balance'))
-    pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
-    pnl_sign = "+" if total_pnl >= 0 else ""
-    
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Portfolio Value</div>
-        <div class="metric-value">{f'${balance:,.2f}' if balance is not None else '—'}</div>
-        <div class="{pnl_class}">P&L: {pnl_sign}${(total_pnl or 0):,.2f}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    bal_str = f"${balance:,.2f}" if balance is not None else "—"
+    st.markdown(
+        metric_card("Portfolio Value", bal_str, delta=total_pnl, icon="💰"),
+        unsafe_allow_html=True,
+    )
     
     # 4. Render Position Card
     # Extract specific asset state from global state
@@ -1676,17 +1446,17 @@ def render_agent_status_fragment():
             model_date = "Not found"
 
     return_str = f"{'+' if total_return >= 0 else ''}{total_return:.2f}% Return" if total_return is not None else "N/A Return"
-    return_color = "#26a69a" if (total_return or 0) >= 0 else "#ef5350"
+    return_color = SUCCESS if (total_return or 0) >= 0 else DANGER
+    model_status_color = SUCCESS if model_exists else DANGER
+    model_status_text = "✓ Model loaded" if model_exists else "✗ Model not found"
 
-    st.markdown(f"""
-    <div class="metric-card">
-        <div class="metric-label">Active Model</div>
-        <div style="color: white; font-size: 14px; margin-top: 5px;">Ultimate Agent (PPO)</div>
-        <div style="color: {return_color}; font-size: 12px;">{return_str} | {win_rate:.1f}% Win Rate</div>
-        <div style="color: #888; font-size: 11px;">Trades: {total_trades} | Model: {model_date}</div>
-        <div style="color: {'#26a69a' if model_exists else '#ef5350'}; font-size: 11px;">{'✓ Model loaded' if model_exists else '✗ Model not found'}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(card_container(
+        f'<div class="ds-card-label">🤖 Active Model</div>'
+        f'<div style="color:{TEXT_PRIMARY};font-size:14px;margin-top:5px;font-weight:600;">Ultimate Agent (PPO)</div>'
+        f'<div style="color:{return_color};font-size:12px;font-family:monospace;">{return_str} | {win_rate:.1f}% Win Rate</div>'
+        f'<div style="color:{TEXT_MUTED};font-size:11px;">Trades: {total_trades} | Model: {model_date}</div>'
+        f'<div style="color:{model_status_color};font-size:11px;">{model_status_text}</div>'
+    ), unsafe_allow_html=True)
 
 
 
@@ -3176,9 +2946,9 @@ def main():
     # Footer
     st.markdown("---")
     st.markdown(f"""
-    <div style="text-align: center; color: #888; font-size: 12px;">
-        DRL Trading System v2.1 | Advanced PPO Agent | 
-        <span style="color: #00e676;">●</span> WebSocket Live Data |
+    <div style="text-align: center; color: {TEXT_MUTED}; font-size: 12px;">
+        DRL Trading System v2.1 | Advanced PPO Agent |
+        <span style="color: {SUCCESS};">●</span> WebSocket Live Data |
         Deployed: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
     </div>
     """, unsafe_allow_html=True)
