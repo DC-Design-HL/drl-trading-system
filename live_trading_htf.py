@@ -351,15 +351,76 @@ class HTFLiveBot:
         # Send Telegram alert immediately
         self._send_telegram_alert(trade)
 
-    def _send_telegram_alert(self, trade: Dict) -> None:
-        """Write trade alert to a pending alerts file for OpenClaw to pick up."""
+    def _fetch_market_signals(self, symbol: str = "BTCUSDT") -> Dict:
+        """Fetch current market analysis signals from the local API server."""
         try:
+            import requests as req
+            resp = req.get(f"http://127.0.0.1:5001/api/market?symbol={symbol}", timeout=10)
+            if resp.ok:
+                return resp.json()
+        except Exception as exc:
+            logger.debug("Failed to fetch market signals: %s", exc)
+        return {}
+
+    def _build_signal_summary(self, market: Dict) -> Dict:
+        """Extract a compact signal summary from market analysis data."""
+        summary = {}
+
+        # Regime
+        regime = market.get("regime", {})
+        if regime:
+            summary["regime"] = {
+                "state": regime.get("regime", "unknown"),
+                "adx": regime.get("adx"),
+                "trend": regime.get("trend_strength"),
+            }
+
+        # Whale signals
+        whale = market.get("whale", {})
+        if whale:
+            summary["whale"] = {
+                "direction": whale.get("direction", "NEUTRAL"),
+                "score": whale.get("score", 0),
+                "confidence": whale.get("confidence", 0),
+            }
+
+        # Funding rate
+        funding = market.get("funding", {})
+        if funding:
+            summary["funding"] = {
+                "rate": funding.get("rate"),
+                "bias": funding.get("bias"),
+            }
+
+        # Order flow
+        of = market.get("order_flow", {})
+        if of:
+            summary["order_flow"] = {
+                "bias": of.get("bias", "neutral"),
+                "large_buys": of.get("large_buys", 0),
+                "large_sells": of.get("large_sells", 0),
+            }
+
+        # Price
+        if market.get("price"):
+            summary["price"] = market["price"]
+
+        return summary
+
+    def _send_telegram_alert(self, trade: Dict) -> None:
+        """Write trade alert with market signal context to pending alerts file."""
+        try:
+            # Fetch current market signals for context
+            market = self._fetch_market_signals(trade.get("symbol", "BTCUSDT"))
+            signal_summary = self._build_signal_summary(market)
+
             alert_file = Path("logs/htf_pending_alerts.jsonl")
             alert_file.parent.mkdir(parents=True, exist_ok=True)
             with open(alert_file, "a") as f:
                 f.write(json.dumps({
                     "timestamp": datetime.now().isoformat(),
                     "trade": trade,
+                    "signals": signal_summary,
                 }) + "\n")
             logger.info("Trade alert queued: %s %s @ $%.2f",
                         trade.get("action", "?"), trade.get("symbol", "?"),
