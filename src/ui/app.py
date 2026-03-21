@@ -2238,8 +2238,9 @@ def main():
                 _ret_val = f'{_pnl_sign(total_return_pct)}{abs(total_return_pct):.2f}%'
                 st.markdown(metric_card(
                     label="Total Return",
-                    value=f'<span style="color:{_ret_color}">{_ret_val}</span>',
+                    value=_ret_val,
                     icon="📊",
+                    value_color=_ret_color,
                 ), unsafe_allow_html=True)
             with p1c2:
                 _sharpe_val = f'{sharpe_perf:.2f}' if sharpe_perf is not None else '—'
@@ -2268,8 +2269,9 @@ def main():
                 _wr_color = SUCCESS if win_rate_perf >= 50 else DANGER
                 st.markdown(metric_card(
                     label="Win Rate",
-                    value=f'<span style="color:{_wr_color}">{win_rate_perf:.1f}%</span>',
+                    value=f'{win_rate_perf:.1f}%',
                     icon="🎯",
+                    value_color=_wr_color,
                 ), unsafe_allow_html=True)
             with p2c3:
                 _pf_val = f'{profit_factor:.2f}' if profit_factor != float('inf') else '∞'
@@ -2286,22 +2288,25 @@ def main():
                 _tpnl_val = f'{_pnl_sign(total_pnl_perf)}${abs(total_pnl_perf):,.2f}'
                 st.markdown(metric_card(
                     label="Total P&L",
-                    value=f'<span style="color:{_tpnl_color}">{_tpnl_val}</span>',
+                    value=_tpnl_val,
                     icon="💰",
+                    value_color=_tpnl_color,
                 ), unsafe_allow_html=True)
             with p3c2:
                 _best_label = f'Best Trade ({best_trade_sym})' if best_trade_sym else 'Best Trade'
                 st.markdown(metric_card(
                     label=_best_label,
-                    value=f'<span style="color:{SUCCESS}">{_pnl_sign(best_trade_pnl)}${abs(best_trade_pnl):,.2f}</span>' if pnl_list else '—',
+                    value=f'{_pnl_sign(best_trade_pnl)}${abs(best_trade_pnl):,.2f}' if pnl_list else '—',
                     icon="🏆",
+                    value_color=SUCCESS if pnl_list else None,
                 ), unsafe_allow_html=True)
             with p3c3:
                 _worst_label = f'Worst Trade ({worst_trade_sym})' if worst_trade_sym else 'Worst Trade'
                 st.markdown(metric_card(
                     label=_worst_label,
-                    value=f'<span style="color:{DANGER}">{_pnl_sign(worst_trade_pnl)}${abs(worst_trade_pnl):,.2f}</span>' if pnl_list else '—',
+                    value=f'{_pnl_sign(worst_trade_pnl)}${abs(worst_trade_pnl):,.2f}' if pnl_list else '—',
                     icon="💔",
+                    value_color=DANGER if pnl_list else None,
                 ), unsafe_allow_html=True)
 
             # ── Equity Curve (SVG) ──
@@ -2409,8 +2414,9 @@ def main():
                         _wfr_color = _pnl_color(wf_return)
                         st.markdown(metric_card(
                             label="OOS Return",
-                            value=f'<span style="color:{_wfr_color}">{_pnl_sign(wf_return)}{abs(wf_return):.1f}%</span>',
+                            value=f'{_pnl_sign(wf_return)}{abs(wf_return):.1f}%',
                             icon="📊",
+                            value_color=_wfr_color,
                         ), unsafe_allow_html=True)
                     with wfc3:
                         st.markdown(metric_card(
@@ -2422,8 +2428,9 @@ def main():
                         _folds_color = SUCCESS if wf_pos_folds >= 75 else (WARNING if wf_pos_folds >= 50 else DANGER)
                         st.markdown(metric_card(
                             label="Positive Folds",
-                            value=f'<span style="color:{_folds_color}">{wf_pos_folds:.0f}%</span>',
+                            value=f'{wf_pos_folds:.0f}%',
                             icon="✅",
+                            value_color=_folds_color,
                         ), unsafe_allow_html=True)
 
                     # Verdict badge
