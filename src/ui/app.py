@@ -2024,11 +2024,11 @@ def main():
                 _pv = f'${lp_total_balance:,.2f}' if lp_total_balance is not None else '—'
                 st.markdown(metric_card(label="Portfolio Value", value=_pv), unsafe_allow_html=True)
             with r2c2:
-                _tpnl_color = _pnl_color(lp_grand_total_pnl)
                 _tpnl_val = f'{_pnl_sign(lp_grand_total_pnl)}${abs(lp_grand_total_pnl):,.2f}'
                 st.markdown(metric_card(
                     label="Total P&L",
-                    value=f'<span style="color:{_tpnl_color}">{_tpnl_val}</span>',
+                    value=_tpnl_val,
+                    value_color=_pnl_color(lp_grand_total_pnl),
                 ), unsafe_allow_html=True)
             with r2c3:
                 st.markdown(metric_card(label="Active Assets", value=str(lp_active_assets_count)), unsafe_allow_html=True)
