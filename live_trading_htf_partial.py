@@ -329,7 +329,7 @@ class HTFPartialBot:
         except Exception as exc:
             logger.error("Failed to write trade log: %s", exc)
         try:
-            self.storage.log_trade(trade)
+            pass  # Paper trade: skip MongoDB (only trailing bot writes to shared DB)
         except Exception as exc:
             logger.debug("storage.log_trade failed: %s", exc)
         # Send alert
