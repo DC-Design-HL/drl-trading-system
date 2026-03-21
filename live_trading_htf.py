@@ -61,6 +61,11 @@ STOP_LOSS_PCT = 0.015  # 1.5% stop loss
 TAKE_PROFIT_PCT = 0.030  # 3.0% take profit
 TRADING_FEE = 0.0004   # 0.04% taker fee
 
+# Trailing stop configuration
+TRAILING_BREAKEVEN_PCT = 0.01    # At +1% profit, move SL to break-even
+TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit
+TRAILING_DISTANCE_PCT = 0.01     # Trail 1% behind peak
+
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
 MIN_HOLD_SECONDS = 3600   # 1 hour minimum hold (HTF signal is slower)
@@ -177,6 +182,7 @@ class HTFLiveBot:
         self.position_units = 0.0
         self.sl_price = 0.0
         self.tp_price = 0.0
+        self.peak_price = 0.0
         self.current_price = 0.0
         self.realized_pnl = 0.0
 
@@ -277,6 +283,7 @@ class HTFLiveBot:
             "position_units": self.position_units,
             "sl_price": self.sl_price,
             "tp_price": self.tp_price,
+            "peak_price": self.peak_price,
             "realized_pnl": self.realized_pnl,
             "last_loss_time": self.last_loss_time,
             "last_entry_time": self.last_entry_time,
@@ -325,6 +332,7 @@ class HTFLiveBot:
             self.position_units = float(state.get("position_units", 0.0))
             self.sl_price = float(state.get("sl_price", 0.0))
             self.tp_price = float(state.get("tp_price", 0.0))
+            self.peak_price = float(state.get("peak_price", 0.0))
             self.realized_pnl = float(state.get("realized_pnl", 0.0))
             self.last_loss_time = float(state.get("last_loss_time", 0.0))
             self.last_entry_time = float(state.get("last_entry_time", 0.0))
@@ -584,20 +592,82 @@ class HTFLiveBot:
     # SL/TP check
     # ------------------------------------------------------------------
 
+    def _update_peak_price(self, current_price: float) -> None:
+        """Track the most-favorable price since entry (highest for LONG, lowest for SHORT)."""
+        if self.position == 0:
+            return
+        if self.position == 1:  # LONG — track highest
+            if current_price > self.peak_price:
+                self.peak_price = current_price
+        elif self.position == -1:  # SHORT — track lowest
+            if self.peak_price == 0.0 or current_price < self.peak_price:
+                self.peak_price = current_price
+
     def _check_sl_tp(self, current_price: float) -> Optional[str]:
-        """Return 'SL' or 'TP' if the current position should be closed, else None."""
+        """
+        Trailing stop logic with break-even and profit-lock levels.
+
+        Returns 'SL' or 'TP' if the current position should be closed, else None.
+        Also adjusts self.sl_price upward (never downward) as price moves in favor.
+        """
         if self.position == 0:
             return None
+
+        entry = self.position_price
+        if entry <= 0:
+            return None
+
+        # --- Update peak price ---
+        self._update_peak_price(current_price)
+
+        # --- Compute unrealized profit % ---
         if self.position == 1:  # LONG
+            profit_pct = (current_price - entry) / entry
+        else:  # SHORT
+            profit_pct = (entry - current_price) / entry
+
+        # --- Hard TP check (unchanged at +3%) ---
+        if self.position == 1 and self.tp_price > 0 and current_price >= self.tp_price:
+            return "TP"
+        if self.position == -1 and self.tp_price > 0 and current_price <= self.tp_price:
+            return "TP"
+
+        # --- Trailing stop adjustments (SL only moves in favorable direction) ---
+        new_sl = self.sl_price
+
+        if profit_pct >= TRAILING_LOCK_PCT:
+            # At +2% profit → lock 50% of profit from entry
+            if self.position == 1:
+                locked_sl = entry + 0.5 * (self.peak_price - entry)
+                new_sl = max(new_sl, locked_sl)
+            else:
+                locked_sl = entry - 0.5 * (entry - self.peak_price)
+                new_sl = min(new_sl, locked_sl) if new_sl > 0 else locked_sl
+
+        elif profit_pct >= TRAILING_BREAKEVEN_PCT:
+            # At +1% profit → move SL to break-even (entry price)
+            if self.position == 1:
+                new_sl = max(new_sl, entry)
+            else:
+                new_sl = min(new_sl, entry) if new_sl > 0 else entry
+
+        # Log SL adjustment
+        if new_sl != self.sl_price:
+            logger.info(
+                "🔄 Trailing SL adjusted: $%.2f → $%.2f (profit=%.2f%%, peak=$%.2f)",
+                self.sl_price, new_sl, profit_pct * 100, self.peak_price,
+            )
+            self.sl_price = new_sl
+            self._save_state()
+
+        # --- Check if current price hits the (possibly adjusted) SL ---
+        if self.position == 1:
             if self.sl_price > 0 and current_price <= self.sl_price:
                 return "SL"
-            if self.tp_price > 0 and current_price >= self.tp_price:
-                return "TP"
-        elif self.position == -1:  # SHORT
+        elif self.position == -1:
             if self.sl_price > 0 and current_price >= self.sl_price:
                 return "SL"
-            if self.tp_price > 0 and current_price <= self.tp_price:
-                return "TP"
+
         return None
 
     # ------------------------------------------------------------------
@@ -657,6 +727,7 @@ class HTFLiveBot:
         self.position = direction
         self.position_price = price
         self.position_units = (trade_value - fee) / (price + 1e-10)
+        self.peak_price = price  # Reset peak price for trailing stop tracking
         self.last_entry_time = time.time()
 
         if direction == 1:
@@ -740,6 +811,7 @@ class HTFLiveBot:
         self.position_units = 0.0
         self.sl_price = 0.0
         self.tp_price = 0.0
+        self.peak_price = 0.0
 
         if not self.dry_run:
             self._log_trade(trade)
@@ -793,6 +865,9 @@ class HTFLiveBot:
             current_price = float(df_15m.iloc[-1]["close"])
             self.current_price = current_price
             status["price"] = current_price
+
+            # 1b. Update peak price for trailing stop tracking
+            self._update_peak_price(current_price)
 
             # 2. Check SL/TP before computing new action
             exit_reason = self._check_sl_tp(current_price)
