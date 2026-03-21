@@ -748,7 +748,7 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
         # logger.info(f"Debug State for P&L: {state}") 
         pass
         is_long = position == 1
-        color = "#26a69a" if is_long else "#ef5350"
+        color = SUCCESS if is_long else DANGER
         side = "LONG" if is_long else "SHORT"
         icon = "📈" if is_long else "📉"
         
@@ -783,47 +783,39 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
         else:
             unrealized_pnl = (entry_price - current_price) * units
         
-        pnl_color = "#26a69a" if unrealized_pnl >= 0 else "#ef5350"
+        pnl_color = SUCCESS if unrealized_pnl >= 0 else DANGER
         pnl_sign = "+" if unrealized_pnl >= 0 else ""
         
+        st.markdown(card_container(
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span class="ds-card-label" style="margin-bottom:0;">Current Position</span>'
+            f'{status_badge(f"{icon} {side}", color)}'
+            f'</div>'
+            f'<div style="margin-top:15px;">'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">Entry Price:</span>'
+            f'<span class="mono" style="color:{TEXT_PRIMARY};">${entry_price:,.2f}</span>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">Current Price:</span>'
+            f'<span id="sidebar-current-price" class="mono" style="color:{TEXT_PRIMARY};">${current_price:,.2f}</span>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">Unrealized P&L:</span>'
+            f'<span id="sidebar-pnl" class="mono" style="color:{pnl_color};font-weight:600;">{pnl_sign}${unrealized_pnl:,.2f}</span>'
+            f'</div>'
+            f'<div style="margin-top:10px;padding-top:10px;border-top:1px solid {BORDER};">'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+            f'<span style="color:{DANGER};font-size:12px;">🛑 Stop Loss:</span>'
+            f'<span class="mono" style="color:{DANGER};">${sl_price:,.2f}</span>'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;">'
+            f'<span style="color:{SUCCESS};font-size:12px;">🎯 Take Profit:</span>'
+            f'<span class="mono" style="color:{SUCCESS};">${tp_price:,.2f}</span>'
+            f'</div></div></div>'
+        ), unsafe_allow_html=True)
+        # Real-time price update script (reads WebSocket price from localStorage)
         st.markdown(f"""
-        <div class="metric-card" style="border: 1px solid {color};">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span class="metric-label">Current Position</span>
-                <span style="
-                    background: {color};
-                    padding: 4px 12px;
-                    border-radius: 4px;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 12px;
-                ">{icon} {side}</span>
-            </div>
-            <div style="margin-top: 15px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                    <span style="color: #888;">Entry Price:</span>
-                    <span style="color: white;">${entry_price:,.2f}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                    <span style="color: #888;">Current Price:</span>
-                    <span id="sidebar-current-price" style="color: white;">${current_price:,.2f}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                    <span style="color: #888;">Unrealized P&L:</span>
-                    <span id="sidebar-pnl" style="color: {pnl_color}; font-weight: bold;">{pnl_sign}${unrealized_pnl:,.2f}</span>
-                </div>
-                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #333;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                        <span style="color: #ef5350;">🛑 Stop Loss:</span>
-                        <span style="color: #ef5350;">${sl_price:,.2f}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color: #26a69a;">🎯 Take Profit:</span>
-                        <span style="color: #26a69a;">${tp_price:,.2f}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
         <script>
             // Real-time price update from WebSocket via localStorage
             const entryPrice = {entry_price};
@@ -842,7 +834,7 @@ def render_position_card(state: dict, current_price: float, symbol: str = 'BTC/U
                     const pnlEl = document.getElementById('sidebar-pnl');
                     if (pnlEl) {{
                         pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
-                        pnlEl.style.color = pnl >= 0 ? '#26a69a' : '#ef5350';
+                        pnlEl.style.color = pnl >= 0 ? '{SUCCESS}' : '{DANGER}';
                     }}
                 }}
             }}
@@ -861,9 +853,12 @@ def render_trade_history(trades: list):
     action_trades = [t for t in trades if 'action' in t and t['action'] != 'HOLD']
     
     if not action_trades:
-        st.info("No trades yet")
+        st.markdown(card_container(
+            f'<div style="text-align:center;padding:12px;color:{TEXT_MUTED};font-size:13px;">No trades yet</div>'
+        ), unsafe_allow_html=True)
         return
     
+    trade_rows_html = ""
     for trade in reversed(action_trades[-10:]):
         action = trade.get('action', '')
         price = trade.get('price', 0)
@@ -874,52 +869,48 @@ def render_trade_history(trades: list):
         try:
             ts = datetime.fromisoformat(timestamp)
             time_str = ts.strftime('%m/%d %H:%M')
-        except:
+        except Exception:
             time_str = ''
         
         # Determine display based on action and reason
         if 'OPEN_LONG' in action:
-            color = "#26a69a"
+            badge_color = SUCCESS
             side = "LONG"
         elif 'OPEN_SHORT' in action:
-            color = "#ef5350"
+            badge_color = DANGER
             side = "SHORT"
         elif 'CLOSE' in action:
             if reason == 'stop_loss':
-                color = "#ff4444"
+                badge_color = DANGER
                 side = "SL"
             elif reason == 'take_profit':
-                color = "#00ff88"
+                badge_color = SUCCESS
                 side = "TP"
             else:
-                color = "#ffc107"
+                badge_color = WARNING
                 side = "EXIT"
         else:
-            color = "#888"
+            badge_color = TEXT_MUTED
             side = action
         
-        pnl_color = "#26a69a" if pnl >= 0 else "#ef5350"
+        t_pnl_color = SUCCESS if pnl >= 0 else DANGER
         pnl_sign = "+" if pnl >= 0 else ""
         pnl_display = f"{pnl_sign}${pnl:,.2f}" if pnl != 0 else ""
         
-        st.markdown(f"""
-        <div style="
-            background: #1e222d;
-            border-radius: 5px;
-            padding: 10px;
-            margin-bottom: 5px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        ">
-            <div>
-                <span style="color: {color}; font-weight: bold;">{side}</span>
-                <span style="color: #888; font-size: 12px; margin-left: 10px;">${price:,.2f}</span>
-                <span style="color: #555; font-size: 10px; margin-left: 10px;">{time_str}</span>
-            </div>
-            <span style="color: {pnl_color}; font-weight: bold;">{pnl_display}</span>
-        </div>
-        """, unsafe_allow_html=True)
+        trade_rows_html += (
+            f'<div style="background:{BG_CARD_ALT};border-radius:6px;padding:10px 12px;'
+            f'margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;'
+            f'border:1px solid {BORDER};">'
+            f'<div>'
+            f'{status_badge(side, badge_color)}'
+            f' <span class="mono" style="color:{TEXT_PRIMARY};font-size:12px;margin-left:8px;">${price:,.2f}</span>'
+            f' <span style="color:{TEXT_MUTED};font-size:10px;margin-left:8px;">{time_str}</span>'
+            f'</div>'
+            f'<span class="mono" style="color:{t_pnl_color};font-weight:600;font-size:12px;">{pnl_display}</span>'
+            f'</div>'
+        )
+    
+    st.markdown(card_container(trade_rows_html), unsafe_allow_html=True)
 
 
 def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd.DataFrame:
@@ -1043,7 +1034,7 @@ def render_market_analysis_fragment(symbol: str):
     import logging
     logger = logging.getLogger(__name__)
     
-    st.markdown("### 📊 Market Analysis")
+    st.markdown(section_header("Market Analysis", "📊"), unsafe_allow_html=True)
     
     # Fetch Market Analysis for current asset
     market_data = {}
@@ -1053,43 +1044,37 @@ def render_market_analysis_fragment(symbol: str):
         if market_resp.status_code == 200:
             market_data = market_resp.json()
         else:
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">📊 Market Analysis</div>
-                <div style="color: #ef5350; font-size: 12px;">API error (HTTP {market_resp.status_code})</div>
-                <div style="color: #888; font-size: 10px; margin-top:5px;">Server returned non-200 for /api/market</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(error_card(
+                f"API error (HTTP {market_resp.status_code})",
+                "Server returned non-200 for /api/market"
+            ), unsafe_allow_html=True)
             return
     except Exception as e:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">📊 Market Analysis</div>
-            <div style="color: #ef5350; font-size: 12px;">Unable to load (API server offline?)</div>
-            <div style="color: #888; font-size: 10px; margin-top:5px;">Error: {str(e)}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(error_card(
+            "Unable to load (API server offline?)",
+            str(e)
+        ), unsafe_allow_html=True)
         return
 
     # Whale Tracker
     whale = market_data.get('whale', {})
     if whale:
         if whale.get('error'):
-             st.markdown(f"""
-             <div class="metric-card">
-                 <div class="metric-label">🐋 Whale Signals</div>
-                 <div style="color: #ef5350; font-size: 12px;">Data Error</div>
-                 <div style="color: #888; font-size: 10px;">{whale.get('error')}</div>
-             </div>
-             """, unsafe_allow_html=True)
+            st.markdown(error_card("🐋 Whale Signals — Data Error", whale.get('error')), unsafe_allow_html=True)
         else:
-            whale_color = "#26a69a" if whale.get('score', 0) > 0 else "#ef5350" if whale.get('score', 0) < 0 else "#888"
-            whale_emoji = "🟢" if whale.get('score', 0) > 0.1 else "🔴" if whale.get('score', 0) < -0.1 else "⚪"
+            w_score = whale.get('score', 0)
+            w_direction = whale.get('direction', 'NEUTRAL')
+            if w_score > 0:
+                w_badge_color = SUCCESS
+            elif w_score < 0:
+                w_badge_color = DANGER
+            else:
+                w_badge_color = TEXT_MUTED
             
             # Format Flow Metrics
             flow_metrics = whale.get('flow_metrics', {})
             net_flow = flow_metrics.get('net_flow', 0)
-            flow_color = "#26a69a" if net_flow > 0 else "#ef5350"
+            flow_color = SUCCESS if net_flow > 0 else DANGER
             flow_sign = "+" if net_flow > 0 else "-"
             
             # Format to K or M
@@ -1100,17 +1085,16 @@ def render_market_analysis_fragment(symbol: str):
             else:
                 flow_str = "$0"
             
-            st.markdown(f"""
-            <div class="metric-card">
-                <div class="metric-label">🐋 Whale Signals</div>
-                <div style="color: {whale_color}; font-size: 14px;">{whale_emoji} {whale.get('direction', 'NEUTRAL')}</div>
-                <div style="color: #888; font-size: 11px;">
-                    Score: {whale.get('score', 0):.2f} | Conf: {whale.get('confidence', 0)}%<br>
-                    Flow (1m): <span style="color: {flow_color}; font-weight: bold;">{flow_str}</span><br>
-                    🟢{whale.get('bullish', 0)} 🔴{whale.get('bearish', 0)} ⚪{whale.get('neutral', 0)}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(card_container(
+                f'<div class="ds-card-label">🐋 Whale Signals</div>'
+                f'<div style="margin:6px 0;">{status_badge(w_direction, w_badge_color)}</div>'
+                f'<div style="color:{TEXT_MUTED};font-size:11px;line-height:1.6;">'
+                f'Score: <span class="mono" style="color:{TEXT_PRIMARY};">{w_score:.2f}</span>'
+                f' | Conf: <span class="mono" style="color:{TEXT_PRIMARY};">{whale.get("confidence", 0)}%</span><br>'
+                f'Flow (1m): <span class="mono" style="color:{flow_color};font-weight:600;">{flow_str}</span><br>'
+                f'🟢{whale.get("bullish", 0)} 🔴{whale.get("bearish", 0)} ⚪{whale.get("neutral", 0)}'
+                f'</div>'
+            ), unsafe_allow_html=True)
     
     # Funding
     funding_data = market_data.get('funding', {})
@@ -1118,24 +1102,26 @@ def render_market_analysis_fragment(symbol: str):
     if funding_data and not funding_data.get('error'):
          # Extract funding rate
          rate = funding_data.get('rate', 0)
-         funding_color = "#26a69a" if rate > 0.0001 else "#ef5350" if rate < -0.0001 else "#888"
+         rate_color = SUCCESS if rate > 0.0001 else DANGER if rate < -0.0001 else TEXT_MUTED
+         bias = funding_data.get('bias', 'neutral')
+         bias_color = SUCCESS if bias == 'bullish' else DANGER if bias == 'bearish' else TEXT_MUTED
          
-         st.markdown(f"""
-         <div class="metric-card">
-             <div class="metric-label">💰 Funding Rate</div>
-             <div style="color: {funding_color}; font-size: 14px;">{rate:.4f}%</div>
-             <div style="color: #888; font-size: 11px;">
-                 Bias: {funding_data.get('bias', 'neutral')} | APR: {funding_data.get('annualized', 0):.1f}%
-             </div>
-         </div>
-         """, unsafe_allow_html=True)
+         st.markdown(card_container(
+             f'<div class="ds-card-label">💰 Funding Rate</div>'
+             f'<div style="margin:6px 0;font-size:18px;font-weight:700;">'
+             f'<span class="mono" style="color:{rate_color};">{rate:.4f}%</span></div>'
+             f'<div style="color:{TEXT_MUTED};font-size:11px;">'
+             f'Bias: {status_badge(bias.upper(), bias_color)}'
+             f' | APR: <span class="mono" style="color:{TEXT_PRIMARY};">{funding_data.get("annualized", 0):.1f}%</span>'
+             f'</div>'
+         ), unsafe_allow_html=True)
     
     # Order Flow (enhanced 3-layer)
     order_flow = market_data.get('order_flow', {})
     if order_flow and not order_flow.get('error'):
         of_bias = order_flow.get('bias', 'neutral')
         of_score = order_flow.get('score', 0)
-        of_color = "#26a69a" if of_bias == 'bullish' else "#ef5350" if of_bias == 'bearish' else "#888"
+        of_badge_color = SUCCESS if of_bias == 'bullish' else DANGER if of_bias == 'bearish' else TEXT_MUTED
         
         # Layer details
         cvd_data = order_flow.get('cvd', {})
@@ -1147,16 +1133,19 @@ def render_market_analysis_fragment(symbol: str):
         notable_buys = notable_data.get('large_buys', order_flow.get('large_buys', 0))
         notable_sells = notable_data.get('large_sells', order_flow.get('large_sells', 0))
         
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">📊 Order Flow</div>
-            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()} ({(of_score or 0):+.2f})</div>
-            <div style="color: #888; font-size: 11px;">
-                CVD: {cvd_trend} | Taker Buy: {taker_ratio:.0%}<br/>
-                Notable: B:{notable_buys} / S:{notable_sells}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(card_container(
+            f'<div class="ds-card-label">📊 Order Flow</div>'
+            f'<div style="margin:6px 0;">'
+            f'{status_badge(of_bias.upper(), of_badge_color)}'
+            f' <span class="mono" style="color:{TEXT_PRIMARY};font-size:13px;">({(of_score or 0):+.2f})</span>'
+            f'</div>'
+            f'<div style="color:{TEXT_MUTED};font-size:11px;line-height:1.6;">'
+            f'CVD: <span style="color:{TEXT_PRIMARY};">{_esc(cvd_trend)}</span>'
+            f' | Taker Buy: <span class="mono" style="color:{TEXT_PRIMARY};">{taker_ratio:.0%}</span><br/>'
+            f'Notable: <span style="color:{SUCCESS};">B:{notable_buys}</span>'
+            f' / <span style="color:{DANGER};">S:{notable_sells}</span>'
+            f'</div>'
+        ), unsafe_allow_html=True)
 
     # News Sentiment - DISABLED (not reliable, removed per user request)
     # Commented out - news sentiment disabled in trading logic
@@ -1202,32 +1191,36 @@ def render_market_analysis_fragment(symbol: str):
     if regime_data and not regime_data.get('error'):
         r_type = regime_data.get('type', 'UNKNOWN')
         # Colors: Green for Bull, Red for Bear, Orange for Breakout, Blue for Range
-        r_color = "#26a69a" if "BULL" in r_type else "#ef5350" if "BEAR" in r_type else "#ffa726" if "BREAKOUT" in r_type else "#42a5f5"
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">👑 Market Regime (HMM)</div>
-            <div style="color: {r_color}; font-size: 14px; font-weight: bold;">{r_type.replace('_', ' ')}</div>
-            <div style="color: #888; font-size: 11px;">
-                ADX: {regime_data.get('adx', 0)} | Volatility: {regime_data.get('volatility', 1.0)}x
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        r_color = SUCCESS if "BULL" in r_type else DANGER if "BEAR" in r_type else WARNING if "BREAKOUT" in r_type else ACCENT
+        st.markdown(card_container(
+            f'<div class="ds-card-label">👑 Market Regime (HMM)</div>'
+            f'<div style="margin:6px 0;">{status_badge(r_type.replace("_", " "), r_color)}</div>'
+            f'<div style="color:{TEXT_MUTED};font-size:11px;">'
+            f'ADX: <span class="mono" style="color:{TEXT_PRIMARY};">{regime_data.get("adx", 0)}</span>'
+            f' | Volatility: <span class="mono" style="color:{TEXT_PRIMARY};">{regime_data.get("volatility", 1.0)}x</span>'
+            f'</div>'
+        ), unsafe_allow_html=True)
 
     # TFT Forecast
     forecast = market_data.get('forecast')
     if forecast:
         ret_4h = forecast.get('return_4h', 0)
-        fc_color = "#26a69a" if ret_4h > 0 else "#ef5350" if ret_4h < 0 else "#888"
-        fc_sign = "+" if ret_4h > 0 else ""
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">🚀 AI Price Forecast (TFT)</div>
-            <div style="color: {fc_color}; font-size: 14px;">4h: {fc_sign}{ret_4h}% | 12h: {forecast.get('return_12h', 0)}%</div>
-            <div style="color: #888; font-size: 11px;">
-                Consensus: {forecast.get('consensus', 0):.2f} | Confidence: {forecast.get('confidence', 0):.2f}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        ret_12h = forecast.get('return_12h', 0)
+        fc_color_4h = SUCCESS if ret_4h > 0 else DANGER if ret_4h < 0 else TEXT_MUTED
+        fc_color_12h = SUCCESS if ret_12h > 0 else DANGER if ret_12h < 0 else TEXT_MUTED
+        fc_sign_4h = "+" if ret_4h > 0 else ""
+        fc_sign_12h = "+" if ret_12h > 0 else ""
+        st.markdown(card_container(
+            f'<div class="ds-card-label">🚀 AI Price Forecast (TFT)</div>'
+            f'<div style="margin:6px 0;font-size:14px;">'
+            f'4h: <span class="mono" style="color:{fc_color_4h};font-weight:600;">{fc_sign_4h}{ret_4h}%</span>'
+            f' | 12h: <span class="mono" style="color:{fc_color_12h};font-weight:600;">{fc_sign_12h}{ret_12h}%</span>'
+            f'</div>'
+            f'<div style="color:{TEXT_MUTED};font-size:11px;">'
+            f'Consensus: <span class="mono" style="color:{TEXT_PRIMARY};">{forecast.get("consensus", 0):.2f}</span>'
+            f' | Confidence: <span class="mono" style="color:{TEXT_PRIMARY};">{forecast.get("confidence", 0):.2f}</span>'
+            f'</div>'
+        ), unsafe_allow_html=True)
 
     # Ensemble Confidence Engine
     confidence = market_data.get('ensemble_confidence')
@@ -1235,22 +1228,17 @@ def render_market_analysis_fragment(symbol: str):
         conf_pct = min(100, max(0, int(confidence * 100)))
         # Map 0-1.0 to 0.25x - 2.0x for UI display (matching the ConfidenceEngine logic roughly)
         mult = 0.25 + 1.75 * confidence if confidence < 0.5 else 1.0 + 1.0 * (confidence - 0.5) * 2  # Approximate for UI
-        c_color = "#26a69a" if confidence > 0.6 else "#ffa726" if confidence > 0.35 else "#ef5350"
+        c_color = SUCCESS if confidence > 0.6 else WARNING if confidence > 0.35 else DANGER
         
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">🧠 Ensemble Agreement</div>
-            <div style="color: {c_color}; font-size: 14px;">{conf_pct}% Alignment</div>
-            <div style="color: #888; font-size: 11px;">
-                Position Size Multiplier: ~{mult:.1f}x
-            </div>
-            
-            <!-- Progress Bar -->
-            <div style="width: 100%; background-color: #333; height: 4px; border-radius: 2px; margin-top: 5px;">
-                <div style="width: {conf_pct}%; background-color: {c_color}; height: 100%; border-radius: 2px;"></div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(card_container(
+            f'<div class="ds-card-label">🧠 Ensemble Agreement</div>'
+            f'<div style="margin:6px 0;font-size:18px;font-weight:700;">'
+            f'<span class="mono" style="color:{c_color};">{conf_pct}% Alignment</span></div>'
+            f'<div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:8px;">'
+            f'Position Size Multiplier: <span class="mono" style="color:{TEXT_PRIMARY};">~{mult:.1f}x</span>'
+            f'</div>'
+            f'{progress_bar(conf_pct, 100, c_color)}'
+        ), unsafe_allow_html=True)
 
 @st.fragment(run_every=30)
 def render_position_fragment(symbol: str):
@@ -1535,8 +1523,10 @@ def main():
         env = os.getenv("ENVIRONMENT", "production").lower()
         if env in ["dev", "development"]:
             st.divider()
-            st.markdown("### 🔄 Database Reset")
-            st.warning("⚠️ This will clear all trades and positions!")
+            st.markdown(f'<div class="ds-card-label" style="margin-top:8px;">🔄 Database Reset</div>', unsafe_allow_html=True)
+            st.markdown(card_container(
+                f'<div style="color:{DANGER};font-size:12px;font-weight:600;">⚠️ This will clear all trades and positions!</div>'
+            ), unsafe_allow_html=True)
 
             if st.button("🗑️ Reset All Trades", type="primary"):
                 try:
@@ -1588,14 +1578,28 @@ def main():
                 except Exception as e:
                     st.error(f"Ping failed: {e}")
 
-        st.markdown("### 🔑 API Status")
+        st.markdown(f'<div class="ds-card-label" style="margin-top:16px;">🔑 API Status</div>', unsafe_allow_html=True)
         eth_key = os.environ.get("ETHERSCAN_API_KEY")
         sol_key = os.environ.get("SOLSCAN_API_KEY")
         xrp_key = os.environ.get("XRPSCAN_API_KEY")
         
-        st.caption(f"ETH: {'✅ Set' if eth_key else '❌ Missing'}")
-        st.caption(f"SOL: {'✅ Set' if sol_key else '❌ Missing'}")
-        st.caption(f"XRP: {'✅ Set' if xrp_key else '⚪ Optional (Public)'}")
+        api_status_html = (
+            f'<div style="display:flex;flex-direction:column;gap:6px;">'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">ETH</span>'
+            f'{status_badge("SET", SUCCESS) if eth_key else status_badge("MISSING", DANGER)}'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">SOL</span>'
+            f'{status_badge("SET", SUCCESS) if sol_key else status_badge("MISSING", DANGER)}'
+            f'</div>'
+            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+            f'<span style="color:{TEXT_MUTED};font-size:12px;">XRP</span>'
+            f'{status_badge("SET", SUCCESS) if xrp_key else status_badge("OPTIONAL", TEXT_MUTED)}'
+            f'</div>'
+            f'</div>'
+        )
+        st.markdown(card_container(api_status_html), unsafe_allow_html=True)
 
         
     # Header
@@ -1608,8 +1612,8 @@ def main():
         refresh_status = "🔄 Auto (10s)" if st.session_state.auto_refresh else "⏸️ Paused"
         st.markdown(f"""
         <div style="text-align: right; padding-top: 10px;">
-            <span style="color: #00e676; font-size: 14px;">🟢 Connected</span><br>
-            <span style="color: #8b949e; font-size: 12px;">{refresh_status}</span>
+            <span style="color: {SUCCESS}; font-size: 14px;">🟢 Connected</span><br>
+            <span style="color: {TEXT_MUTED}; font-size: 12px;">{refresh_status}</span>
         </div>
         """, unsafe_allow_html=True)
     
