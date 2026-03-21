@@ -1977,263 +1977,177 @@ def main():
                              check_process_running("api_server"))
             status_dot = '🟢' if is_online else '🔴'
             status_text = 'Online' if is_online else 'Offline'
-            status_color = '#00e676' if is_online else '#ff5252'
+            status_color = SUCCESS if is_online else DANGER
             
-            # Color helpers
-            def pnl_color(val):
-                return '#00e676' if val >= 0 else '#ff5252'
-            
-            def pnl_sign(val):
-                return '+' if val >= 0 else '-'
-            
-            # ─── Build the Live Portfolio HTML ───
-            # Equity curve data for SVG chart (pure inline, no CDN)
-            eq_pct = list(equity_points)  # absolute PnL values; SVG normalizes by range
-            
-            # Build SVG polyline points
-            svg_w = 900
-            svg_h = 160
+            # ─── Render Live Portfolio with Design System ───
+
+            # Header with badges
+            st.markdown(
+                section_header("Live Portfolio", icon="💼")
+                + " " + status_badge("LIVE TRADING", SUCCESS)
+                + " " + status_badge(f"{status_dot} {status_text}", status_color),
+                unsafe_allow_html=True,
+            )
+
+            # ── Metric Row 1: Realized, Open PnL, Win Rate, Trades ──
+            r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1, 1, 1])
+            with r1c1:
+                _rpnl_color = _pnl_color(realized_pnl_total)
+                _rpnl_val = f'{_pnl_sign(realized_pnl_total)}${abs(realized_pnl_total):,.2f}'
+                st.markdown(metric_card(
+                    label="Realized PNL",
+                    value=f'<span style="color:{_rpnl_color}">{_rpnl_val}</span>',
+                ), unsafe_allow_html=True)
+            with r1c2:
+                _opnl_color = _pnl_color(open_pnl_total)
+                _opnl_val = f'{_pnl_sign(open_pnl_total)}${abs(open_pnl_total):,.2f}'
+                st.markdown(metric_card(
+                    label="Open PNL",
+                    value=f'<span style="color:{_opnl_color}">{_opnl_val}</span>',
+                ), unsafe_allow_html=True)
+            with r1c3:
+                _wr_sub = f'<div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px;">{total_winning_trades}W / {total_closed_trades - total_winning_trades}L</div>'
+                st.markdown(metric_card(
+                    label="Win Rate",
+                    value=f'{overall_win_rate:.0f}%',
+                ) + _wr_sub, unsafe_allow_html=True)
+            with r1c4:
+                _tr_sub = f'<div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px;">{total_open_trades} open · {total_closed_trades} closed</div>'
+                st.markdown(metric_card(
+                    label="Trades",
+                    value=str(total_trades_count),
+                ) + _tr_sub, unsafe_allow_html=True)
+
+            # ── Metric Row 2: Portfolio Value, Total P&L, Active Assets ──
+            r2c1, r2c2, r2c3 = st.columns([1, 1, 1])
+            with r2c1:
+                _pv = f'${lp_total_balance:,.2f}' if lp_total_balance is not None else '—'
+                st.markdown(metric_card(label="Portfolio Value", value=_pv), unsafe_allow_html=True)
+            with r2c2:
+                _tpnl_color = _pnl_color(lp_grand_total_pnl)
+                _tpnl_val = f'{_pnl_sign(lp_grand_total_pnl)}${abs(lp_grand_total_pnl):,.2f}'
+                st.markdown(metric_card(
+                    label="Total P&L",
+                    value=f'<span style="color:{_tpnl_color}">{_tpnl_val}</span>',
+                ), unsafe_allow_html=True)
+            with r2c3:
+                st.markdown(metric_card(label="Active Assets", value=str(lp_active_assets_count)), unsafe_allow_html=True)
+
+            # ── Equity Curve (Pure SVG — no external deps) ──
+            eq_pct = list(equity_points)
+            svg_w, svg_h = 900, 160
             n_points = len(eq_pct)
             eq_min_val = min(eq_pct) if eq_pct else 0
             eq_max_val = max(eq_pct) if eq_pct else 0
             eq_range_val = max(abs(eq_min_val), abs(eq_max_val), 0.01)
-            padding_y = 20  # vertical padding
-            
+            padding_y = 20
+
             svg_points = []
             svg_fill_points = []
             for i, val in enumerate(eq_pct):
                 x = (i / max(n_points - 1, 1)) * svg_w
-                # Map value from [-range, +range] to [svg_h - padding, padding]
                 y = svg_h - padding_y - ((val + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
                 svg_points.append(f"{x:.1f},{y:.1f}")
                 svg_fill_points.append(f"{x:.1f},{y:.1f}")
-            
+
             polyline_str = ' '.join(svg_points)
-            # Close the fill polygon at bottom
             fill_points = svg_fill_points.copy()
             if fill_points:
                 fill_points.append(f"{svg_w:.1f},{svg_h - padding_y:.1f}")
                 fill_points.append(f"0,{svg_h - padding_y:.1f}")
             fill_str = ' '.join(fill_points)
-            
+
             last_eq = eq_pct[-1] if eq_pct else 0
-            line_color = '#00e676' if last_eq >= 0 else '#ff5252'
-            fill_color_start = 'rgba(0,230,118,0.3)' if last_eq >= 0 else 'rgba(255,82,82,0.3)'
-            fill_color_end = 'rgba(0,230,118,0.0)' if last_eq >= 0 else 'rgba(255,82,82,0.0)'
-            
-            # Zero line Y position
+            eq_line_color = SUCCESS if last_eq >= 0 else DANGER
+            fill_color_start = f'rgba(16,185,129,0.3)' if last_eq >= 0 else f'rgba(239,68,68,0.3)'
+            fill_color_end = f'rgba(16,185,129,0.0)' if last_eq >= 0 else f'rgba(239,68,68,0.0)'
             zero_y = svg_h - padding_y - ((0 + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
-            
-            # Last point for dot
             last_x = svg_w if n_points <= 1 else ((n_points - 1) / max(n_points - 1, 1)) * svg_w
             last_y = svg_h - padding_y - ((last_eq + eq_range_val) / (2 * eq_range_val)) * (svg_h - 2 * padding_y)
-            
-            # Y-axis labels
             top_label = f"+{eq_range_val:.1f}%"
             bot_label = f"-{eq_range_val:.1f}%"
-            
-            svg_chart = f'''
-                <svg width="100%" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="none" style="display:block;">
-                    <defs>
-                        <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stop-color="{fill_color_start}"/>
-                            <stop offset="100%" stop-color="{fill_color_end}"/>
-                        </linearGradient>
-                    </defs>
-                    <!-- Zero line -->
-                    <line x1="0" y1="{zero_y:.1f}" x2="{svg_w}" y2="{zero_y:.1f}" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4,4"/>
-                    <!-- Fill area -->
-                    <polygon points="{fill_str}" fill="url(#eqGrad)"/>
-                    <!-- Line -->
-                    <polyline points="{polyline_str}" fill="none" stroke="{line_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <!-- Last point dot -->
-                    <circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="4" fill="{line_color}" stroke="#fff" stroke-width="1.5"/>
-                    <!-- Labels -->
-                    <text x="{svg_w - 5}" y="{padding_y + 4}" fill="#8b949e" font-size="10" text-anchor="end" font-family="monospace">{top_label}</text>
-                    <text x="{svg_w - 5}" y="{svg_h - padding_y + 12}" fill="#8b949e" font-size="10" text-anchor="end" font-family="monospace">{bot_label}</text>
-                    <text x="5" y="{zero_y - 4:.1f}" fill="#555" font-size="9" font-family="monospace">0%</text>
-                </svg>
-            '''
-            
-            # Build asset rows HTML
-            asset_rows_html = ''
+
+            svg_chart = f'''<svg width="100%" viewBox="0 0 {svg_w} {svg_h}" preserveAspectRatio="none" style="display:block;">
+                <defs><linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="{fill_color_start}"/>
+                    <stop offset="100%" stop-color="{fill_color_end}"/>
+                </linearGradient></defs>
+                <line x1="0" y1="{zero_y:.1f}" x2="{svg_w}" y2="{zero_y:.1f}" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4,4"/>
+                <polygon points="{fill_str}" fill="url(#eqGrad)"/>
+                <polyline points="{polyline_str}" fill="none" stroke="{eq_line_color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="{last_x:.1f}" cy="{last_y:.1f}" r="4" fill="{eq_line_color}" stroke="#fff" stroke-width="1.5"/>
+                <text x="{svg_w - 5}" y="{padding_y + 4}" fill="{TEXT_MUTED}" font-size="10" text-anchor="end" font-family="monospace">{top_label}</text>
+                <text x="{svg_w - 5}" y="{svg_h - padding_y + 12}" fill="{TEXT_MUTED}" font-size="10" text-anchor="end" font-family="monospace">{bot_label}</text>
+                <text x="5" y="{zero_y - 4:.1f}" fill="{BORDER}" font-size="9" font-family="monospace">0%</text>
+            </svg>'''
+
+            eq_inner = (
+                f'<div style="font-size:15px;font-weight:600;color:{TEXT_PRIMARY};margin-bottom:2px;">Equity Curve</div>'
+                f'<div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:12px;">Cumulative P&amp;L from closed trades</div>'
+                + svg_chart
+            )
+            st.markdown(card_container(eq_inner), unsafe_allow_html=True)
+
+            # ── Asset Table using styled_table() ──
+            table_headers = ["Asset", "Status", "Price", "Equity", "PNL ($)", "Trades", "Win Rate", "Best", "Worst"]
+            table_rows = []
             for row in asset_rows:
-                # Status badge
+                # Status badge via design system
                 if row['status'] == 'LONG':
-                    status_html = '<span style="background:#1b3a26;color:#00e676;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;">● LONG</span>'
+                    row_status = status_badge("● LONG", SUCCESS)
                 elif row['status'] == 'SHORT':
-                    status_html = '<span style="background:#3a1b1b;color:#ff5252;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;">● SHORT</span>'
+                    row_status = status_badge("● SHORT", DANGER)
                 else:
-                    status_html = '<span style="background:#2a2e39;color:#888;padding:3px 10px;border-radius:4px;font-size:11px;">● —</span>'
-                
-                # PNL
-                pnl_val = row['pnl']
-                pnl_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;">—</span>'
-                pnl_dollar_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;font-family:monospace;">{pnl_sign(pnl_val)}${abs(pnl_val):,.2f}</span>'
-                
+                    row_status = status_badge("● FLAT", TEXT_MUTED)
+
+                # PnL via design system
+                row_pnl = pnl_text(row['pnl'])
+
                 # Trades
                 trades_str = str(row['trades'])
                 if row['open_trades'] > 0:
-                    trades_str += f' <span style="color:#888;">(+{row["open_trades"]})</span>'
-                
-                # Win rate bar
-                wr = row['win_rate']
-                bar_color = '#00e676' if wr >= 50 else '#ff9800' if wr > 0 else '#555'
-                wr_html = f'''
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <div style="flex:1;background:#1a1e2a;border-radius:4px;height:8px;overflow:hidden;min-width:60px;">
-                            <div style="width:{wr}%;height:100%;background:{bar_color};border-radius:4px;"></div>
-                        </div>
-                        <span style="color:#ccc;font-size:12px;min-width:35px;">{wr:.0f}%</span>
-                    </div>
-                '''
-                
-                # Best
-                if row['best'] is not None:
-                    best_html = f'<span style="color:#00e676;">{pnl_sign(row["best"])}${abs(row["best"]):,.2f}</span>'
-                else:
-                    best_html = '<span style="color:#555;">—</span>'
+                    trades_str += f' <span style="color:{TEXT_MUTED};">(+{row["open_trades"]})</span>'
 
-                # Worst
-                if row['worst'] is not None:
-                    worst_html = f'<span style="color:#ff5252;">-${abs(row["worst"]):,.2f}</span>'
-                else:
-                    worst_html = '<span style="color:#555;">—</span>'
-                
-                asset_rows_html += f'''
-                <tr style="border-bottom:1px solid #1a1e2a;">
-                    <td style="padding:14px 16px;font-weight:600;color:#fff;font-size:13px;">
-                        {row['symbol']}
-                    </td>
-                    <td style="padding:14px 16px;">{status_html}</td>
-                    <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['price']:,.2f}</td>
-                    <td style="padding:14px 16px;text-align:right;color:#ccc;font-size:13px;font-family:monospace;">${row['equity']:,.2f}</td>
-                    <td style="padding:14px 16px;">{pnl_html}</td>
-                    <td style="padding:14px 16px;">{pnl_dollar_html}</td>
-                    <td style="padding:14px 16px;color:#ccc;font-size:13px;">{trades_str}</td>
-                    <td style="padding:14px 16px;min-width:100px;">{wr_html}</td>
-                    <td style="padding:14px 16px;">{best_html}</td>
-                    <td style="padding:14px 16px;">{worst_html}</td>
-                </tr>
-                '''
-            
-            if not asset_rows_html:
-                asset_rows_html = '''
-                <tr>
-                    <td colspan="10" style="padding:30px;text-align:center;color:#555;font-size:14px;">
-                        No trades recorded yet. Start the trading bot to see portfolio data.
-                    </td>
-                </tr>
-                '''
-            
-            portfolio_html = f'''
-            <div style="
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                background: #0d1117;
-                color: #fff;
-                padding: 0;
-            ">
-                <!-- Header -->
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <span style="font-size:22px;font-weight:700;color:#fff;">Live Portfolio</span>
-                    <span style="
-                        background: #1a6b3c;
-                        color: #00e676;
-                        padding: 3px 10px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        font-weight: 700;
-                        letter-spacing: 1px;
-                        text-transform: uppercase;
-                    ">LIVE TRADING</span>
-                    <span style="
-                        background: {'#1b3a26' if is_online else '#3a1b1b'};
-                        color: {status_color};
-                        padding: 3px 10px;
-                        border-radius: 4px;
-                        font-size: 10px;
-                        font-weight: 700;
-                        letter-spacing: 1px;
-                        margin-left: 4px;
-                    ">{status_dot} {status_text}</span>
-                </div>
-                
-                <!-- Metric Cards Row 1 -->
-                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Realized PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pnl_total)}${abs(realized_pnl_total):,.2f}</div>
-                    </div>
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Open PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pnl_total)}${abs(open_pnl_total):,.2f}</div>
-                    </div>
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Win Rate</div>
-                        <div style="font-size:26px;font-weight:700;color:#fff;">{overall_win_rate:.0f}%</div>
-                        <div style="color:#8b949e;font-size:11px;">{total_winning_trades}W / {total_closed_trades - total_winning_trades}L</div>
-                    </div>
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Trades</div>
-                        <div style="font-size:26px;font-weight:700;color:#fff;">{total_trades_count}</div>
-                        <div style="color:#8b949e;font-size:11px;">{total_open_trades} open · {total_closed_trades} closed</div>
-                    </div>
-                </div>
-                
-                <!-- Metric Cards Row 2 (Dollar Values) -->
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;">
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Portfolio Value</div>
-                        <div style="font-size:22px;font-weight:700;color:#fff;">{f'${lp_total_balance:,.2f}' if lp_total_balance is not None else '—'}</div>
-                    </div>
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total P&L</div>
-                        <div style="font-size:22px;font-weight:700;color:{pnl_color(lp_grand_total_pnl)};">{pnl_sign(lp_grand_total_pnl)}${abs(lp_grand_total_pnl):,.2f}</div>
-                    </div>
-                    <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
-                        <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Active Assets</div>
-                        <div style="font-size:22px;font-weight:700;color:#fff;">{lp_active_assets_count}</div>
-                    </div>
-                </div>
-                
-                <!-- Equity Curve (Pure SVG — no external deps) -->
-                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:20px;margin-bottom:24px;">
-                    <div style="font-size:15px;font-weight:600;color:#fff;margin-bottom:2px;">Equity Curve</div>
-                    <div style="color:#8b949e;font-size:11px;margin-bottom:12px;">Cumulative P&L from closed trades</div>
-                    {svg_chart}
-                </div>
-                
-                <!-- Asset Table -->
-                <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;overflow-x:auto;overflow-y:hidden;">
-                    <table style="width:100%;min-width:1200px;border-collapse:collapse;">
-                        <thead>
-                            <tr style="border-bottom:1px solid #21262d;">
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Asset</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Status</th>
-                                <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Price</th>
-                                <th style="padding:12px 16px;text-align:right;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Equity</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL (%)</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">PNL ($)</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Trades</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Win Rate</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Best</th>
-                                <th style="padding:12px 16px;text-align:left;color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Worst</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {asset_rows_html}
-                        </tbody>
-                    </table>
-                </div>
-                
-                <!-- Footer -->
-                <div style="text-align:center;color:#555;font-size:11px;margin-top:16px;">
-                    DRL Trading System · Signals from PPO + Composite Scoring · Connected to OKX
-                </div>
-            </div>
-            '''
-            
-            components.html(portfolio_html, height=950, scrolling=True)
+                # Win rate with progress bar
+                wr = row['win_rate']
+                wr_color = SUCCESS if wr >= 50 else WARNING if wr > 0 else TEXT_MUTED
+                wr_cell = (
+                    f'<div style="display:flex;align-items:center;gap:8px;">'
+                    f'<div style="flex:1;min-width:60px;">{progress_bar(wr, 100, wr_color)}</div>'
+                    f'<span style="color:{TEXT_PRIMARY};font-size:12px;min-width:35px;">{wr:.0f}%</span>'
+                    f'</div>'
+                )
+
+                # Best / Worst
+                best_cell = pnl_text(row['best']) if row['best'] is not None else f'<span style="color:{TEXT_MUTED};">—</span>'
+                worst_cell = pnl_text(row['worst']) if row['worst'] is not None else f'<span style="color:{TEXT_MUTED};">—</span>'
+
+                table_rows.append([
+                    f'<span style="font-weight:600;color:{TEXT_PRIMARY};">{_esc(row["symbol"])}</span>',
+                    row_status,
+                    f'<span class="mono" style="color:{TEXT_PRIMARY};">${row["price"]:,.2f}</span>',
+                    f'<span class="mono" style="color:{TEXT_PRIMARY};">${row["equity"]:,.2f}</span>',
+                    row_pnl,
+                    trades_str,
+                    wr_cell,
+                    best_cell,
+                    worst_cell,
+                ])
+
+            if table_rows:
+                st.markdown(styled_table(table_headers, table_rows), unsafe_allow_html=True)
+            else:
+                st.markdown(card_container(
+                    f'<div style="text-align:center;padding:30px;color:{TEXT_MUTED};font-size:14px;">'
+                    f'No trades recorded yet. Start the trading bot to see portfolio data.</div>'
+                ), unsafe_allow_html=True)
+
+            # Footer
+            st.markdown(
+                f'<div style="text-align:center;color:{TEXT_MUTED};font-size:11px;margin-top:16px;">'
+                f'DRL Trading System · Signals from PPO + Composite Scoring · Connected to OKX</div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_performance:
             total_pnl = state.get('realized_pnl', 0)
