@@ -199,17 +199,24 @@ def get_model_info():
     except Exception as e:
         logger.error(f"Failed to load trades for model info: {e}")
     
-    winning = sum(1 for t in trades if t.get('pnl', 0) > 0)
-    total = len(trades)
-    win_rate = (winning / total * 100) if total > 0 else 0
+    # Only count CLOSED trades for win rate (OPEN trades have pnl=0, not relevant)
+    closed_trades = [t for t in trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper()]
+    winning = sum(1 for t in closed_trades if t.get('pnl', 0) > 0)
+    total_closed = len(closed_trades)
+    win_rate = (winning / total_closed * 100) if total_closed > 0 else 0
+    
+    # Calculate total return from realized PnL
+    initial_capital = 20000.0
+    realized_pnl = sum(t.get('pnl', 0) for t in closed_trades)
+    total_return = (realized_pnl / initial_capital * 100) if initial_capital > 0 else None
     
     return jsonify({
         'model_name': 'Ultimate Agent (PPO)',
         'model_exists': model_exists,
         'model_date': model_date,
-        'total_return': None,
+        'total_return': round(total_return, 2) if total_return is not None else None,
         'win_rate': round(win_rate, 1),
-        'total_trades': total,
+        'total_trades': total_closed,
         'winning_trades': winning,
         'balance': balance,
         'timestamp': datetime.now().isoformat()
