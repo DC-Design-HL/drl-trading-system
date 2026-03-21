@@ -284,10 +284,35 @@ class HTFLiveBot:
             "model_path": str(self._model_path) if self._model_path else None,
             "updated_at": datetime.now().isoformat(),
         }
+        # Save to local HTF state file
         try:
             STATE_FILE.write_text(json.dumps(state, indent=2))
         except Exception as exc:
             logger.error("Failed to save state: %s", exc)
+        # Also update shared MongoDB state so Live Portfolio reflects HTF positions
+        try:
+            pos_label = {1: "LONG", -1: "SHORT", 0: "FLAT"}.get(self.position, "FLAT")
+            shared_state = self.storage.load_state()
+            if not shared_state:
+                shared_state = {}
+            assets = shared_state.get("assets", {})
+            assets[self.symbol] = {
+                "position": self.position,
+                "position_label": pos_label,
+                "entry_price": self.position_price,
+                "units": self.position_units,
+                "pnl": self.realized_pnl,
+                "sl_price": self.sl_price,
+                "tp_price": self.tp_price,
+                "source": "htf_agent",
+            }
+            shared_state["assets"] = assets
+            shared_state["total_balance"] = self.balance + sum(
+                a.get("pnl", 0) for a in assets.values()
+            )
+            self.storage.save_state(shared_state)
+        except Exception as exc:
+            logger.debug("Failed to update shared state: %s", exc)
 
     def _load_state(self) -> None:
         if not STATE_FILE.exists():
