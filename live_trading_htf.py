@@ -421,6 +421,13 @@ class HTFLiveBot:
                     "timestamp": datetime.now().isoformat(),
                     "trade": trade,
                     "signals": signal_summary,
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
+                    },
                 }) + "\n")
             logger.info("Trade alert queued: %s %s @ $%.2f",
                         trade.get("action", "?"), trade.get("symbol", "?"),
