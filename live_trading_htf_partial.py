@@ -21,6 +21,12 @@ import sys
 import os
 import time
 import json
+
+def _json_safe(obj):
+    """JSON serializer that handles MongoDB ObjectId and other non-serializable types."""
+    if hasattr(obj, "__str__"):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 import logging
 import argparse
 import threading
@@ -319,7 +325,7 @@ class HTFPartialBot:
         self.trades.append(trade)
         try:
             with open(TRADES_FILE, "a") as f:
-                f.write(json.dumps(trade) + "\n")
+                f.write(json.dumps(trade, default=_json_safe) + "\n")
         except Exception as exc:
             logger.error("Failed to write trade log: %s", exc)
         try:
@@ -397,7 +403,7 @@ class HTFPartialBot:
                         "partial_exits": self.partial_exits,
                         "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
                     },
-                }) + "\n")
+                }, default=_json_safe) + "\n")
             logger.info("Trade alert queued: %s %s @ $%.2f [strategy=partial]",
                         trade.get("action", "?"), trade.get("symbol", "?"),
                         trade.get("price", 0))
