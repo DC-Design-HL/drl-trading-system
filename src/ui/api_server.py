@@ -239,7 +239,8 @@ def get_market_analysis():
     global _MARKET_CACHE
     cached = _MARKET_CACHE.get(clean_symbol)
     if cached and (time.time() - cached['_fetched_at']) < MARKET_CACHE_TTL:
-        return jsonify(cached)
+        response = {k: v for k, v in cached.items() if k != '_fetched_at'}
+        return jsonify(response)
     # ─────────────────────────────────────────────────────────────────────
 
     result = {
@@ -366,8 +367,8 @@ def get_market_analysis():
             signals = whale.get_whale_signals() 
             
             result['whale'] = {
-                'score': round(signals.get('score', 0), 2),
-                'direction': signals.get('direction', 'NEUTRAL'),
+                'score': round(signals.get('combined_score', signals.get('score', 0)), 2),
+                'direction': signals.get('recommendation', signals.get('direction', 'NEUTRAL')).upper(),
                 'confidence': int(signals.get('confidence', 0) * 100),
                 'bullish': signals.get('bullish_signals', 0),
                 'bearish': signals.get('bearish_signals', 0),

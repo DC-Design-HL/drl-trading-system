@@ -559,6 +559,7 @@ class BinanceOITracker:
         self.window_minutes = window_minutes
         self.cache = {}
         self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
+        self.oi_history = deque(maxlen=100)  # Rolling OI/price history for signal computation
     
     def get_oi_signal(self) -> Dict:
         """Get Open Interest trend signal using OKX."""
@@ -925,10 +926,18 @@ class WhaleTracker:
             logger.error(f"Error getting OI signal: {e}")
             signals_raw['oi_trend'] = None
             
-        # 3. Blockchair Large Transactions (25% weight)
+        # 3. Top Trader Positioning (25% weight)
         try:
             blockchair_data = self.blockchair.get_large_transactions()
-            signals_raw['large_txns'] = blockchair_data.get('signal', 0)
+            # Convert bias+strength to a numeric signal: bullish → positive, bearish → negative
+            bias = blockchair_data.get('bias', 'neutral')
+            strength = blockchair_data.get('strength', 0)
+            if bias == 'bullish':
+                signals_raw['large_txns'] = strength
+            elif bias == 'bearish':
+                signals_raw['large_txns'] = -strength
+            else:
+                signals_raw['large_txns'] = 0.0
         except Exception as e:
             logger.error(f"Error getting Blockchair: {e}")
             signals_raw['large_txns'] = None
