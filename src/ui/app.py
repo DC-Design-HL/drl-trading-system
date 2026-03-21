@@ -18,23 +18,39 @@ import os
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.backtest.data_loader import DataLoader, BinanceHistoricalDataFetcher
+try:
+    from src.backtest.data_loader import DataLoader, BinanceHistoricalDataFetcher
+    _HAS_BACKTEST = True
+except ImportError:
+    _HAS_BACKTEST = False
 from src.data.storage import get_storage, JsonFileStorage
 
-# Initialize storage with caching
-@st.cache_resource
-def get_app_storage():
-    return get_storage()
+# True when running as a client-only HF Space (API_SERVER_URL points at remote server)
+IS_CLIENT_MODE = bool(os.environ.get('API_SERVER_URL'))
 
-storage = get_app_storage()
+# API server URL — configurable for remote (local server) or local deployments
+def get_api_url() -> str:
+    """Return the base URL of the Flask API server.
 
-# Page configuration
+    Set API_SERVER_URL env var to point at a remote local server
+    (e.g. https://abc123.ngrok.io). Defaults to localhost:5001.
+    """
+    return os.environ.get('API_SERVER_URL', 'http://127.0.0.1:5001').rstrip('/')
+
+# Page configuration — MUST be first Streamlit command
 st.set_page_config(
     page_title="DRL Trading System",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Initialize storage with caching (must be after set_page_config)
+@st.cache_resource
+def get_app_storage():
+    return get_storage()
+
+storage = get_app_storage()
 
 # Custom CSS — Premium Dark Theme (matches Live Portfolio aesthetic)
 st.markdown("""
@@ -278,10 +294,29 @@ TIMEFRAMES = {
 
 
 def load_trading_log(symbol: str = None) -> list:
-    """Load real trading data from updated storage, filtered by reset timestamp."""
+    """Load real trading data — via API in client mode, local storage otherwise."""
+    import requests as _r
+
+    def _filter_by_symbol(trades, symbol):
+        if not symbol:
+            return trades
+        s1 = symbol.replace('/', '').upper()
+        return [t for t in trades if s1 in t.get('symbol', t.get('asset', '')).replace('/', '').upper()
+                or t.get('symbol', t.get('asset', '')).replace('/', '').upper() in s1]
+
+    if IS_CLIENT_MODE:
+        try:
+            resp = _r.get(f'{get_api_url()}/api/trades', timeout=10)
+            if resp.ok:
+                return _filter_by_symbol(resp.json(), symbol)
+        except Exception:
+            pass
+        return []
+
+    # Local storage mode
     try:
         all_trades = storage.get_trades(limit=1000)
-        
+
         # Filter by reset_timestamp if available (hide pre-reset trades)
         try:
             state = storage.load_state()
@@ -296,23 +331,12 @@ def load_trading_log(symbol: str = None) -> list:
                         if trade_dt >= reset_dt:
                             filtered_by_time.append(trade)
                     except:
-                        filtered_by_time.append(trade)  # Include if can't parse
+                        filtered_by_time.append(trade)
                 all_trades = filtered_by_time
         except:
             pass
-        
-        if not symbol:
-            return all_trades
-            
-        filtered_trades = []
-        for trade in all_trades:
-            # Filter by symbol
-            trade_symbol = trade.get('symbol', trade.get('asset', 'BTC/USDT'))
-            s1 = symbol.replace('/', '').upper()
-            s2 = trade_symbol.replace('/', '').upper()
-            if s1 in s2 or s2 in s1:
-                filtered_trades.append(trade)
-        return filtered_trades
+
+        return _filter_by_symbol(all_trades, symbol)
     except Exception as e:
         st.error(f"Failed to load trades: {e}")
         return []
@@ -360,98 +384,87 @@ def get_last_logs(log_path: Path, lines: int = 50) -> str:
 
 
 def get_trading_state(selected_asset: str = None) -> dict:
-    """Get current trading state from storage."""
+    """Get current trading state — via API in client mode, local storage otherwise."""
+    import requests as _r
+
+    _empty = {'balance': 0, 'realized_pnl': 0, 'multi_asset': True,
+              'whale_alerts': [], 'assets': {}, 'available_assets': []}
+
+    if IS_CLIENT_MODE:
+        try:
+            state_resp = _r.get(f'{get_api_url()}/api/state', timeout=10)
+            state = state_resp.json() if state_resp.ok else {}
+            trades_resp = _r.get(f'{get_api_url()}/api/trades', timeout=10)
+            all_trades = trades_resp.json() if trades_resp.ok else []
+
+            raw_assets = state.get('assets', {})
+
+            if selected_asset:
+                s1 = selected_asset.replace('/', '').upper()
+                asset_trades = [t for t in all_trades
+                                if s1 in t.get('symbol', t.get('asset', '')).replace('/', '').upper()]
+                asset_state = raw_assets.get(selected_asset, raw_assets.get(s1, {}))
+                return {
+                    'balance': state.get('balance', state.get('total_balance', 0)),
+                    'total_balance': state.get('total_balance', state.get('balance', 0)),
+                    'asset_balance': asset_state.get('balance', 0),
+                    'position': asset_state.get('position', 0),
+                    'realized_pnl': state.get('realized_pnl', state.get('total_pnl', 0)),
+                    'total_pnl': state.get('total_pnl', state.get('realized_pnl', 0)),
+                    'asset_pnl': asset_state.get('pnl', 0),
+                    'trades': asset_trades,
+                    'total_trades': len([t for t in asset_trades if 'OPEN' in t.get('action', '')]),
+                    'position_price': asset_state.get('price', 0),
+                    'position_size_units': asset_state.get('units', 0),
+                    'price': asset_state.get('price', 0),
+                    'timestamp': state.get('timestamp'),
+                    'multi_asset': True,
+                    'available_assets': state.get('available_assets') or list(raw_assets.keys()) or ['BTCUSDT'],
+                    'whale_alerts': state.get('whale_alerts', []),
+                    'raw_state': state,
+                    'assets': raw_assets,
+                    'sl': asset_state.get('sl', 0),
+                    'tp': asset_state.get('tp', 0),
+                }
+            else:
+                return {
+                    'balance': state.get('balance', state.get('total_balance', 0)),
+                    'total_balance': state.get('total_balance', state.get('balance', 0)),
+                    'realized_pnl': state.get('realized_pnl', state.get('total_pnl', 0)),
+                    'total_pnl': state.get('total_pnl', state.get('realized_pnl', 0)),
+                    'multi_asset': True,
+                    'available_assets': state.get('available_assets') or list(raw_assets.keys()) or ['BTCUSDT'],
+                    'whale_alerts': state.get('whale_alerts', []),
+                    'raw_state': state,
+                    'assets': raw_assets,
+                }
+        except Exception:
+            pass
+        return _empty
+
+    # ── Local storage mode (server-side only) ──────────────────────────────
     try:
-        # Load state through storage interface
         state = storage.load_state()
-        
+
         if not state:
-            return {
-                'balance': 0, 
-                'realized_pnl': 0, 
-                'multi_asset': True,
-                'available_assets': []
-            }
+            return {**_empty}
 
         # If specific asset selected, return its details mixed with global
         if selected_asset and 'assets' in state and selected_asset in state['assets']:
             asset_state = state['assets'][selected_asset]
             asset_trades = load_trading_log(symbol=selected_asset)
-            
-            # MATHEMATICAL OVERRIDE: Same logic as api_server.py to sync the center dashboard
+
             all_trades = load_trading_log()
-            realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+            realized_pnl = sum(t.get('pnl', 0) for t in all_trades
+                               if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
             raw_assets = state.get('assets', {})
             open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
-            initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
-            
             total_pnl = realized_pnl + open_pnl
-            total_balance = initial_capital + total_pnl
-            
-            # --- Inject Whale Alerts ---
-            import json, time, random
-            from pathlib import Path
-            whale_alerts = []
-            try:
-                whale_dir = Path(__file__).parent.parent.parent / "data" / "whale_wallets"
-                if whale_dir.exists():
-                    from src.features.whale_wallet_registry import get_wallets_by_chain
-                    for chain_dir in whale_dir.iterdir():
-                        if chain_dir.is_dir():
-                            chain = chain_dir.name.upper()
-                            for wallet_file in chain_dir.glob("*.json"):
-                                try:
-                                    with open(wallet_file, "r") as f:
-                                        w_data = json.load(f)
-                                        addr = w_data.get("address", "")
-                                        chain_wallets = get_wallets_by_chain(chain)
-                                        wallet = next((w for w in chain_wallets if w.address.lower() == addr.lower()), None)
-                                        w_label = wallet.label if wallet else f"Unknown {chain} Whale"
-                                        w_type = wallet.wallet_type if wallet else "unknown"
-                                        
-                                        for tx in w_data.get("transactions", [])[-10:]:
-                                            val = float(tx.get('value', 0))
-                                            price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
-                                            usd_val = val * price_map.get(chain, 1)
-                                            if usd_val > 50000:
-                                                whale_alerts.append({
-                                                    'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
-                                                    'timestamp': tx.get('timestamp', int(time.time())),
-                                                    'link': tx.get('link', '#'),
-                                                    'wallet_label': w_label,
-                                                    'wallet_type': w_type,
-                                                    'wallet_address': addr
-                                                })
-                                except: pass
-                if len(whale_alerts) < 50:
-                    from src.features.whale_wallet_registry import get_wallets_by_chain
-                    current_ts = int(time.time())
-                    needed = 50 - len(whale_alerts)
-                    for _ in range(needed):
-                        c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
-                        if c == 'ETH': v = random.uniform(200, 1500)
-                        elif c == 'BTC': v = random.uniform(50, 400)
-                        elif c == 'SOL': v = random.uniform(8000, 45000)
-                        else: v = random.uniform(500000, 2500000)
-                        
-                        cw = get_wallets_by_chain(c)
-                        w = random.choice(cw) if cw else None
-                        w_addr = w.address if w else f"0x{random.randbytes(20).hex()}"
-                        
-                        whale_alerts.append({
-                            'chain': c, 'value': v, 'currency': c,
-                            'timestamp': current_ts - random.randint(120, 86400),
-                            'link': f"https://{c.lower()}scan.io/address/{w_addr}" if c in ['ETH','BTC'] else '#',
-                            'wallet_label': w.label if w else f"Unknown {c} Whale",
-                            'wallet_type': w.wallet_type if w else "unknown",
-                            'wallet_address': w_addr
-                        })
-                if whale_alerts:
-                    whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
-            except Exception as e:
-                pass
+            total_balance = state.get('total_balance', state.get('balance'))
+
+            whale_alerts = _load_whale_alerts_local()
             state['whale_alerts'] = whale_alerts
-            
+
             return {
                 'balance': total_balance,
                 'total_balance': total_balance,
@@ -467,101 +480,82 @@ def get_trading_state(selected_asset: str = None) -> dict:
                 'price': asset_state.get('price', 0),
                 'timestamp': state.get('timestamp'),
                 'multi_asset': True,
-                'available_assets': list(state.get('assets', {}).keys()),
+                'available_assets': state.get('available_assets') or list(state.get('assets', {}).keys()) or ['BTCUSDT'],
                 'whale_alerts': whale_alerts,
                 'raw_state': state,
+                'assets': raw_assets,
                 'sl': asset_state.get('sl', 0),
-                'tp': asset_state.get('tp', 0)
+                'tp': asset_state.get('tp', 0),
             }
-        
-        # Default: return list of assets if no specific one selected (or global view)
-        
-        # MATHEMATICAL OVERRIDE: Global sync
+
+        # Global view
         all_trades = load_trading_log()
-        realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+        realized_pnl = sum(t.get('pnl', 0) for t in all_trades
+                           if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
         raw_assets = state.get('assets', {})
         open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
-        initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
         total_pnl = realized_pnl + open_pnl
-        total_balance = initial_capital + total_pnl
-        
-        # --- Inject Whale Alerts ---
-        import json, time, random
-        from pathlib import Path
-        whale_alerts = []
-        try:
-            whale_dir = Path(__file__).parent.parent.parent / "data" / "whale_wallets"
-            if whale_dir.exists():
-                from src.features.whale_wallet_registry import get_wallets_by_chain
-                for chain_dir in whale_dir.iterdir():
-                    if chain_dir.is_dir():
-                        chain = chain_dir.name.upper()
-                        for wallet_file in chain_dir.glob("*.json"):
-                            try:
-                                with open(wallet_file, "r") as f:
-                                    w_data = json.load(f)
-                                    addr = w_data.get("address", "")
-                                    chain_wallets = get_wallets_by_chain(chain)
-                                    wallet = next((w for w in chain_wallets if w.address.lower() == addr.lower()), None)
-                                    w_label = wallet.label if wallet else f"Unknown {chain} Whale"
-                                    w_type = wallet.wallet_type if wallet else "unknown"
-                                    
-                                    for tx in w_data.get("transactions", [])[-10:]:
-                                        val = float(tx.get('value', 0))
-                                        price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
-                                        usd_val = val * price_map.get(chain, 1)
-                                        if usd_val > 50000:
-                                            whale_alerts.append({
-                                                'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
-                                                'timestamp': tx.get('timestamp', int(time.time())),
-                                                'link': tx.get('link', '#'),
-                                                'wallet_label': w_label,
-                                                'wallet_type': w_type,
-                                                'wallet_address': addr
-                                            })
-                            except: pass
-            if len(whale_alerts) < 50:
-                from src.features.whale_wallet_registry import get_wallets_by_chain
-                current_ts = int(time.time())
-                needed = 50 - len(whale_alerts)
-                for _ in range(needed):
-                    c = random.choice(['ETH', 'SOL', 'XRP', 'BTC'])
-                    if c == 'ETH': v = random.uniform(200, 1500)
-                    elif c == 'BTC': v = random.uniform(50, 400)
-                    elif c == 'SOL': v = random.uniform(8000, 45000)
-                    else: v = random.uniform(500000, 2500000)
-                    
-                    cw = get_wallets_by_chain(c)
-                    w = random.choice(cw) if cw else None
-                    w_addr = w.address if w else f"0x{random.randbytes(20).hex()}"
-                    
-                    whale_alerts.append({
-                        'chain': c, 'value': v, 'currency': c,
-                        'timestamp': current_ts - random.randint(120, 86400),
-                        'link': f"https://{c.lower()}scan.io/address/{w_addr}" if c in ['ETH','BTC'] else '#',
-                        'wallet_label': w.label if w else f"Unknown {c} Whale",
-                        'wallet_type': w.wallet_type if w else "unknown",
-                        'wallet_address': w_addr
-                    })
-            if whale_alerts:
-                whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
-        except Exception as e:
-            pass
+        total_balance = state.get('total_balance', state.get('balance'))
+
+        whale_alerts = _load_whale_alerts_local()
         state['whale_alerts'] = whale_alerts
-        
+
         return {
             'balance': total_balance,
             'total_balance': total_balance,
             'realized_pnl': total_pnl,
             'total_pnl': total_pnl,
             'multi_asset': True,
-            'available_assets': list(state.get('assets', {}).keys()),
+            'available_assets': state.get('available_assets') or list(state.get('assets', {}).keys()) or ['BTCUSDT'],
             'whale_alerts': whale_alerts,
-            'raw_state': state 
+            'raw_state': state,
+            'assets': raw_assets,
         }
-    except Exception as e:
-        # Fallback for empty init
-        return {'balance': 0, 'realized_pnl': 0, 'multi_asset': True}
+    except Exception:
+        return {**_empty}
+
+
+def _load_whale_alerts_local() -> list:
+    """Load whale alerts from local wallet files (server-side only). Returns [] on HF."""
+    import json as _json, time as _time
+    whale_alerts = []
+    try:
+        whale_dir = Path(__file__).parent.parent.parent / "data" / "whale_wallets"
+        if not whale_dir.exists():
+            return []
+        try:
+            from src.features.whale_wallet_registry import get_wallets_by_chain as _gwbc
+        except ImportError:
+            return []
+        for chain_dir in whale_dir.iterdir():
+            if not chain_dir.is_dir():
+                continue
+            chain = chain_dir.name.upper()
+            for wallet_file in chain_dir.glob("*.json"):
+                try:
+                    with open(wallet_file, "r") as f:
+                        w_data = _json.load(f)
+                    addr = w_data.get("address", "")
+                    chain_wallets = _gwbc(chain)
+                    wallet = next((w for w in chain_wallets if w.address.lower() == addr.lower()), None)
+                    w_label = wallet.label if wallet else f"Unknown {chain} Whale"
+                    w_type = wallet.wallet_type if wallet else "unknown"
+                    price_map = {'BTC': 70000, 'ETH': 3500, 'SOL': 150, 'XRP': 0.6}
+                    for tx in w_data.get("transactions", [])[-10:]:
+                        val = float(tx.get('value', 0))
+                        if val * price_map.get(chain, 1) > 50000:
+                            whale_alerts.append({
+                                'chain': chain, 'value': val, 'currency': tx.get('asset', chain),
+                                'timestamp': tx.get('timestamp', int(_time.time())),
+                                'link': tx.get('link', '#'),
+                                'wallet_label': w_label, 'wallet_type': w_type, 'wallet_address': addr,
+                            })
+                except Exception:
+                    pass
+        whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
+    except Exception:
+        pass
+    return whale_alerts
 
 
 def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, timeframe: str = '1h', symbol: str = 'BTC/USDT') -> str:
@@ -1147,27 +1141,89 @@ def render_trade_history(trades: list):
 
 
 def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd.DataFrame:
-    """Load real market data from Binance."""
+    """Load OHLCV candlestick data — via /api/ohlcv or direct Binance public API."""
+    import requests as _mkt_requests
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+
+    clean_symbol = symbol.replace("/", "")
+
+    def _parse_ohlcv_list(data: list) -> pd.DataFrame:
+        """Parse list of {time,open,high,low,close,volume} dicts into DataFrame."""
+        df = pd.DataFrame(data)
+        df.index = pd.to_datetime(df['time'], unit='s')
+        df.index.name = None
+        return df[['open', 'high', 'low', 'close', 'volume']]
+
+    # Primary: /api/ohlcv via local Flask server
+    api_url = get_api_url()
     try:
-        fetcher = BinanceHistoricalDataFetcher()
-        end_date = datetime.now()
-        days = TIMEFRAMES.get(timeframe, {}).get('days', 7)
-        start_date = end_date - timedelta(days=days)
-        
-        # Ensure symbol format is correct (e.g. BTC/USDT)
-        if "USDT" in symbol and "/" not in symbol:
-            symbol = symbol.replace("USDT", "/USDT")
-            
-        df = fetcher.fetch_historical_data(
-            symbol=symbol,
-            timeframe=timeframe,
-            start_date=start_date,
-            end_date=end_date,
+        resp = _mkt_requests.get(
+            f'{api_url}/api/ohlcv',
+            params={'symbol': clean_symbol, 'interval': timeframe, 'limit': 500},
+            timeout=10
         )
-        return df
+        if resp.ok:
+            data = resp.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                return _parse_ohlcv_list(data)
+            else:
+                _logger.warning(f"load_real_market_data: empty/invalid response from {api_url} for {clean_symbol} {timeframe}: {str(data)[:200]}")
+        else:
+            _logger.warning(f"load_real_market_data: HTTP {resp.status_code} from {api_url}/api/ohlcv for {clean_symbol} {timeframe}")
     except Exception as e:
-        st.error(f"Failed to fetch market data for {symbol}: {e}")
-        return pd.DataFrame()
+        _logger.warning(f"load_real_market_data: Flask API unavailable ({api_url}): {e}")
+
+    # Fallback: Direct Binance public API (no auth required, works on HF)
+    try:
+        _logger.info(f"load_real_market_data: trying direct Binance API for {clean_symbol} {timeframe}")
+        binance_url = os.environ.get("BINANCE_FUTURES_URL", "https://data-api.binance.vision")
+        resp = _mkt_requests.get(
+            f"{binance_url}/api/v3/klines",
+            params={'symbol': clean_symbol, 'interval': timeframe, 'limit': 500},
+            timeout=15
+        )
+        if resp.ok:
+            raw = resp.json()
+            if isinstance(raw, list) and len(raw) > 0 and not (isinstance(raw, dict) and raw.get('code')):
+                candles = [
+                    {
+                        'time': int(row[0]) // 1000,
+                        'open': float(row[1]),
+                        'high': float(row[2]),
+                        'low': float(row[3]),
+                        'close': float(row[4]),
+                        'volume': float(row[5]),
+                    }
+                    for row in raw
+                ]
+                _logger.info(f"load_real_market_data: direct Binance returned {len(candles)} candles for {clean_symbol} {timeframe}")
+                return _parse_ohlcv_list(candles)
+            else:
+                _logger.warning(f"load_real_market_data: Binance direct API returned unexpected data: {str(raw)[:200]}")
+        else:
+            _logger.warning(f"load_real_market_data: Binance direct API HTTP {resp.status_code} for {clean_symbol} {timeframe}")
+    except Exception as e:
+        _logger.error(f"load_real_market_data: direct Binance fallback failed: {e}")
+
+    # Final fallback: BinanceHistoricalDataFetcher if backtest module available (local server only)
+    if _HAS_BACKTEST:
+        try:
+            fetcher = BinanceHistoricalDataFetcher()
+            end_date = datetime.now()
+            days = TIMEFRAMES.get(timeframe, {}).get('days', 7)
+            start_date = end_date - timedelta(days=days)
+            if "USDT" in symbol and "/" not in symbol:
+                symbol = symbol.replace("USDT", "/USDT")
+            df = fetcher.fetch_historical_data(
+                symbol=symbol, timeframe=timeframe,
+                start_date=start_date, end_date=end_date,
+            )
+            return df
+        except Exception as e:
+            _logger.error(f"load_real_market_data: BinanceHistoricalDataFetcher failed: {e}")
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 
 
@@ -1180,7 +1236,7 @@ def render_sidebar_metrics_fragment():
     try:
         # Fetch State
         try:
-            state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+            state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
             if state_resp.status_code == 200:
                 api_state = state_resp.json()
                 # Update session state with API data (optional, but good for other parts)
@@ -1192,9 +1248,9 @@ def render_sidebar_metrics_fragment():
             st.markdown(f"""
             <div class="metric-card">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value">${st.session_state.get('portfolio_balance', 10000):,.2f}</div>
-                <div class="metric-delta" style="color: {'#26a69a' if st.session_state.get('total_pnl', 0) >= 0 else '#ef5350'}">
-                    P&L: {'+' if st.session_state.get('total_pnl', 0) >= 0 else ''}${st.session_state.get('total_pnl', 0):,.2f}
+                <div class="metric-value">{f'${st.session_state["portfolio_balance"]:,.2f}' if st.session_state.get('portfolio_balance') is not None else '—'}</div>
+                <div class="metric-delta" style="color: {'#26a69a' if float(st.session_state.get('total_pnl') or 0) >= 0 else '#ef5350'}">
+                    P&L: {'+' if float(st.session_state.get('total_pnl') or 0) >= 0 else ''}${float(st.session_state.get('total_pnl') or 0):,.2f}
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1218,9 +1274,18 @@ def render_market_analysis_fragment(symbol: str):
     market_data = {}
     try:
         api_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={api_symbol}', timeout=15)
+        market_resp = requests.get(f'{get_api_url()}/api/market?symbol={api_symbol}', timeout=15)
         if market_resp.status_code == 200:
             market_data = market_resp.json()
+        else:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="metric-label">📊 Market Analysis</div>
+                <div style="color: #ef5350; font-size: 12px;">API error (HTTP {market_resp.status_code})</div>
+                <div style="color: #888; font-size: 10px; margin-top:5px;">Server returned non-200 for /api/market</div>
+            </div>
+            """, unsafe_allow_html=True)
+            return
     except Exception as e:
         st.markdown(f"""
         <div class="metric-card">
@@ -1310,7 +1375,7 @@ def render_market_analysis_fragment(symbol: str):
         st.markdown(f"""
         <div class="metric-card">
             <div class="metric-label">📊 Order Flow</div>
-            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()} ({of_score:+.2f})</div>
+            <div style="color: {of_color}; font-size: 14px;">{of_bias.upper()} ({(of_score or 0):+.2f})</div>
             <div style="color: #888; font-size: 11px;">
                 CVD: {cvd_trend} | Taker Buy: {taker_ratio:.0%}<br/>
                 Notable: B:{notable_buys} / S:{notable_sells}
@@ -1424,7 +1489,7 @@ def render_position_fragment(symbol: str):
     # 1. Fetch Trading State
     state = {}
     try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
+        state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
         if state_resp.status_code == 200:
             state = state_resp.json()
     except Exception as e:
@@ -1435,7 +1500,7 @@ def render_position_fragment(symbol: str):
     try:
         # Try to get price from market API first (faster)
         clean_symbol = symbol.replace('/', '').upper()
-        market_resp = requests.get(f'http://127.0.0.1:5001/api/market?symbol={clean_symbol}', timeout=5)
+        market_resp = requests.get(f'{get_api_url()}/api/market?symbol={clean_symbol}', timeout=5)
         if market_resp.status_code == 200:
             m_data = market_resp.json()
             if 'price' in m_data:
@@ -1456,7 +1521,7 @@ def render_position_fragment(symbol: str):
     # 3. Fetch ALL Trades early to calculate perfectly mathematically synced global Portfolio Value
     all_trades = []
     try:
-        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=2)
+        trades_resp = requests.get(f'{get_api_url()}/api/trades', timeout=5)
         if trades_resp.status_code == 200:
             all_trades = trades_resp.json()
     except Exception as e:
@@ -1470,22 +1535,19 @@ def render_position_fragment(symbol: str):
         if asset_data.get('position', 0) != 0:
             open_pnl_total += asset_data.get('pnl', 0)
             
-    initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
-    
     if all_trades or raw_assets:
         total_pnl = realized_pnl_total + open_pnl_total
-        balance = initial_capital + total_pnl
     else:
-        balance = state.get('total_balance', state.get('balance', 10000))
         total_pnl = state.get('total_pnl', state.get('realized_pnl', 0))
+    balance = state.get('total_balance', state.get('balance'))
     pnl_class = "metric-delta-positive" if total_pnl >= 0 else "metric-delta-negative"
     pnl_sign = "+" if total_pnl >= 0 else ""
     
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-label">Portfolio Value</div>
-        <div class="metric-value">${balance:,.2f}</div>
-        <div class="{pnl_class}">P&L: {pnl_sign}${total_pnl:,.2f}</div>
+        <div class="metric-value">{f'${balance:,.2f}' if balance is not None else '—'}</div>
+        <div class="{pnl_class}">P&L: {pnl_sign}${(total_pnl or 0):,.2f}</div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1532,91 +1594,96 @@ def render_agent_status_fragment():
     from datetime import datetime
     import logging
     logger = logging.getLogger(__name__)
-    
-    # Fetch State
-    state = {}
-    try:
-        state_resp = requests.get('http://127.0.0.1:5001/api/state', timeout=1)
-        if state_resp.status_code == 200:
-            state = state_resp.json()
-    except Exception as e:
-        pass
-        
-    # Model Info
-    project_root = Path(__file__).parent.parent.parent
-    model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
-    model_exists = model_path.exists()
-    
-    # Fetch trades explicitly for mathematical accuracy
-    all_trades = state.get('trades', [])
-    try:
-        trades_resp = requests.get('http://127.0.0.1:5001/api/trades', timeout=1)
-        if trades_resp.status_code == 200:
-            all_trades = trades_resp.json()
-    except Exception as e:
-        pass
-        
-    # Calculate real mathematical return
-    realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
-    raw_assets = state.get('raw_state', {}).get('assets', {})
 
-    # Calculate unrealized P&L for open positions
-    open_pnl = 0.0
-    for sym, asset_data in raw_assets.items():
-        if asset_data.get('position', 0) != 0:
-            # Get current position details
-            current_price = asset_data.get('price', 0)
-            units = asset_data.get('units', 0)
-            position = asset_data.get('position', 0)
-
-            # Find entry price from last OPEN trade
-            entry_price = 0
-            sym_trades = [t for t in all_trades if t.get('symbol', '').upper() == sym.upper() or t.get('asset', '').upper() == sym.upper()]
-            for t in reversed(sorted(sym_trades, key=lambda x: x.get('timestamp', ''))):
-                if 'OPEN' in t.get('action', '').upper():
-                    entry_price = t.get('price', 0)
-                    break
-
-            # Calculate unrealized P&L
-            if entry_price > 0 and units > 0 and current_price > 0:
-                if position > 0:  # LONG
-                    open_pnl += (current_price - entry_price) * units
-                else:  # SHORT
-                    open_pnl += (entry_price - current_price) * units
-
-    total_pnl = realized_pnl + open_pnl
-    initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
-    
-    total_return = (total_pnl / initial_capital) * 100 if initial_capital > 0 else 0
-    
-    # Calculate actual win rate from trades
-    closed_trades = [t for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper()]
-    if closed_trades:
-        winning = sum(1 for t in closed_trades if t.get('pnl', 0) > 0)
-        total = len(closed_trades)
-        win_rate = (winning / total * 100) if total > 0 else 0
-    else:
-        win_rate = 0
-    
-    # Get model last modified time
-    if model_exists:
+    # In client mode, use /api/model which returns pre-computed model stats
+    if IS_CLIENT_MODE:
         try:
-            model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
-            model_date = model_mtime.strftime("%Y-%m-%d")
-        except:
-            model_date = "Unknown"
+            model_resp = requests.get(f'{get_api_url()}/api/model', timeout=5)
+            if model_resp.status_code == 200:
+                model_info = model_resp.json()
+                total_return = model_info.get('total_return', 0)
+                win_rate = model_info.get('win_rate', 0)
+                total_trades = model_info.get('total_trades', 0)
+                model_date = model_info.get('model_date', 'Remote')
+                model_exists = model_info.get('model_exists', True)
+            else:
+                total_return, win_rate, total_trades = 0, 0, 0
+                model_date, model_exists = 'API error', False
+        except Exception:
+            total_return, win_rate, total_trades = 0, 0, 0
+            model_date, model_exists = 'Connecting...', False
     else:
-        model_date = "Not found"
-    
-    return_color = "#26a69a" if total_return >= 0 else "#ef5350"
-    return_sign = "+" if total_return >= 0 else ""
-    
+        # Local mode: check filesystem and compute from trades
+        project_root = Path(__file__).parent.parent.parent
+        model_path = project_root / 'data' / 'models' / 'ultimate_agent.zip'
+        model_exists = model_path.exists()
+
+        state = {}
+        try:
+            state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
+            if state_resp.status_code == 200:
+                state = state_resp.json()
+        except Exception:
+            pass
+
+        all_trades = state.get('trades', [])
+        try:
+            trades_resp = requests.get(f'{get_api_url()}/api/trades', timeout=5)
+            if trades_resp.status_code == 200:
+                all_trades = trades_resp.json()
+        except Exception:
+            pass
+
+        realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
+        raw_assets = state.get('raw_state', {}).get('assets', {})
+
+        open_pnl = 0.0
+        for sym, asset_data in raw_assets.items():
+            if asset_data.get('position', 0) != 0:
+                current_price = asset_data.get('price', 0)
+                units = asset_data.get('units', 0)
+                position = asset_data.get('position', 0)
+                entry_price = 0
+                sym_trades = [t for t in all_trades if t.get('symbol', '').upper() == sym.upper() or t.get('asset', '').upper() == sym.upper()]
+                for t in reversed(sorted(sym_trades, key=lambda x: x.get('timestamp', ''))):
+                    if 'OPEN' in t.get('action', '').upper():
+                        entry_price = t.get('price', 0)
+                        break
+                if entry_price > 0 and units > 0 and current_price > 0:
+                    if position > 0:
+                        open_pnl += (current_price - entry_price) * units
+                    else:
+                        open_pnl += (entry_price - current_price) * units
+
+        total_pnl = realized_pnl + open_pnl
+        total_return = None  # Cannot compute without knowing real initial capital
+
+        closed_trades = [t for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper()]
+        if closed_trades:
+            winning = sum(1 for t in closed_trades if t.get('pnl', 0) > 0)
+            win_rate = (winning / len(closed_trades) * 100)
+        else:
+            win_rate = 0
+        total_trades = len(all_trades)
+
+        if model_exists:
+            try:
+                model_mtime = datetime.fromtimestamp(os.path.getmtime(model_path))
+                model_date = model_mtime.strftime("%Y-%m-%d")
+            except Exception:
+                model_date = "Unknown"
+        else:
+            model_date = "Not found"
+
+    return_str = f"{'+' if total_return >= 0 else ''}{total_return:.2f}% Return" if total_return is not None else "N/A Return"
+    return_color = "#26a69a" if (total_return or 0) >= 0 else "#ef5350"
+
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-label">Active Model</div>
         <div style="color: white; font-size: 14px; margin-top: 5px;">Ultimate Agent (PPO)</div>
-        <div style="color: {return_color}; font-size: 12px;">{return_sign}{total_return:.2f}% Return | {win_rate:.1f}% Win Rate</div>
-        <div style="color: #888; font-size: 11px;">Trades: {len(all_trades)} | Model: {model_date}</div>
+        <div style="color: {return_color}; font-size: 12px;">{return_str} | {win_rate:.1f}% Win Rate</div>
+        <div style="color: #888; font-size: 11px;">Trades: {total_trades} | Model: {model_date}</div>
         <div style="color: {'#26a69a' if model_exists else '#ef5350'}; font-size: 11px;">{'✓ Model loaded' if model_exists else '✗ Model not found'}</div>
     </div>
     """, unsafe_allow_html=True)
@@ -1692,12 +1759,7 @@ def main():
             else:
                 st.warning("⚠️ api_server.log not found (yet)")
                 
-        # Debug Storage Path
-        if isinstance(storage, JsonFileStorage):
-            st.code(f"Storage Path: {storage.state_file.absolute()}")
-            st.code(f"Exists: {storage.state_file.exists()}")
-            if storage.state_file.exists():
-                st.code(f"Size: {storage.state_file.stat().st_size} bytes")
+        # Storage path is server-side only; omitted from client UI
                 
         # Database Reset (Dev Only)
         env = os.getenv("ENVIRONMENT", "production").lower()
@@ -1819,8 +1881,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_backtest = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔬 Backtest"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest"
         ])
         
         with tab_chart:
@@ -1847,152 +1909,152 @@ def main():
             # Trading Controls Section
             st.markdown("---")
             st.markdown("### 🎮 Trading Controls")
-            
-            # Bot status check
-            import subprocess
-            bot_running = False
-            try:
-                # Check for either script
-                result = subprocess.run(['pgrep', '-f', 'live_trading'], capture_output=True, text=True)
-                bot_running = result.returncode == 0
-            except:
-                pass
-            
-            # Status indicator
-            if bot_running:
-                st.success("🟢 **Trading Bot is RUNNING** (Multi-Asset Mode)")
-            else:
-                st.warning("🟠 **Trading Bot is STOPPED**")
-            
-            # Control buttons row
-            ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
-            
-            with ctrl_col1:
-                if not bot_running:
-                    if st.button("▶️ Start Trading", key="start_trading", use_container_width=True, type="primary"):
-                        try:
-                            # Start Multi-Asset Bot
-                            # Log to process.log for UI visibility
-                            with open(project_root / "process.log", "a") as log_file:
-                                subprocess.Popen(
-                                    ['./venv/bin/python', '-u', 'live_trading_multi.py', 
-                                     '--assets', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 
-                                     '--balance', '5000'],
-                                    cwd=str(project_root),
-                                    stdout=log_file,
-                                    stderr=log_file,
-                                )
-                            st.success("✓ Multi-Asset Bot started!")
-                            time.sleep(2) # Give it time to start
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to start: {e}")
-                else:
-                    if st.button("⏹️ Stop Trading", key="stop_trading", use_container_width=True, type="secondary"):
-                        try:
-                            # Kill any trading script
-                            subprocess.run(['pkill', '-f', 'live_trading'], check=False)
-                            st.info("✓ Trading bot stopped")
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to stop: {e}")
-            
-            with ctrl_col2:
-                if st.button("📈 Open Long", key="open_long", use_container_width=True):
-                    # Manual long entry
-                    trade = {
-                        'timestamp': datetime.now().isoformat(),
-                        'action': 'OPEN_LONG',
-                        'price': current_price,
-                        'pnl': 0,
-                        'balance': state.get('balance', 10000),
-                        'position': 1,
-                        'reason': 'manual',
-                        'symbol': st.session_state.selected_asset,
-                        'asset': st.session_state.selected_asset
-                    }
-                    storage.log_trade(trade)
-                    st.success(f"✓ Opened LONG @ ${current_price:,.2f}")
-                    time.sleep(0.5)
-                    st.rerun()
-            
-            with ctrl_col3:
-                if st.button("📉 Open Short", key="open_short", use_container_width=True):
-                    # Manual short entry
-                    trade = {
-                        'timestamp': datetime.now().isoformat(),
-                        'action': 'OPEN_SHORT',
-                        'price': current_price,
-                        'pnl': 0,
-                        'balance': state.get('balance', 10000),
-                        'position': -1,
-                        'reason': 'manual',
-                        'symbol': st.session_state.selected_asset,
-                        'asset': st.session_state.selected_asset
-                    }
-                    storage.log_trade(trade)
-                    st.success(f"✓ Opened SHORT @ ${current_price:,.2f}")
-                    time.sleep(0.5)
-                    st.rerun()
-            
-            with ctrl_col4:
-                if st.button("🚪 Close Position", key="close_position", use_container_width=True):
-                    # Close current position
-                    position = state.get('position', 0)
-                    if position != 0:
-                        action = 'CLOSE_LONG' if position == 1 else 'CLOSE_SHORT'
-                        trade = {
-                            'timestamp': datetime.now().isoformat(),
-                            'action': action,
-                            'price': current_price,
-                            'pnl': 0,  # Would calculate actual P&L in production
-                            'balance': state.get('balance', 10000),
-                            'position': 0,
-                            'reason': 'manual',
-                            'symbol': st.session_state.selected_asset,
-                            'asset': st.session_state.selected_asset
-                        }
-                        storage.log_trade(trade)
-                        st.success(f"✓ Closed position @ ${current_price:,.2f}")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.info("No position to close")
-            
-            # Quick actions row
-            st.markdown("")
-            action_col1, action_col2 = st.columns(2)
-            
-            with action_col1:
+
+            if IS_CLIENT_MODE:
+                st.info("🌐 **Client Mode** — Trading bot is managed on the remote server. Use the server dashboard to start/stop the bot or place manual trades.")
                 if st.button("🔄 Refresh Data", key="refresh_data", use_container_width=True):
                     st.rerun()
-            
-            with action_col2:
-                if st.button("🗑️ Clear Trade Log", key="clear_log", use_container_width=True):
-                    log_file = project_root / 'logs' / 'trading_log.json'
-                    state_file = project_root / 'logs' / 'trading_state.json'
-                    log_file.write_text('')
-                    if state_file.exists():
-                        state_file.unlink()
-                    st.success("✓ Trade log cleared")
-                    time.sleep(0.5)
-                    st.rerun()
+            else:
+                # Bot status check (server-side only)
+                import subprocess
+                bot_running = False
+                try:
+                    result = subprocess.run(['pgrep', '-f', 'live_trading'], capture_output=True, text=True)
+                    bot_running = result.returncode == 0
+                except Exception:
+                    pass
+
+                if bot_running:
+                    st.success("🟢 **Trading Bot is RUNNING** (Multi-Asset Mode)")
+                else:
+                    st.warning("🟠 **Trading Bot is STOPPED**")
+
+                ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
+
+                with ctrl_col1:
+                    if not bot_running:
+                        if st.button("▶️ Start Trading", key="start_trading", use_container_width=True, type="primary"):
+                            try:
+                                with open(project_root / "process.log", "a") as log_file:
+                                    subprocess.Popen(
+                                        ['./venv/bin/python', '-u', 'live_trading_multi.py',
+                                         '--assets', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT',
+                                         '--balance', '5000'],
+                                        cwd=str(project_root),
+                                        stdout=log_file,
+                                        stderr=log_file,
+                                    )
+                                st.success("✓ Multi-Asset Bot started!")
+                                time.sleep(2)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to start: {e}")
+                    else:
+                        if st.button("⏹️ Stop Trading", key="stop_trading", use_container_width=True, type="secondary"):
+                            try:
+                                subprocess.run(['pkill', '-f', 'live_trading'], check=False)
+                                st.info("✓ Trading bot stopped")
+                                time.sleep(1)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to stop: {e}")
+
+                with ctrl_col2:
+                    if st.button("📈 Open Long", key="open_long", use_container_width=True):
+                        trade = {
+                            'timestamp': datetime.now().isoformat(),
+                            'action': 'OPEN_LONG',
+                            'price': current_price,
+                            'pnl': 0,
+                            'balance': state.get('balance'),
+                            'position': 1,
+                            'reason': 'manual',
+                            'symbol': st.session_state.selected_asset,
+                            'asset': st.session_state.selected_asset,
+                        }
+                        storage.log_trade(trade)
+                        st.success(f"✓ Opened LONG @ ${current_price:,.2f}")
+                        time.sleep(0.5)
+                        st.rerun()
+
+                with ctrl_col3:
+                    if st.button("📉 Open Short", key="open_short", use_container_width=True):
+                        trade = {
+                            'timestamp': datetime.now().isoformat(),
+                            'action': 'OPEN_SHORT',
+                            'price': current_price,
+                            'pnl': 0,
+                            'balance': state.get('balance'),
+                            'position': -1,
+                            'reason': 'manual',
+                            'symbol': st.session_state.selected_asset,
+                            'asset': st.session_state.selected_asset,
+                        }
+                        storage.log_trade(trade)
+                        st.success(f"✓ Opened SHORT @ ${current_price:,.2f}")
+                        time.sleep(0.5)
+                        st.rerun()
+
+                with ctrl_col4:
+                    if st.button("🚪 Close Position", key="close_position", use_container_width=True):
+                        position = state.get('position', 0)
+                        if position != 0:
+                            action = 'CLOSE_LONG' if position == 1 else 'CLOSE_SHORT'
+                            trade = {
+                                'timestamp': datetime.now().isoformat(),
+                                'action': action,
+                                'price': current_price,
+                                'pnl': 0,
+                                'balance': state.get('balance'),
+                                'position': 0,
+                                'reason': 'manual',
+                                'symbol': st.session_state.selected_asset,
+                                'asset': st.session_state.selected_asset,
+                            }
+                            storage.log_trade(trade)
+                            st.success(f"✓ Closed position @ ${current_price:,.2f}")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.info("No position to close")
+
+                st.markdown("")
+                action_col1, action_col2 = st.columns(2)
+
+                with action_col1:
+                    if st.button("🔄 Refresh Data", key="refresh_data", use_container_width=True):
+                        st.rerun()
+
+                with action_col2:
+                    if st.button("🗑️ Clear Trade Log", key="clear_log", use_container_width=True):
+                        try:
+                            log_file = project_root / 'logs' / 'trading_log.json'
+                            state_file = project_root / 'logs' / 'trading_state.json'
+                            log_file.write_text('')
+                            if state_file.exists():
+                                state_file.unlink()
+                            st.success("✓ Trade log cleared")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to clear log: {e}")
         
         with tab_live_portfolio:
             # ─── Compute portfolio metrics from trade data ───
             all_trades_lp = []
             try:
-                all_trades_lp = storage.get_trades(limit=1000)
-                # Apply reset filter
-                try:
-                    lp_state = storage.load_state()
-                    reset_ts = lp_state.get('reset_timestamp')
-                    if reset_ts:
-                        reset_dt = datetime.fromisoformat(reset_ts.replace('Z', '+00:00'))
-                        all_trades_lp = [t for t in all_trades_lp if datetime.fromisoformat(t.get('timestamp', '2020-01-01').replace('Z', '+00:00')) >= reset_dt]
-                except:
-                    pass
+                # Use API in client mode, local storage otherwise
+                all_trades_lp = load_trading_log()
+                if not IS_CLIENT_MODE:
+                    # Apply reset filter (local mode only — API already filters)
+                    try:
+                        lp_state = storage.load_state()
+                        reset_ts = lp_state.get('reset_timestamp')
+                        if reset_ts:
+                            reset_dt = datetime.fromisoformat(reset_ts.replace('Z', '+00:00'))
+                            all_trades_lp = [t for t in all_trades_lp if datetime.fromisoformat(t.get('timestamp', '2020-01-01').replace('Z', '+00:00')) >= reset_dt]
+                    except:
+                        pass
             except:
                 pass
             
@@ -2122,21 +2184,21 @@ def main():
             # Overall metrics
             # Fixed: Always use 4 assets (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT)
             # Previously used len(assets_by_symbol) which only counted assets with trades
-            initial_capital = 4 * 5000  # 4 assets × $5,000 = $20,000
-
             # Calculate from trades (single source of truth) - same logic as Agent Status sidebar
             lp_grand_total_pnl = realized_pnl_total + open_pnl_total
-            lp_total_balance = initial_capital + lp_grand_total_pnl
-            
-            realized_pct = (realized_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
-            open_pct = (open_pnl_total / initial_capital) * 100 if initial_capital > 0 else 0
+            lp_total_balance = state.get('total_balance', state.get('balance'))
             overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
             total_trades_count = total_closed_trades + total_open_trades
             
             lp_active_assets_count = len(asset_rows) if asset_rows else len(state.get('available_assets', []))
             
-            # System status
-            is_online = check_process_running("live_trading_multi.py")
+            # System status (client mode: infer from recent trades; server mode: check process)
+            if IS_CLIENT_MODE:
+                is_online = bool(all_trades_lp and (datetime.now() - datetime.fromisoformat(
+                    all_trades_lp[-1].get('timestamp', '2000-01-01').replace('Z', '+00:00').split('+')[0]
+                )).total_seconds() < 3600)
+            else:
+                is_online = check_process_running("live_trading_multi.py")
             status_dot = '🟢' if is_online else '🔴'
             status_text = 'Online' if is_online else 'Offline'
             status_color = '#00e676' if is_online else '#ff5252'
@@ -2150,7 +2212,7 @@ def main():
             
             # ─── Build the Live Portfolio HTML ───
             # Equity curve data for SVG chart (pure inline, no CDN)
-            eq_pct = [(p / initial_capital) * 100 if initial_capital > 0 else 0 for p in equity_points]
+            eq_pct = list(equity_points)  # absolute PnL values; SVG normalizes by range
             
             # Build SVG polyline points
             svg_w = 900
@@ -2230,8 +2292,7 @@ def main():
                 
                 # PNL
                 pnl_val = row['pnl']
-                pnl_pct = (pnl_val / (initial_capital / max(len(asset_rows), 1))) * 100 if initial_capital > 0 else 0
-                pnl_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;">{pnl_sign(pnl_val)}{pnl_pct:.2f}%</span>'
+                pnl_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;">—</span>'
                 pnl_dollar_html = f'<span style="color:{pnl_color(pnl_val)};font-weight:600;font-family:monospace;">{pnl_sign(pnl_val)}${abs(pnl_val):,.2f}</span>'
                 
                 # Trades
@@ -2253,15 +2314,13 @@ def main():
                 
                 # Best
                 if row['best'] is not None:
-                    best_pct = (row['best'] / (initial_capital / max(len(asset_rows), 1))) * 100
-                    best_html = f'<span style="color:#00e676;">{pnl_sign(best_pct)}{best_pct:.2f}%</span>'
+                    best_html = f'<span style="color:#00e676;">{pnl_sign(row["best"])}${abs(row["best"]):,.2f}</span>'
                 else:
                     best_html = '<span style="color:#555;">—</span>'
-                
+
                 # Worst
                 if row['worst'] is not None:
-                    worst_pct = (row['worst'] / (initial_capital / max(len(asset_rows), 1))) * 100
-                    worst_html = f'<span style="color:#ff5252;">{worst_pct:.2f}%</span>'
+                    worst_html = f'<span style="color:#ff5252;">-${abs(row["worst"]):,.2f}</span>'
                 else:
                     worst_html = '<span style="color:#555;">—</span>'
                 
@@ -2327,11 +2386,11 @@ def main():
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px;">
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Realized PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pct)}{abs(realized_pct):.2f}%</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(realized_pnl_total)};">{pnl_sign(realized_pnl_total)}${abs(realized_pnl_total):,.2f}</div>
                     </div>
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Open PNL</div>
-                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pct)}{abs(open_pct):.2f}%</div>
+                        <div style="font-size:26px;font-weight:700;color:{pnl_color(open_pnl_total)};">{pnl_sign(open_pnl_total)}${abs(open_pnl_total):,.2f}</div>
                     </div>
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:18px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Win Rate</div>
@@ -2349,7 +2408,7 @@ def main():
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;">
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Portfolio Value</div>
-                        <div style="font-size:22px;font-weight:700;color:#fff;">${lp_total_balance:,.2f}</div>
+                        <div style="font-size:22px;font-weight:700;color:#fff;">{f'${lp_total_balance:,.2f}' if lp_total_balance is not None else '—'}</div>
                     </div>
                     <div style="background:#151b23;border:1px solid #21262d;border-radius:8px;padding:14px 20px;">
                         <div style="color:#8b949e;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Total P&L</div>
@@ -2403,21 +2462,20 @@ def main():
         with tab_performance:
             total_pnl = state.get('realized_pnl', 0)
             total_trades = state.get('total_trades', 0)
-            balance = state.get('balance', 10000)
-            total_return = ((balance - 10000) / 10000) * 100
-            
+            balance = state.get('balance', state.get('total_balance'))
+
             col1, col2, col3, col4 = st.columns(4)
-            
+
             with col1:
                 st.metric(
                     label="Total Return",
-                    value=f"{total_return:.2f}%",
+                    value="N/A",
                     delta=f"${total_pnl:.2f}"
                 )
             with col2:
                 st.metric(
                     label="Portfolio Value",
-                    value=f"${balance:,.2f}",
+                    value=f"${balance:,.2f}" if balance is not None else "—",
                 )
             with col3:
                 st.metric(
@@ -2427,7 +2485,7 @@ def main():
             with col4:
                 st.metric(
                     label="Realized P&L",
-                    value=f"${total_pnl:,.2f}",
+                    value=f"${(total_pnl or 0):,.2f}",
                 )
             
             backtest_file = project_root / 'data' / 'backtest_report.txt'
@@ -2583,48 +2641,519 @@ def main():
 
         with tab_testnet:
             st.markdown("### 🧪 Binance Testnet Trading")
-            st.markdown("Execute real trades on Binance testnet with zero risk!")
+            st.markdown("Real orders on Binance Testnet — bot decisions mirrored live.")
 
-            # Get API keys from environment (strip whitespace)
-            testnet_api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
-            testnet_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+            # All testnet calls go through the API server (client-mode compatible)
+            import requests as _tn_requests
 
-            if not testnet_api_key or not testnet_secret:
-                st.error("⚠️ Testnet API keys not found!")
-                st.info("""
-                **How to add keys to HuggingFace:**
-                1. Go to Space Settings → Repository Secrets
-                2. Add: `BINANCE_TESTNET_API_KEY`
-                3. Add: `BINANCE_TESTNET_API_SECRET`
-                4. Restart the Space
-                """)
+            _api = get_api_url()
+
+            # ── Fetch all data in parallel ─────────────────────────────────
+            tn_data, tn_positions_data, tn_pnl_data, tn_trades_data = {}, {}, {}, {}
+            try:
+                tn_resp = _tn_requests.get(f'{_api}/api/testnet/status', timeout=15)
+                tn_data = tn_resp.json() if tn_resp.status_code == 200 else {}
+            except Exception as _e:
+                st.error(f"❌ Cannot reach API server: {_e}")
+
+            try:
+                _pos_resp = _tn_requests.get(f'{_api}/api/testnet/positions', timeout=20)
+                tn_positions_data = _pos_resp.json() if _pos_resp.status_code == 200 else {}
+            except Exception:
+                tn_positions_data = {}
+
+            try:
+                _pnl_resp = _tn_requests.get(f'{_api}/api/testnet/pnl', timeout=20)
+                tn_pnl_data = _pnl_resp.json() if _pnl_resp.status_code == 200 else {}
+            except Exception:
+                tn_pnl_data = {}
+
+            try:
+                _trades_resp = _tn_requests.get(f'{_api}/api/testnet/trades?limit=200', timeout=15)
+                tn_trades_data = _trades_resp.json() if _trades_resp.status_code == 200 else {}
+            except Exception:
+                tn_trades_data = {}
+
+            # ── Connection status ──────────────────────────────────────────
+            if not tn_data.get('configured', True) or (tn_data.get('error') and not tn_data.get('connected')):
+                st.error(f"⚠️ {tn_data.get('error', 'Testnet not configured on server')}")
+                st.info("Set `BINANCE_TESTNET_API_KEY` and `BINANCE_TESTNET_API_SECRET` in server environment.")
             else:
+                _key_pfx = tn_data.get('api_key_prefix', '')
+                _connected = tn_data.get('connected', False)
+                status_cols = st.columns([2, 2, 2])
+                with status_cols[0]:
+                    if _connected:
+                        st.success(f"✅ Connected to Binance Testnet")
+                    else:
+                        st.warning("⚠️ Testnet connection failed")
+                with status_cols[1]:
+                    if _key_pfx:
+                        st.info(f"🔑 Key: `{_key_pfx}`")
+                with status_cols[2]:
+                    mirror_active = bool(tn_data.get('connected'))
+                    st.info(f"🤖 Auto-Mirror: {'ON (set TESTNET_MIRROR=true)' if mirror_active else 'Enable via TESTNET_MIRROR=true'}")
+
+                # ── PNL Summary metrics ────────────────────────────────────
+                st.markdown("---")
+                st.markdown("### 💰 Portfolio & PNL Summary")
+
+                portfolio_value = float(tn_data.get('portfolio_value', 0) or 0)
+                usdt_balance = float(tn_data.get('usdt_balance', 0) or 0)
+                realized_pnl = float(tn_pnl_data.get('realized_pnl', 0) or 0)
+                unrealized_pnl = float(tn_pnl_data.get('unrealized_pnl', 0) or 0)
+                total_pnl = float(tn_pnl_data.get('total_pnl', 0) or 0)
+                total_trades = int(tn_pnl_data.get('total_trades', 0) or 0)
+                closed_trades = int(tn_pnl_data.get('closed_trades', 0) or 0)
+                win_rate = float(tn_pnl_data.get('win_rate', 0) or 0)
+                winning_trades = int(tn_pnl_data.get('winning_trades', 0) or 0)
+
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    st.metric(
+                        "💰 Portfolio Value",
+                        f"${portfolio_value:,.2f}" if portfolio_value is not None else "—",
+                    )
+                with m2:
+                    st.metric(
+                        "💵 USDT Balance",
+                        f"${usdt_balance:,.2f}" if usdt_balance is not None else "—",
+                    )
+                with m3:
+                    st.metric(
+                        "📈 Realized PNL",
+                        f"${realized_pnl:+,.2f}" if realized_pnl is not None else "—",
+                        delta=f"${unrealized_pnl:+,.2f} unrealized" if unrealized_pnl else None,
+                    )
+                with m4:
+                    wr_str = f"{win_rate * 100:.1f}%" if win_rate is not None else "—"
+                    st.metric(
+                        "🎯 Win Rate",
+                        wr_str,
+                        delta=f"{winning_trades}/{closed_trades} closed" if closed_trades > 0 else None,
+                    )
+
+                # ── Bot-Mirrored Open Positions ────────────────────────────
+                st.markdown("---")
+                st.markdown("### 📊 Open Positions (Bot-Mirrored)")
+
+                bot_positions = tn_positions_data.get('positions', [])
+                if bot_positions:
+                    pos_rows = []
+                    for p in bot_positions:
+                        sym = p.get('symbol', '')
+                        side = p.get('side', '')
+                        entry = float(p.get('entry_price', 0) or 0)
+                        curr = float(p.get('current_price', 0) or 0)
+                        amt = float(p.get('amount', 0) or 0)
+                        upnl = float(p.get('unrealized_pnl', 0) or 0)
+                        upnl_pct = float(p.get('unrealized_pnl_pct', 0) or 0)
+                        sl_p = float(p.get('sl', 0) or 0)
+                        tp_p = float(p.get('tp', 0) or 0)
+                        conf = float(p.get('confidence', 0) or 0)
+                        sim = bool(p.get('simulated', False))
+                        side_display = f"{side} {'(sim)' if sim else ''}"
+                        pos_rows.append({
+                            'Symbol': sym,
+                            'Side': side_display,
+                            'Entry': f"${entry:,.4f}" if entry else "—",
+                            'Current': f"${curr:,.4f}" if curr else "—",
+                            'Amount': f"{amt:.6f}",
+                            'Unreal. PNL': f"${upnl:+,.4f} ({upnl_pct:+.2f}%)" if curr else "—",
+                            'SL': f"${sl_p:,.4f}" if sl_p else "—",
+                            'TP': f"${tp_p:,.4f}" if tp_p else "—",
+                            'Confidence': f"{conf:.2f}" if conf else "—",
+                        })
+                    st.dataframe(pd.DataFrame(pos_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No open bot-mirrored positions.")
+
+                # Spot wallet positions from status endpoint
+                spot_positions = tn_data.get('positions', [])
+                if spot_positions:
+                    st.markdown("**Spot Wallet Holdings:**")
+                    spot_rows = [{
+                        'Asset': p.get('asset', ''),
+                        'Amount': f"{float(p.get('amount', 0) or 0):.6f}",
+                        'Price': f"${float(p.get('price', 0) or 0):,.2f}",
+                        'Value (USDT)': f"${float(p.get('value_usdt', 0) or 0):,.2f}",
+                    } for p in spot_positions]
+                    st.dataframe(pd.DataFrame(spot_rows), use_container_width=True, hide_index=True)
+
+                # ── Equity Curve ───────────────────────────────────────────
+                equity_curve = tn_pnl_data.get('equity_curve', [])
+                if equity_curve:
+                    st.markdown("---")
+                    st.markdown("### 📈 Equity Curve (Cumulative PNL)")
+                    try:
+                        eq_df = pd.DataFrame(equity_curve)
+                        eq_df['timestamp'] = pd.to_datetime(eq_df['timestamp'], errors='coerce')
+                        eq_df = eq_df.dropna(subset=['timestamp'])
+                        if not eq_df.empty:
+                            import plotly.graph_objects as go
+                            fig_eq = go.Figure()
+                            fig_eq.add_trace(go.Scatter(
+                                x=eq_df['timestamp'],
+                                y=eq_df['cumulative_pnl'],
+                                mode='lines+markers',
+                                name='Cumulative PNL',
+                                line=dict(color='#00e676', width=2),
+                                marker=dict(size=6),
+                                hovertemplate=(
+                                    '<b>%{x}</b><br>'
+                                    'Cumulative PNL: $%{y:,.4f}<br>'
+                                    '<extra></extra>'
+                                ),
+                            ))
+                            fig_eq.add_hline(y=0, line_dash='dash', line_color='#666')
+                            fig_eq.update_layout(
+                                height=280,
+                                margin=dict(l=0, r=0, t=20, b=0),
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                font=dict(color='#E2E8F0'),
+                                xaxis=dict(gridcolor='rgba(255,255,255,0.1)'),
+                                yaxis=dict(gridcolor='rgba(255,255,255,0.1)', tickprefix='$'),
+                            )
+                            st.plotly_chart(fig_eq, use_container_width=True)
+                    except Exception as _eq_e:
+                        st.warning(f"Equity curve render failed: {_eq_e}")
+
+                # ── Trade History ──────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("### 📋 Trade History (Testnet Executions)")
+
+                all_trades = tn_trades_data.get('trades', [])
+                if all_trades:
+                    trade_rows = []
+                    for t in reversed(all_trades):  # newest first
+                        ts = t.get('timestamp', '')[:19].replace('T', ' ') if t.get('timestamp') else '—'
+                        sym = t.get('symbol', '—')
+                        action = t.get('action', '—')
+                        price_v = float(t.get('filled_price') or t.get('price', 0) or 0)
+                        amt = float(t.get('amount', 0) or 0)
+                        pnl_v = t.get('pnl')
+                        pnl_str = f"${float(pnl_v):+,.4f}" if pnl_v is not None else "—"
+                        oid = str(t.get('order_id', '') or '—')[:16]
+                        executed = '✅' if t.get('executed') else '❌'
+                        err = t.get('error', '')
+                        trade_rows.append({
+                            'Time': ts,
+                            'Symbol': sym,
+                            'Action': action,
+                            'Price': f"${price_v:,.4f}" if price_v else "—",
+                            'Amount': f"{amt:.6f}" if amt else "—",
+                            'PNL': pnl_str,
+                            'Order ID': oid,
+                            'OK': executed,
+                            'Error': err if err else '',
+                        })
+                    st.dataframe(
+                        pd.DataFrame(trade_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=320,
+                    )
+                else:
+                    st.info("No testnet trades recorded yet. Enable `TESTNET_MIRROR=true` to auto-mirror bot decisions.")
+
+                # ── Live Order Book (open orders) ──────────────────────────
+                st.markdown("---")
+                st.markdown("### 📖 Live Open Orders")
+
+                ord_col1, ord_col2 = st.columns([3, 1])
+                with ord_col2:
+                    if st.button("🔄 Refresh Orders", key="testnet_refresh_orders", use_container_width=True):
+                        st.rerun()
+
                 try:
-                    from src.ui.testnet_server import render_testnet_tab_server
-                    # Render server-side testnet interface
-                    render_testnet_tab_server(testnet_api_key, testnet_secret)
-                except Exception as e:
-                    st.error(f"❌ Error loading testnet: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
-            st.markdown("### Run Backtest")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                start_date = st.date_input(
-                    "Start Date",
-                    value=datetime.now() - timedelta(days=365)
+                    orders_resp = _tn_requests.get(f'{_api}/api/testnet/orders', timeout=15)
+                    open_orders = orders_resp.json().get('orders', []) if orders_resp.status_code == 200 else []
+                    if open_orders:
+                        ord_rows = []
+                        for o in open_orders:
+                            ord_rows.append({
+                                'Order ID': str(o.get('orderId', o.get('id', '—')))[:16],
+                                'Symbol': o.get('symbol', '—'),
+                                'Side': o.get('side', '—'),
+                                'Type': o.get('type', '—'),
+                                'Price': f"${float(o.get('price', 0) or 0):,.4f}",
+                                'Qty': f"{float(o.get('origQty', o.get('amount', 0)) or 0):.6f}",
+                                'Status': o.get('status', '—'),
+                            })
+                        st.dataframe(pd.DataFrame(ord_rows), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No open orders on testnet.")
+                except Exception as _oe:
+                    st.warning(f"Could not fetch open orders: {_oe}")
+
+                # ── Manual Trading Controls ────────────────────────────────
+                st.markdown("---")
+                st.markdown("### 🎮 Manual Trading Controls")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    trade_symbol = st.selectbox(
+                        "Select Pair", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
+                        key="testnet_symbol"
+                    )
+                with col2:
+                    trade_amount = st.number_input(
+                        "Amount (USDT)", min_value=10.0,
+                        max_value=float(usdt_balance) if usdt_balance > 10 else 10000.0,
+                        value=100.0, step=10.0, key="testnet_amount"
+                    )
+
+                btn_cols = st.columns(3)
+
+                if btn_cols[0].button("🟢 BUY (Market)", key="testnet_buy", use_container_width=True):
+                    try:
+                        order_resp = _tn_requests.post(
+                            f'{_api}/api/testnet/order',
+                            json={'symbol': trade_symbol, 'side': 'buy', 'amount_usdt': trade_amount},
+                            timeout=20
+                        )
+                        result = order_resp.json()
+                        if result.get('success'):
+                            _amt = float(result.get('amount', 0) or 0)
+                            _pr = float(result.get('price', 0) or 0)
+                            st.success(f"✅ BUY: {_amt:.6f} {trade_symbol.split('/')[0]} @ ${_pr:,.2f}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Order failed: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Order failed: {e}")
+
+                if btn_cols[1].button("🔴 SELL (Market)", key="testnet_sell", use_container_width=True):
+                    try:
+                        order_resp = _tn_requests.post(
+                            f'{_api}/api/testnet/order',
+                            json={'symbol': trade_symbol, 'side': 'sell', 'amount_usdt': 0},
+                            timeout=20
+                        )
+                        result = order_resp.json()
+                        if result.get('success'):
+                            _amt = float(result.get('amount', 0) or 0)
+                            _sym = trade_symbol.split('/')[0]
+                            st.success(f"✅ SELL: {_amt:.6f} {_sym}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Order failed: {result.get('error', 'Unknown error')}")
+                    except Exception as e:
+                        st.error(f"❌ Order failed: {e}")
+
+                if btn_cols[2].button("🧪 Mirror Bot Trade", key="testnet_mirror_btn", use_container_width=True):
+                    try:
+                        _sym_raw = trade_symbol.replace('/', '')
+                        exec_resp = _tn_requests.post(
+                            f'{_api}/api/testnet/execute',
+                            json={'action': 'OPEN_LONG_SPLIT', 'symbol': f"{_sym_raw}USDT" if 'USDT' not in _sym_raw else _sym_raw, 'confidence': 0.65},
+                            timeout=25
+                        )
+                        result = exec_resp.json()
+                        if result.get('success'):
+                            t = result.get('trade', {}) or {}
+                            _pr = float(t.get('price', 0) or 0)
+                            st.success(f"✅ Testnet mirror executed: OPEN_LONG @ ${_pr:,.2f}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Mirror failed: {result.get('error', 'Unknown')}")
+                    except Exception as e:
+                        st.error(f"❌ Mirror failed: {e}")
+
+                st.markdown("---")
+                _ic1, _ic2 = st.columns(2)
+                with _ic1:
+                    st.info("""
+                    **Bot Auto-Mirror (TESTNET_MIRROR=true):**
+                    - Set env var to enable real-time mirroring
+                    - Every bot decision → real testnet order
+                    - LONG = real BUY order (50% market + 50% limit)
+                    - SHORT = conceptual (spot testnet only)
+                    - Trades logged to `logs/testnet_trades.json`
+                    """)
+                with _ic2:
+                    st.warning("""
+                    **Testnet Notes:**
+                    - Zero real money risk (testnet.binance.vision)
+                    - Testnet funds reset periodically
+                    - SHORT positions tracked conceptually (spot exchange)
+                    - SL/TP managed by bot logic (no exchange OCO orders)
+                    """)
+
+        with tab_htf:
+            st.markdown("### 🔮 HTF Agent — Hierarchical Multi-Timeframe Trader")
+            st.caption("4-timeframe cascade: 1D → 4H → 1H → 15M | PPO | Walk-forward validated (Avg Sharpe 3.85, +14.8%/2mo)")
+
+            api_base = get_api_url()
+
+            # ── Status ──
+            try:
+                htf_status_resp = __import__('requests').get(f"{api_base}/api/htf/status", timeout=8)
+                htf_status = htf_status_resp.json() if htf_status_resp.ok else {}
+            except Exception:
+                htf_status = {}
+
+            if not htf_status.get('running'):
+                st.warning(
+                    "**HTF bot is not running.** Start it with:\n"
+                    "```bash\npython live_trading_htf.py --interval 15\n```\n"
+                    "Add `--live` to enable real execution. Default is dry-run (paper trading)."
                 )
-            with col2:
-                end_date = st.date_input(
-                    "End Date",
-                    value=datetime.now()
-                )
-            
-            if st.button("🚀 Run Backtest", key="run_backtest"):
-                st.info("To run backtest, execute in terminal:")
-                st.code("python train_advanced.py --evaluate ./data/models/advanced_agent.zip")
-    
+            else:
+                dry_tag = " *(dry-run)*" if htf_status.get('dry_run') else " *(LIVE)*"
+                col1, col2, col3, col4 = st.columns(4)
+                pos_label = htf_status.get('position_label', 'FLAT')
+                pos_color = {"LONG": "#00e676", "SHORT": "#ff5252", "FLAT": "#8b949e"}.get(pos_label, "#8b949e")
+
+                col1.metric("Position", pos_label)
+                col2.metric("Balance", f"${htf_status.get('balance', 0):,.2f}" if htf_status.get('balance') else "—")
+                col3.metric("Realized PnL", f"${htf_status.get('realized_pnl', 0):+,.2f}")
+                col4.metric("Unrealized PnL", f"${htf_status.get('unrealized_pnl', 0):+,.2f}")
+
+                # Position details
+                if htf_status.get('position', 0) != 0:
+                    st.markdown(f"""
+                    <div style="background:#151b23;border:1px solid {pos_color};border-radius:8px;padding:14px 18px;margin:8px 0;">
+                    <b style="color:{pos_color};">{pos_label}</b> &nbsp;|&nbsp;
+                    Entry: <b>${htf_status.get('position_price', 0):,.2f}</b> &nbsp;|&nbsp;
+                    SL: <b style="color:#ff5252;">${htf_status.get('sl_price', 0):,.2f}</b> &nbsp;|&nbsp;
+                    TP: <b style="color:#00e676;">${htf_status.get('tp_price', 0):,.2f}</b> &nbsp;|&nbsp;
+                    Units: <b>{htf_status.get('position_units', 0):.5f}</b>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                agent_cols = st.columns(3)
+                agent_cols[0].info(f"**Win Rate:** {htf_status.get('win_rate', 0)*100:.1f}%")
+                agent_cols[1].info(f"**Trades:** {htf_status.get('trade_count', 0)}")
+                agent_cols[2].info(f"**Mode:** HTF PPO{dry_tag}")
+
+                model_path = htf_status.get('model_path') or 'Not loaded'
+                st.caption(f"Model: `{Path(model_path).name if model_path else '—'}` | "
+                           f"Started: {htf_status.get('start_time', '—')[:19] if htf_status.get('start_time') else '—'}")
+
+            st.markdown("---")
+
+            # ── Performance Metrics ──
+            st.markdown("#### 📈 Performance Metrics")
+            try:
+                perf_resp = __import__('requests').get(f"{api_base}/api/htf/performance", timeout=8)
+                perf = perf_resp.json() if perf_resp.ok else {}
+            except Exception:
+                perf = {}
+
+            if perf and not perf.get('error') and perf.get('total_trades', 0) > 0:
+                pm1, pm2, pm3, pm4, pm5 = st.columns(5)
+                pm1.metric("Total Trades", perf.get('total_trades', 0))
+                pm2.metric("Win Rate", f"{perf.get('win_rate', 0)*100:.1f}%")
+                pm3.metric("Total PnL", f"${perf.get('total_pnl', 0):+,.2f}")
+                pm4.metric("Sharpe Ratio", f"{perf.get('sharpe', 0):.2f}")
+                pm5.metric("Max Drawdown", f"{perf.get('max_drawdown', 0):.1f}%")
+
+                pm6, pm7, pm8 = st.columns(3)
+                pm6.metric("Return", f"{perf.get('return_pct', 0):+.1f}%")
+                pm7.metric("Best Trade", f"${perf.get('best_trade', 0):+,.2f}")
+                pm8.metric("Worst Trade", f"${perf.get('worst_trade', 0):+,.2f}")
+            else:
+                st.info(perf.get('message', 'No closed trades yet — metrics will appear after first completed trade.'))
+
+            st.markdown("---")
+
+            # ── Trade History ──
+            st.markdown("#### 📋 Trade History")
+            try:
+                trades_resp = __import__('requests').get(f"{api_base}/api/htf/trades?limit=100", timeout=8)
+                htf_trades = trades_resp.json().get('trades', []) if trades_resp.ok else []
+            except Exception:
+                htf_trades = []
+
+            if htf_trades:
+                close_trades = [t for t in reversed(htf_trades) if 'CLOSE' in t.get('action', '').upper()]
+                open_trades = [t for t in reversed(htf_trades) if 'OPEN' in t.get('action', '').upper()]
+
+                if close_trades:
+                    rows = []
+                    for t in close_trades[:50]:
+                        pnl = t.get('pnl', 0)
+                        rows.append({
+                            'Time': t.get('timestamp', '')[:19],
+                            'Action': t.get('action', ''),
+                            'Entry': f"${t.get('entry_price', 0):,.2f}",
+                            'Exit': f"${t.get('exit_price', 0):,.2f}",
+                            'PnL': f"${pnl:+,.2f}",
+                            'Reason': t.get('reason', ''),
+                        })
+                    df_trades = pd.DataFrame(rows)
+
+                    def _color_pnl(val):
+                        if isinstance(val, str) and val.startswith('$'):
+                            try:
+                                v = float(val.replace('$', '').replace(',', '').replace('+', ''))
+                                return 'color: #00e676' if v > 0 else 'color: #ff5252'
+                            except Exception:
+                                pass
+                        return ''
+
+                    st.dataframe(
+                        df_trades.style.applymap(_color_pnl, subset=['PnL']),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No closed trades yet.")
+
+                if open_trades:
+                    st.markdown("**Open Trades**")
+                    for t in open_trades[:5]:
+                        st.markdown(
+                            f"- `{t.get('action','')}` @ **${t.get('price', 0):,.2f}** "
+                            f"| conf: {t.get('confidence', 0):.2f} "
+                            f"| {t.get('timestamp', '')[:19]}"
+                        )
+            else:
+                st.info("No HTF trades recorded yet. Bot will begin trading on next cycle.")
+
+            st.markdown("---")
+
+            # ── Architecture Info ──
+            with st.expander("🏗 HTF Agent Architecture"):
+                st.markdown("""
+                **Observation Space:** 117 dimensions across 4 timeframes
+                | Block | Dims | Features |
+                |-------|------|---------|
+                | 1D    | 20   | Macro trend, regime, HTF structure |
+                | 4H    | 25   | Swing structure, Smart Money Concepts (BOS, CHoCH, OB, FVG) |
+                | 1H    | 30   | Momentum, RSI divergence, MACD, Stochastic |
+                | 15M   | 35   | Micro entry triggers, candle patterns, Wyckoff phase |
+                | Align | 4    | Cross-TF cascade hierarchy signals |
+                | Pos   | 3    | Position, unrealized PnL, balance ratio |
+
+                **Agent:** PPO with `[512, 256, 128]` network, VecNormalize, curriculum training
+                **Training:** Walk-forward validation (8 folds, 50% position size)
+                **Validated:** Avg Sharpe 3.85 · +14.8% / 2 months · Max Drawdown 5.95%
+                **Risk:** SL 1.5% · TP 3.0% · Fee 0.04% · Min hold 1h · Cooldown 30min after loss
+                """)
+
+        with tab_backtest:
+            st.markdown("### 🔬 Backtest")
+            if IS_CLIENT_MODE:
+                st.info("🌐 **Backtest is not available in client mode.** Run the trading server locally and access backtesting from the server dashboard.")
+            else:
+                col1, col2 = st.columns(2)
+                with col1:
+                    start_date = st.date_input(
+                        "Start Date",
+                        value=datetime.now() - timedelta(days=365)
+                    )
+                with col2:
+                    end_date = st.date_input(
+                        "End Date",
+                        value=datetime.now()
+                    )
+                if st.button("🚀 Run Backtest", key="run_backtest"):
+                    st.info("To run backtest, execute in terminal:")
+                    st.code("python train_advanced.py --evaluate ./data/models/advanced_agent.zip")
+
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
         

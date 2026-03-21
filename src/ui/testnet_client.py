@@ -246,18 +246,14 @@ def render_testnet_tab(api_key: str, api_secret: str):
                     // Update portfolio metrics
                     document.getElementById('portfolioValue').textContent = `$${{totalValue.toFixed(2)}}`;
 
-                    const initialValue = 10000;
-                    const pnl = totalValue - initialValue;
-                    const pnlPct = (pnl / initialValue) * 100;
+                    document.getElementById('totalPnl').textContent = 'N/A';
+                    document.getElementById('totalPnl').className = 'metric-value';
 
-                    document.getElementById('totalPnl').textContent = `${{pnlPct >= 0 ? '+' : ''}}${{pnlPct.toFixed(2)}}%`;
-                    document.getElementById('totalPnl').className = pnlPct >= 0 ? 'metric-value positive' : 'metric-value negative';
+                    document.getElementById('portfolioDelta').textContent = '';
+                    document.getElementById('portfolioDelta').className = 'metric-delta';
 
-                    document.getElementById('portfolioDelta').textContent = `$${{pnl >= 0 ? '+' : ''}}${{pnl.toFixed(2)}}`;
-                    document.getElementById('portfolioDelta').className = pnl >= 0 ? 'metric-delta positive' : 'metric-delta negative';
-
-                    document.getElementById('pnlDelta').textContent = `$${{pnl >= 0 ? '+' : ''}}${{pnl.toFixed(2)}}`;
-                    document.getElementById('pnlDelta').className = pnl >= 0 ? 'metric-delta positive' : 'metric-delta negative';
+                    document.getElementById('pnlDelta').textContent = '';
+                    document.getElementById('pnlDelta').className = 'metric-delta';
 
                     // Update positions table
                     const positionsDiv = document.getElementById('positions');

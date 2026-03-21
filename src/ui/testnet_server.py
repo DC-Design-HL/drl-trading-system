@@ -186,7 +186,7 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
             st.metric(
                 label="💰 Portfolio Value",
                 value=f"${portfolio_value:,.2f}",
-                delta=f"{portfolio_value - 10000:.2f} USDT" if portfolio_value != 10000 else None
+                delta=None
             )
 
         with col2:
@@ -197,11 +197,10 @@ def render_testnet_tab_server(api_key: str, api_secret: str):
             )
 
         with col3:
-            pnl_pct = ((portfolio_value - 10000) / 10000) * 100 if portfolio_value > 0 else 0
             st.metric(
                 label="📊 Total P&L %",
-                value=f"{pnl_pct:+.2f}%",
-                delta=f"${portfolio_value - 10000:+,.2f}"
+                value="N/A",
+                delta=None
             )
 
         st.markdown("---")

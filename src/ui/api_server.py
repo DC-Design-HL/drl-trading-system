@@ -3,14 +3,28 @@ API endpoints for live streaming data to the dashboard.
 This provides JSON endpoints that JavaScript can poll for updates.
 """
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
 from pathlib import Path
 from datetime import datetime
 import time
 
+# Load .env for local development (no-op if vars already set)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / '.env', override=False)
+except ImportError:
+    pass
+
 app = Flask(__name__)
+CORS(app, origins="*")
+
+@app.route('/api/ping')
+def ping():
+    """Lightweight connectivity check for remote clients."""
+    return jsonify({"ok": True, "timestamp": datetime.now().isoformat()})
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for system status."""
@@ -51,14 +65,11 @@ def get_state():
             
             raw_assets = state.get('raw_state', {}).get('assets', {})
             open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
-            
-            initial_capital = max(len(raw_assets), 1) * 5000 if raw_assets else 20000
-            
+
             if all_trades or raw_assets:
                 state['total_pnl'] = realized_pnl + open_pnl
                 state['realized_pnl'] = realized_pnl + open_pnl
-                state['total_balance'] = initial_capital + state['total_pnl']
-                state['balance'] = state['total_balance']
+                # Do not override balance — use real value from stored state
         except Exception as math_err:
             logger.error(f"Failed mathematical override: {math_err}")
             
@@ -67,6 +78,16 @@ def get_state():
             state['balance'] = state['total_balance']
         if 'total_pnl' in state and 'realized_pnl' not in state:
             state['realized_pnl'] = state['total_pnl']
+
+        # Expose available assets for the frontend selector
+        # Always include all configured trading assets so user can switch
+        configured_assets = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
+        raw_assets_keys = list(state.get('raw_state', {}).get('assets', {}).keys())
+        if not raw_assets_keys:
+            raw_assets_keys = list(state.get('assets', {}).keys())
+        # Merge: configured assets + any additional ones from state
+        all_assets = list(dict.fromkeys(configured_assets + raw_assets_keys))
+        state['available_assets'] = all_assets
 
         # Inject Recent On-Chain Whale Alerts from tracked wallets
         try:
@@ -111,41 +132,6 @@ def get_state():
                             except:
                                 pass
             
-            # Guarentee a rich visual dashboard experience
-            # If live API tracking fails, or blockchain volume is low, seamlessly backfill the gap up to 50 alerts
-            if len(whale_alerts) < 50:
-                import random
-                from src.features.whale_wallet_registry import get_wallets_by_chain
-                current_ts = int(time.time())
-                chains = ['ETH', 'SOL', 'XRP', 'BTC']
-                needed_mock = 50 - len(whale_alerts)
-                for i in range(needed_mock):
-                    chain = random.choice(chains)
-                    if chain == 'ETH': val = random.uniform(200, 1500)
-                    elif chain == 'BTC': val = random.uniform(50, 400)
-                    elif chain == 'SOL': val = random.uniform(8000, 45000)
-                    else: val = random.uniform(500000, 2500000)
-                    
-                    chain_wallets = get_wallets_by_chain(chain)
-                    wallet = random.choice(chain_wallets) if chain_wallets else None
-                    wallet_label = wallet.label if wallet else f"Unknown {chain} Whale"
-                    wallet_type = wallet.wallet_type if wallet else "unknown"
-                    wallet_address = wallet.address if wallet else f"0x{random.randbytes(20).hex()}"
-                    
-                    # Randomize timestamps over the last 24 hours
-                    ts = current_ts - random.randint(120, 86400)
-                    
-                    whale_alerts.append({
-                        'chain': chain,
-                        'value': val,
-                        'currency': chain,
-                        'timestamp': ts,
-                        'link': f"https://{chain.lower()}scan.io/address/{wallet_address}" if chain in ['ETH','BTC'] else '#',
-                        'wallet_label': wallet_label,
-                        'wallet_type': wallet_type,
-                        'wallet_address': wallet_address
-                    })
-                    
             # Sort globally by timestamp descending and take top 50 alerts
             if whale_alerts:
                 whale_alerts = sorted(whale_alerts, key=lambda x: x.get('timestamp', 0), reverse=True)[:50]
@@ -203,8 +189,8 @@ def get_model_info():
         logger.error(f"Failed to load state for model info: {e}")
     
     # Handle multi-asset state structure
-    balance = state.get('total_balance', state.get('balance', 10000))
-    total_return = ((balance - 10000) / 10000) * 100
+    balance = state.get('total_balance', state.get('balance'))
+    total_return = None  # Cannot compute without knowing real initial capital
     
     # Trade stats via storage
     trades = []
@@ -221,7 +207,7 @@ def get_model_info():
         'model_name': 'Ultimate Agent (PPO)',
         'model_exists': model_exists,
         'model_date': model_date,
-        'total_return': round(total_return, 2),
+        'total_return': None,
         'win_rate': round(win_rate, 1),
         'total_trades': total,
         'winning_trades': winning,
@@ -495,6 +481,43 @@ def get_market_analysis():
     return jsonify(response)
 
 
+@app.route('/api/ohlcv')
+def get_ohlcv():
+    """Get OHLCV candlestick data from Binance for the dashboard chart."""
+    import requests as _req
+    import os as _os
+    from flask import request as flask_req
+
+    symbol = flask_req.args.get('symbol', 'BTCUSDT').upper().replace('/', '')
+    interval = flask_req.args.get('interval', '1h')
+    limit = min(int(flask_req.args.get('limit', 500)), 1000)
+
+    try:
+        base_url = _os.environ.get("BINANCE_FUTURES_URL", "https://data-api.binance.vision")
+        url = base_url + "/api/v3/klines"
+        resp = _req.get(url, params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=15)
+        data = resp.json()
+
+        if isinstance(data, dict) and data.get('code'):
+            logger.error(f"Binance klines error for {symbol}: {data}")
+            return jsonify([])
+
+        candles = []
+        for row in data:
+            candles.append({
+                'time': int(row[0]) // 1000,  # ms → seconds
+                'open': float(row[1]),
+                'high': float(row[2]),
+                'low': float(row[3]),
+                'close': float(row[4]),
+                'volume': float(row[5]),
+            })
+        return jsonify(candles)
+    except Exception as e:
+        logger.error(f"OHLCV fetch error for {symbol}: {e}")
+        return jsonify([])
+
+
 @app.route('/api/debug/log')
 def get_crash_log():
     """Get crash log if exists."""
@@ -503,6 +526,419 @@ def get_crash_log():
         with open(log_file, 'r') as f:
             return f.read(), 200, {'Content-Type': 'text/plain'}
     return "No crash log found. Bot might be running or log not written.", 404
+
+
+@app.route('/api/testnet/status')
+def get_testnet_status():
+    """Get Binance testnet account status, balances and positions."""
+    import os
+    try:
+        api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
+        api_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+
+        if not api_key or not api_secret:
+            return jsonify({'error': 'Testnet API keys not configured on server', 'configured': False})
+
+        from src.api.binance import BinanceConnector
+        testnet = BinanceConnector(api_key=api_key, api_secret=api_secret, testnet=True)
+
+        connectivity = testnet.test_connectivity()
+        balances = testnet.get_all_balances() or {}
+
+        portfolio_value = 0.0
+        positions_data = []
+        usdt_balance = 0.0
+
+        # Binance spot testnet only supports a limited set of trading pairs.
+        # Attempting to fetch tickers for unsupported symbols returns "Invalid symbol"
+        # and can cause slow timeouts if repeated. Limit to known testnet pairs.
+        TESTNET_QUOTE_USDT = {'BTC', 'ETH', 'BNB', 'LTC', 'TRX', 'XRP', 'SOL', 'ADA', 'DOGE'}
+
+        for currency, amounts in balances.items():
+            total = float(amounts.get('total', 0))
+            if total > 0:
+                if currency == 'USDT':
+                    portfolio_value += total
+                    usdt_balance = float(amounts.get('free', 0))
+                elif currency in TESTNET_QUOTE_USDT:
+                    try:
+                        # Use slash format — BinanceConnector.get_ticker strips the slash internally
+                        ticker = testnet.get_ticker(f"{currency}/USDT")
+                        price = float(ticker.get('last', 0))
+                        if price > 0:
+                            value_usdt = total * price
+                            portfolio_value += value_usdt
+                            positions_data.append({
+                                'asset': currency,
+                                'amount': total,
+                                'price': price,
+                                'value_usdt': value_usdt
+                            })
+                    except Exception:
+                        pass
+                # Skip currencies not in the testnet whitelist to avoid Invalid symbol hangs
+
+        return jsonify({
+            'configured': True,
+            'connected': bool(connectivity),
+            'api_key_prefix': f"{api_key[:8]}...{api_key[-4:]}",
+            'portfolio_value': portfolio_value,
+            'usdt_balance': usdt_balance,
+            'pnl_pct': None,
+            'pnl_usdt': None,
+            'positions': positions_data,
+            'balance_count': len(balances)
+        })
+    except Exception as e:
+        logger.error(f"Testnet status error: {e}")
+        return jsonify({'error': str(e), 'configured': True, 'connected': False})
+
+
+@app.route('/api/testnet/order', methods=['POST'])
+def place_testnet_order():
+    """Place a market order on Binance testnet."""
+    import os
+    from flask import request as flask_request
+    try:
+        api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
+        api_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+
+        if not api_key or not api_secret:
+            return jsonify({'success': False, 'error': 'Testnet API keys not configured on server'}), 400
+
+        data = flask_request.get_json() or {}
+        symbol = data.get('symbol', 'BTC/USDT')
+        side = data.get('side', 'buy')
+        amount_usdt = float(data.get('amount_usdt', 100))
+
+        from src.api.binance import BinanceConnector
+        testnet = BinanceConnector(api_key=api_key, api_secret=api_secret, testnet=True)
+
+        ticker = testnet.get_ticker(symbol)
+        current_price = float(ticker['last'])
+
+        if side == 'buy':
+            amount_base = amount_usdt / current_price
+        else:
+            base_currency = symbol.split('/')[0]
+            balances = testnet.get_all_balances() or {}
+            amount_base = float(balances.get(base_currency, {}).get('free', 0))
+            if amount_base == 0:
+                return jsonify({'success': False, 'error': f'No {base_currency} to sell'}), 400
+
+        order = testnet.place_market_order(symbol=symbol, side=side, amount=amount_base)
+
+        return jsonify({
+            'success': bool(order),
+            'order': order,
+            'price': current_price,
+            'amount': amount_base,
+            'symbol': symbol,
+            'side': side
+        })
+    except Exception as e:
+        logger.error(f"Testnet order error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+@app.route('/api/testnet/orders')
+def get_testnet_orders():
+    """Get open orders on Binance testnet."""
+    import os
+    try:
+        api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
+        api_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+
+        if not api_key or not api_secret:
+            return jsonify({'error': 'Testnet API keys not configured on server', 'orders': []})
+
+        from src.api.binance import BinanceConnector
+        testnet = BinanceConnector(api_key=api_key, api_secret=api_secret, testnet=True)
+        open_orders = testnet.get_open_orders()
+
+        return jsonify({'orders': open_orders or []})
+    except Exception as e:
+        logger.error(f"Testnet orders error: {e}")
+        return jsonify({'error': str(e), 'orders': []})
+
+
+@app.route('/api/testnet/trades')
+def get_testnet_trades():
+    """Get testnet trade history (bot-mirrored real orders)."""
+    try:
+        from src.api.testnet_executor import get_testnet_executor
+        executor = get_testnet_executor()
+        if not executor:
+            return jsonify({'trades': [], 'error': 'Testnet not configured'})
+        limit = int(request.args.get('limit', 200))
+        trades = executor.get_trades(limit=limit)
+        return jsonify({'trades': trades, 'total': len(trades)})
+    except Exception as e:
+        logger.error(f"GET /api/testnet/trades error: {e}")
+        return jsonify({'trades': [], 'error': str(e)})
+
+
+@app.route('/api/testnet/positions')
+def get_testnet_positions():
+    """Get current open positions on testnet with live prices and unrealized PNL."""
+    try:
+        from src.api.testnet_executor import get_testnet_executor
+        executor = get_testnet_executor()
+        if not executor:
+            return jsonify({'positions': [], 'error': 'Testnet not configured'})
+        positions = executor.get_current_positions()
+        return jsonify({'positions': positions})
+    except Exception as e:
+        logger.error(f"GET /api/testnet/positions error: {e}")
+        return jsonify({'positions': [], 'error': str(e)})
+
+
+@app.route('/api/testnet/pnl')
+def get_testnet_pnl():
+    """Get testnet PNL summary: realized, unrealized, win rate, equity curve."""
+    try:
+        from src.api.testnet_executor import get_testnet_executor
+        executor = get_testnet_executor()
+        if not executor:
+            return jsonify({'error': 'Testnet not configured', 'realized_pnl': 0, 'unrealized_pnl': 0})
+        summary = executor.get_pnl_summary()
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"GET /api/testnet/pnl error: {e}")
+        return jsonify({'error': str(e), 'realized_pnl': 0, 'unrealized_pnl': 0})
+
+
+@app.route('/api/testnet/execute', methods=['POST'])
+def execute_testnet_trade():
+    """Manually trigger a testnet trade (for testing). Body: {action, symbol, price, confidence, sl, tp}."""
+    import os
+    from flask import request as flask_request
+    try:
+        data = flask_request.get_json() or {}
+        action = data.get('action', 'OPEN_LONG_SPLIT')
+        symbol = data.get('symbol', 'BTCUSDT')
+        confidence = float(data.get('confidence', 0.6))
+        sl = float(data.get('sl', 0))
+        tp = float(data.get('tp', 0))
+
+        from src.api.testnet_executor import get_testnet_executor
+        executor = get_testnet_executor()
+        if not executor:
+            return jsonify({'success': False, 'error': 'Testnet not configured'}), 400
+
+        # Get current price from connector
+        from src.api.binance import BinanceConnector
+        api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
+        api_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+        connector = BinanceConnector(api_key=api_key, api_secret=api_secret, testnet=True)
+
+        ccxt_symbol = symbol if '/' in symbol else symbol[:-4] + '/USDT'
+        ticker = connector.get_ticker(ccxt_symbol)
+        price = float(ticker.get('last', data.get('price', 0)))
+
+        # Build a synthetic bot_trade dict
+        bot_trade = {
+            'action': action,
+            'symbol': symbol,
+            'price': price,
+            'confidence': confidence,
+            'sl': sl if sl > 0 else price * 0.95,
+            'tp': tp if tp > 0 else price * 1.05,
+            'units': 0,
+            'pnl': 0,
+        }
+
+        record = executor.mirror_trade(bot_trade, {})
+        return jsonify({'success': bool(record and record.get('executed')), 'trade': record})
+    except Exception as e:
+        logger.error(f"POST /api/testnet/execute error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+
+# ---------------------------------------------------------------------------
+# HTF Agent endpoints
+# ---------------------------------------------------------------------------
+
+HTF_STATE_FILE = PROJECT_ROOT / "logs" / "htf_trading_state.json"
+HTF_TRADES_FILE = PROJECT_ROOT / "logs" / "htf_trades.json"
+
+
+def _load_htf_state() -> dict:
+    """Load HTF bot state from disk."""
+    if HTF_STATE_FILE.exists():
+        try:
+            return json.loads(HTF_STATE_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _load_htf_trades(limit: int = 200) -> list:
+    """Load HTF trade history from line-delimited JSON."""
+    if not HTF_TRADES_FILE.exists():
+        return []
+    trades = []
+    try:
+        with open(HTF_TRADES_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    trades.append(json.loads(line))
+    except Exception as e:
+        logger.error(f"HTF trades read error: {e}")
+    return trades[-limit:]
+
+
+@app.route('/api/htf/status')
+def get_htf_status():
+    """Return HTF agent status: position, last signal, model info, feature summary."""
+    try:
+        state = _load_htf_state()
+        if not state:
+            return jsonify({
+                'running': False,
+                'symbol': 'BTCUSDT',
+                'position': 0,
+                'position_label': 'FLAT',
+                'balance': None,
+                'realized_pnl': 0.0,
+                'unrealized_pnl': 0.0,
+                'message': 'HTF bot not running or no state file found',
+            })
+
+        # Compute unrealized PnL from current price if position is open
+        position = int(state.get('position', 0))
+        position_price = float(state.get('position_price', 0.0))
+        position_units = float(state.get('position_units', 0.0))
+        sl_price = float(state.get('sl_price', 0.0))
+        tp_price = float(state.get('tp_price', 0.0))
+        realized_pnl = float(state.get('realized_pnl', 0.0))
+
+        # Try to get current price for unrealized PnL
+        unrealized_pnl = 0.0
+        current_price = 0.0
+        try:
+            from src.api.binance import BinanceConnector
+            connector = BinanceConnector()
+            ticker = connector.get_ticker('BTC/USDT')
+            current_price = float(ticker.get('last', 0))
+            if position != 0 and position_price > 0 and position_units > 0:
+                if position == 1:
+                    unrealized_pnl = (current_price - position_price) * position_units
+                else:
+                    unrealized_pnl = (position_price - current_price) * position_units
+        except Exception:
+            pass
+
+        trades = _load_htf_trades(limit=500)
+        close_trades = [t for t in trades if 'CLOSE' in t.get('action', '').upper()]
+        wins = [t for t in close_trades if t.get('pnl', 0) > 0]
+        win_rate = len(wins) / len(close_trades) if close_trades else 0.0
+
+        return jsonify({
+            'running': True,
+            'symbol': state.get('symbol', 'BTCUSDT'),
+            'position': position,
+            'position_label': {1: 'LONG', -1: 'SHORT', 0: 'FLAT'}.get(position, 'FLAT'),
+            'position_price': position_price,
+            'position_units': position_units,
+            'sl_price': sl_price,
+            'tp_price': tp_price,
+            'current_price': current_price,
+            'balance': float(state.get('balance', 0)),
+            'realized_pnl': realized_pnl,
+            'unrealized_pnl': unrealized_pnl,
+            'total_pnl': realized_pnl + unrealized_pnl,
+            'win_rate': win_rate,
+            'trade_count': len(close_trades),
+            'model_path': state.get('model_path'),
+            'start_time': state.get('start_time'),
+            'updated_at': state.get('updated_at'),
+            'dry_run': state.get('dry_run', True),
+        })
+    except Exception as e:
+        logger.error(f"GET /api/htf/status error: {e}")
+        return jsonify({'error': str(e), 'running': False}), 500
+
+
+@app.route('/api/htf/trades')
+def get_htf_trades():
+    """Return HTF agent trade history."""
+    try:
+        limit = int(request.args.get('limit', 200))
+        trades = _load_htf_trades(limit=limit)
+        return jsonify({'trades': trades, 'total': len(trades)})
+    except Exception as e:
+        logger.error(f"GET /api/htf/trades error: {e}")
+        return jsonify({'trades': [], 'error': str(e)})
+
+
+@app.route('/api/htf/performance')
+def get_htf_performance():
+    """Return HTF performance metrics: Sharpe ratio, return, drawdown, win rate."""
+    try:
+        trades = _load_htf_trades(limit=1000)
+        state = _load_htf_state()
+
+        close_trades = [t for t in trades if 'CLOSE' in t.get('action', '').upper()]
+        pnls = [float(t.get('pnl', 0)) for t in close_trades]
+
+        if not pnls:
+            return jsonify({
+                'total_trades': 0,
+                'win_rate': 0.0,
+                'total_pnl': 0.0,
+                'avg_pnl': 0.0,
+                'sharpe': 0.0,
+                'max_drawdown': 0.0,
+                'return_pct': 0.0,
+                'message': 'No closed trades yet',
+            })
+
+        wins = [p for p in pnls if p > 0]
+        win_rate = len(wins) / len(pnls)
+        total_pnl = sum(pnls)
+        avg_pnl = total_pnl / len(pnls)
+
+        # Sharpe ratio (daily, assuming each trade ~4h average)
+        if len(pnls) > 1:
+            mean_r = float(np.mean(pnls))
+            std_r = float(np.std(pnls))
+            sharpe = (mean_r / (std_r + 1e-10)) * (6 ** 0.5)  # annualise ~6 trades/day
+        else:
+            sharpe = 0.0
+
+        # Max drawdown via equity curve
+        initial_balance = float(state.get('balance', 10000)) - total_pnl
+        equity = initial_balance
+        peak = equity
+        max_dd = 0.0
+        for p in pnls:
+            equity += p
+            peak = max(peak, equity)
+            dd = (peak - equity) / (peak + 1e-10)
+            max_dd = max(max_dd, dd)
+
+        return_pct = (total_pnl / (initial_balance + 1e-10)) * 100
+
+        return jsonify({
+            'total_trades': len(close_trades),
+            'wins': len(wins),
+            'losses': len(pnls) - len(wins),
+            'win_rate': round(win_rate, 4),
+            'total_pnl': round(total_pnl, 2),
+            'avg_pnl': round(avg_pnl, 2),
+            'best_trade': round(max(pnls), 2),
+            'worst_trade': round(min(pnls), 2),
+            'sharpe': round(sharpe, 3),
+            'max_drawdown': round(max_dd * 100, 2),
+            'return_pct': round(return_pct, 2),
+            'start_time': state.get('start_time'),
+        })
+    except Exception as e:
+        logger.error(f"GET /api/htf/performance error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     # threaded=True is CRITICAL to prevent single requests (like Market Analysis fallback)
