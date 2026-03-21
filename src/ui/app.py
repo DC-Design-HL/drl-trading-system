@@ -2192,13 +2192,15 @@ def main():
             
             lp_active_assets_count = len(asset_rows) if asset_rows else len(state.get('available_assets', []))
             
-            # System status (client mode: infer from recent trades; server mode: check process)
+            # System status: check if API server is reachable and any bot process is running
             if IS_CLIENT_MODE:
-                is_online = bool(all_trades_lp and (datetime.now() - datetime.fromisoformat(
-                    all_trades_lp[-1].get('timestamp', '2000-01-01').replace('Z', '+00:00').split('+')[0]
-                )).total_seconds() < 3600)
+                # Client mode: server reachable = online (we got state data)
+                is_online = bool(state and state.get('available_assets'))
             else:
-                is_online = check_process_running("live_trading_multi.py")
+                # Server mode: check if any trading bot process is running
+                is_online = (check_process_running("live_trading_multi.py") or
+                             check_process_running("live_trading_htf.py") or
+                             check_process_running("api_server"))
             status_dot = '🟢' if is_online else '🔴'
             status_text = 'Online' if is_online else 'Offline'
             status_color = '#00e676' if is_online else '#ff5252'
