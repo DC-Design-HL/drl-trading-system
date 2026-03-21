@@ -275,6 +275,7 @@ def metric_card(
     value: Any,
     delta: Optional[float] = None,
     icon: Optional[str] = None,
+    value_color: Optional[str] = None,
 ) -> str:
     """
     Render a styled metric card.
@@ -284,6 +285,7 @@ def metric_card(
         value: Main display value (string or number).
         delta: Optional delta number — green if positive, red if negative.
         icon: Optional emoji/icon prefix for the label.
+        value_color: Optional hex color for the value text.
 
     Returns:
         HTML string.
@@ -293,11 +295,15 @@ def metric_card(
 
     # Format value
     if value is None:
-        value_html = '<span style="color:{TEXT_MUTED};">—</span>'
+        value_html = f'<span style="color:{TEXT_MUTED};">—</span>'
     elif isinstance(value, (int, float)):
         value_html = f'<span class="mono">{_format_number(value)}</span>'
     else:
         value_html = _esc(str(value))
+
+    # Apply value color if specified
+    if value_color and value_html:
+        value_html = f'<span style="color:{value_color}">{value_html}</span>'
 
     # Format delta
     delta_html = ""

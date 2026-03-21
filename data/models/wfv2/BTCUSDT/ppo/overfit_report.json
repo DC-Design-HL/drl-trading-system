@@ -1,0 +1,73 @@
+{
+  "asset": "BTCUSDT",
+  "algorithm": "ppo",
+  "interpretation": {
+    "val_test_ratio < 1.5": "Excellent generalization",
+    "val_test_ratio 1.5-3.0": "Mild overfitting (acceptable)",
+    "val_test_ratio 3.0-5.0": "Moderate overfitting (review features)",
+    "val_test_ratio > 5.0": "Severe overfitting (do not deploy)"
+  },
+  "avg_val_sharpe": 2.5138,
+  "avg_test_sharpe": 0.0941,
+  "avg_val_test_ratio": 19.162,
+  "max_val_test_ratio": 131.008,
+  "per_fold": [
+    {
+      "fold": 0,
+      "val_sharpe": 5.1592,
+      "test_sharpe": -1.342751113093844,
+      "ratio": 3.842,
+      "verdict": "moderate"
+    },
+    {
+      "fold": 1,
+      "val_sharpe": 2.6641,
+      "test_sharpe": 0.440853148064068,
+      "ratio": 6.043,
+      "verdict": "severe"
+    },
+    {
+      "fold": 2,
+      "val_sharpe": 3.7877,
+      "test_sharpe": 0.45014443047793185,
+      "ratio": 8.414,
+      "verdict": "severe"
+    },
+    {
+      "fold": 3,
+      "val_sharpe": 4.2044,
+      "test_sharpe": 0.03209266277242663,
+      "ratio": 131.008,
+      "verdict": "severe"
+    },
+    {
+      "fold": 4,
+      "val_sharpe": 0.9018,
+      "test_sharpe": 2.517297210287318,
+      "ratio": 0.358,
+      "verdict": "excellent"
+    },
+    {
+      "fold": 5,
+      "val_sharpe": 2.1141,
+      "test_sharpe": -0.9086043430774919,
+      "ratio": 2.327,
+      "verdict": "mild"
+    },
+    {
+      "fold": 6,
+      "val_sharpe": 1.6802,
+      "test_sharpe": 1.5256795120713844,
+      "ratio": 1.101,
+      "verdict": "excellent"
+    },
+    {
+      "fold": 7,
+      "val_sharpe": -0.4013,
+      "test_sharpe": -1.9617508342105634,
+      "ratio": 0.205,
+      "verdict": "excellent"
+    }
+  ],
+  "overall_verdict": "DO NOT DEPLOY \u2014 severe overfitting detected"
+}

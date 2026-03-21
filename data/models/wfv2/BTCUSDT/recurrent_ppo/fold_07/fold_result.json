@@ -1,0 +1,73 @@
+{
+  "fold": 7,
+  "asset": "BTCUSDT",
+  "algorithm": "recurrent_ppo",
+  "train_start": "2024-12-20",
+  "train_end": "2025-09-20",
+  "val_start": "2025-09-20",
+  "val_end": "2025-12-20",
+  "test_start": "2025-12-20",
+  "test_end": "2026-03-20",
+  "train_bars": 6576,
+  "val_bars": 2184,
+  "test_bars": 2160,
+  "steps_trained": 200000,
+  "train_elapsed_s": 498.1,
+  "best_val_sharpe": 1.6278,
+  "val_metrics": {
+    "total_return": 0.009860245878278147,
+    "total_return_pct": 0.99,
+    "sharpe_ratio": 1.627807236388374,
+    "sortino_ratio": 0.8442538617318486,
+    "max_drawdown": 0.014275929859473572,
+    "max_drawdown_pct": 1.43,
+    "total_trades": 2,
+    "win_rate": 0.5,
+    "profit_factor": 4.65276759667874,
+    "avg_trade_pnl": 50.29980235874223,
+    "final_balance": 10098.602458782781
+  },
+  "test_metrics": {
+    "total_return": 0.0,
+    "total_return_pct": 0.0,
+    "sharpe_ratio": 0.0,
+    "sortino_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "profit_factor": 0.0,
+    "avg_trade_pnl": 0.0,
+    "final_balance": 10000.0
+  },
+  "overfit_ratio_val_test": 162.781,
+  "overfit_flag": true,
+  "callback_history": [
+    {
+      "step": 25000,
+      "val_sharpe": 0.0,
+      "val_return_pct": 0.0,
+      "val_trades": 0,
+      "train_mean_reward": -79.8801,
+      "overfit_ratio": 7988.01
+    },
+    {
+      "step": 50000,
+      "val_sharpe": 1.6278,
+      "val_return_pct": 0.99,
+      "val_trades": 2,
+      "train_mean_reward": -45.3319,
+      "overfit_ratio": 27.85
+    },
+    {
+      "step": 75000,
+      "val_sharpe": -0.7012,
+      "val_return_pct": -1.82,
+      "val_trades": 35,
+      "train_mean_reward": -28.4293,
+      "overfit_ratio": 40.55
+    }
+  ],
+  "model_path": "data/models/wfv2/BTCUSDT/recurrent_ppo/fold_07/best_model.zip",
+  "vecnorm_path": "data/models/wfv2/BTCUSDT/recurrent_ppo/fold_07/vecnorm.pkl"
+}

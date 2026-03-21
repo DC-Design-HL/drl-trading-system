@@ -1,0 +1,90 @@
+{
+  "asset": "BTCUSDT",
+  "algorithm": "recurrent_ppo",
+  "total_folds": 8,
+  "valid_folds": 8,
+  "oos_sharpe_mean": -0.6017,
+  "oos_sharpe_std": 2.0594,
+  "oos_sharpe_min": -4.0845,
+  "oos_sharpe_max": 2.9161,
+  "oos_return_mean_pct": 0.03,
+  "oos_return_std_pct": 2.75,
+  "oos_drawdown_mean_pct": 2.87,
+  "positive_fold_pct": 25.0,
+  "avg_trades_per_fold": 10.6,
+  "overfit_flags_count": 2,
+  "per_fold": [
+    {
+      "fold": 0,
+      "test_period": "2024-03-20 \u2192 2024-06-20",
+      "oos_sharpe": 0.708840550167873,
+      "oos_return_pct": 0.53,
+      "oos_drawdown_pct": 1.21,
+      "oos_trades": 2,
+      "overfit": false
+    },
+    {
+      "fold": 1,
+      "test_period": "2024-06-20 \u2192 2024-09-20",
+      "oos_sharpe": 0.06210002210611327,
+      "oos_return_pct": 0.0,
+      "oos_drawdown_pct": 6.57,
+      "oos_trades": 35,
+      "overfit": false
+    },
+    {
+      "fold": 2,
+      "test_period": "2024-09-20 \u2192 2024-12-20",
+      "oos_sharpe": -3.220067557352702,
+      "oos_return_pct": -2.96,
+      "oos_drawdown_pct": 3.96,
+      "oos_trades": 4,
+      "overfit": false
+    },
+    {
+      "fold": 3,
+      "test_period": "2024-12-20 \u2192 2025-03-20",
+      "oos_sharpe": -0.4438723130694505,
+      "oos_return_pct": -0.38,
+      "oos_drawdown_pct": 1.94,
+      "oos_trades": 3,
+      "overfit": true
+    },
+    {
+      "fold": 4,
+      "test_period": "2025-03-20 \u2192 2025-06-20",
+      "oos_sharpe": -4.084477280912384,
+      "oos_return_pct": -2.24,
+      "oos_drawdown_pct": 2.46,
+      "oos_trades": 3,
+      "overfit": false
+    },
+    {
+      "fold": 5,
+      "test_period": "2025-06-20 \u2192 2025-09-20",
+      "oos_sharpe": -0.7525245772924295,
+      "oos_return_pct": -1.38,
+      "oos_drawdown_pct": 3.15,
+      "oos_trades": 18,
+      "overfit": false
+    },
+    {
+      "fold": 6,
+      "test_period": "2025-09-20 \u2192 2025-12-20",
+      "oos_sharpe": 2.916144904205858,
+      "oos_return_pct": 6.66,
+      "oos_drawdown_pct": 3.65,
+      "oos_trades": 20,
+      "overfit": false
+    },
+    {
+      "fold": 7,
+      "test_period": "2025-12-20 \u2192 2026-03-20",
+      "oos_sharpe": 0.0,
+      "oos_return_pct": 0.0,
+      "oos_drawdown_pct": 0.0,
+      "oos_trades": 0,
+      "overfit": true
+    }
+  ]
+}

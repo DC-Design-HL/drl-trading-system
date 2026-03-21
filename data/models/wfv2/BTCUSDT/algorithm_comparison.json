@@ -1,0 +1,272 @@
+{
+  "ppo": {
+    "asset": "BTCUSDT",
+    "algorithm": "ppo",
+    "total_folds": 8,
+    "valid_folds": 8,
+    "oos_sharpe_mean": 0.0941,
+    "oos_sharpe_std": 1.3905,
+    "oos_sharpe_min": -1.9618,
+    "oos_sharpe_max": 2.5173,
+    "oos_return_mean_pct": 0.6,
+    "oos_return_std_pct": 3.14,
+    "oos_drawdown_mean_pct": 5.47,
+    "positive_fold_pct": 50.0,
+    "avg_trades_per_fold": 26.9,
+    "overfit_flags_count": 4,
+    "per_fold": [
+      {
+        "fold": 0,
+        "test_period": "2024-03-20 \u2192 2024-06-20",
+        "oos_sharpe": -1.342751113093844,
+        "oos_return_pct": -4.17,
+        "oos_drawdown_pct": 7.62,
+        "oos_trades": 33,
+        "overfit": true
+      },
+      {
+        "fold": 1,
+        "test_period": "2024-06-20 \u2192 2024-09-20",
+        "oos_sharpe": 0.440853148064068,
+        "oos_return_pct": 1.28,
+        "oos_drawdown_pct": 4.71,
+        "oos_trades": 40,
+        "overfit": true
+      },
+      {
+        "fold": 2,
+        "test_period": "2024-09-20 \u2192 2024-12-20",
+        "oos_sharpe": 0.45014443047793185,
+        "oos_return_pct": 1.05,
+        "oos_drawdown_pct": 6.77,
+        "oos_trades": 28,
+        "overfit": true
+      },
+      {
+        "fold": 3,
+        "test_period": "2024-12-20 \u2192 2025-03-20",
+        "oos_sharpe": 0.03209266277242663,
+        "oos_return_pct": -0.12,
+        "oos_drawdown_pct": 8.32,
+        "oos_trades": 34,
+        "overfit": true
+      },
+      {
+        "fold": 4,
+        "test_period": "2025-03-20 \u2192 2025-06-20",
+        "oos_sharpe": 2.517297210287318,
+        "oos_return_pct": 6.21,
+        "oos_drawdown_pct": 3.32,
+        "oos_trades": 23,
+        "overfit": false
+      },
+      {
+        "fold": 5,
+        "test_period": "2025-06-20 \u2192 2025-09-20",
+        "oos_sharpe": -0.9086043430774919,
+        "oos_return_pct": -1.81,
+        "oos_drawdown_pct": 5.04,
+        "oos_trades": 16,
+        "overfit": false
+      },
+      {
+        "fold": 6,
+        "test_period": "2025-09-20 \u2192 2025-12-20",
+        "oos_sharpe": 1.5256795120713844,
+        "oos_return_pct": 4.09,
+        "oos_drawdown_pct": 4.9,
+        "oos_trades": 37,
+        "overfit": false
+      },
+      {
+        "fold": 7,
+        "test_period": "2025-12-20 \u2192 2026-03-20",
+        "oos_sharpe": -1.9617508342105634,
+        "oos_return_pct": -1.72,
+        "oos_drawdown_pct": 3.12,
+        "oos_trades": 4,
+        "overfit": false
+      }
+    ]
+  },
+  "recurrent_ppo": {
+    "asset": "BTCUSDT",
+    "algorithm": "recurrent_ppo",
+    "total_folds": 8,
+    "valid_folds": 8,
+    "oos_sharpe_mean": -0.6017,
+    "oos_sharpe_std": 2.0594,
+    "oos_sharpe_min": -4.0845,
+    "oos_sharpe_max": 2.9161,
+    "oos_return_mean_pct": 0.03,
+    "oos_return_std_pct": 2.75,
+    "oos_drawdown_mean_pct": 2.87,
+    "positive_fold_pct": 25.0,
+    "avg_trades_per_fold": 10.6,
+    "overfit_flags_count": 2,
+    "per_fold": [
+      {
+        "fold": 0,
+        "test_period": "2024-03-20 \u2192 2024-06-20",
+        "oos_sharpe": 0.708840550167873,
+        "oos_return_pct": 0.53,
+        "oos_drawdown_pct": 1.21,
+        "oos_trades": 2,
+        "overfit": false
+      },
+      {
+        "fold": 1,
+        "test_period": "2024-06-20 \u2192 2024-09-20",
+        "oos_sharpe": 0.06210002210611327,
+        "oos_return_pct": 0.0,
+        "oos_drawdown_pct": 6.57,
+        "oos_trades": 35,
+        "overfit": false
+      },
+      {
+        "fold": 2,
+        "test_period": "2024-09-20 \u2192 2024-12-20",
+        "oos_sharpe": -3.220067557352702,
+        "oos_return_pct": -2.96,
+        "oos_drawdown_pct": 3.96,
+        "oos_trades": 4,
+        "overfit": false
+      },
+      {
+        "fold": 3,
+        "test_period": "2024-12-20 \u2192 2025-03-20",
+        "oos_sharpe": -0.4438723130694505,
+        "oos_return_pct": -0.38,
+        "oos_drawdown_pct": 1.94,
+        "oos_trades": 3,
+        "overfit": true
+      },
+      {
+        "fold": 4,
+        "test_period": "2025-03-20 \u2192 2025-06-20",
+        "oos_sharpe": -4.084477280912384,
+        "oos_return_pct": -2.24,
+        "oos_drawdown_pct": 2.46,
+        "oos_trades": 3,
+        "overfit": false
+      },
+      {
+        "fold": 5,
+        "test_period": "2025-06-20 \u2192 2025-09-20",
+        "oos_sharpe": -0.7525245772924295,
+        "oos_return_pct": -1.38,
+        "oos_drawdown_pct": 3.15,
+        "oos_trades": 18,
+        "overfit": false
+      },
+      {
+        "fold": 6,
+        "test_period": "2025-09-20 \u2192 2025-12-20",
+        "oos_sharpe": 2.916144904205858,
+        "oos_return_pct": 6.66,
+        "oos_drawdown_pct": 3.65,
+        "oos_trades": 20,
+        "overfit": false
+      },
+      {
+        "fold": 7,
+        "test_period": "2025-12-20 \u2192 2026-03-20",
+        "oos_sharpe": 0.0,
+        "oos_return_pct": 0.0,
+        "oos_drawdown_pct": 0.0,
+        "oos_trades": 0,
+        "overfit": true
+      }
+    ]
+  },
+  "qrdqn": {
+    "asset": "BTCUSDT",
+    "algorithm": "qrdqn",
+    "total_folds": 8,
+    "valid_folds": 8,
+    "oos_sharpe_mean": 0.5937,
+    "oos_sharpe_std": 1.9377,
+    "oos_sharpe_min": -2.048,
+    "oos_sharpe_max": 3.8953,
+    "oos_return_mean_pct": 2.64,
+    "oos_return_std_pct": 4.99,
+    "oos_drawdown_mean_pct": 4.71,
+    "positive_fold_pct": 50.0,
+    "avg_trades_per_fold": 59.9,
+    "overfit_flags_count": 3,
+    "per_fold": [
+      {
+        "fold": 0,
+        "test_period": "2024-03-20 \u2192 2024-06-20",
+        "oos_sharpe": -0.027944273770943908,
+        "oos_return_pct": -0.27,
+        "oos_drawdown_pct": 6.46,
+        "oos_trades": 37,
+        "overfit": true
+      },
+      {
+        "fold": 1,
+        "test_period": "2024-06-20 \u2192 2024-09-20",
+        "oos_sharpe": 0.7952396425509709,
+        "oos_return_pct": 2.48,
+        "oos_drawdown_pct": 5.1,
+        "oos_trades": 46,
+        "overfit": false
+      },
+      {
+        "fold": 2,
+        "test_period": "2024-09-20 \u2192 2024-12-20",
+        "oos_sharpe": 3.895325054419261,
+        "oos_return_pct": 11.78,
+        "oos_drawdown_pct": 4.17,
+        "oos_trades": 33,
+        "overfit": false
+      },
+      {
+        "fold": 3,
+        "test_period": "2024-12-20 \u2192 2025-03-20",
+        "oos_sharpe": 0.7663013433779732,
+        "oos_return_pct": 2.42,
+        "oos_drawdown_pct": 5.64,
+        "oos_trades": 108,
+        "overfit": true
+      },
+      {
+        "fold": 4,
+        "test_period": "2025-03-20 \u2192 2025-06-20",
+        "oos_sharpe": -2.0480205196187407,
+        "oos_return_pct": -1.3,
+        "oos_drawdown_pct": 1.93,
+        "oos_trades": 2,
+        "overfit": false
+      },
+      {
+        "fold": 5,
+        "test_period": "2025-06-20 \u2192 2025-09-20",
+        "oos_sharpe": -1.617233826430432,
+        "oos_return_pct": -3.12,
+        "oos_drawdown_pct": 4.44,
+        "oos_trades": 73,
+        "overfit": false
+      },
+      {
+        "fold": 6,
+        "test_period": "2025-09-20 \u2192 2025-12-20",
+        "oos_sharpe": -0.11859939895190616,
+        "oos_return_pct": -0.49,
+        "oos_drawdown_pct": 6.78,
+        "oos_trades": 47,
+        "overfit": true
+      },
+      {
+        "fold": 7,
+        "test_period": "2025-12-20 \u2192 2026-03-20",
+        "oos_sharpe": 3.1045755874375645,
+        "oos_return_pct": 9.64,
+        "oos_drawdown_pct": 3.12,
+        "oos_trades": 133,
+        "overfit": false
+      }
+    ]
+  }
+}

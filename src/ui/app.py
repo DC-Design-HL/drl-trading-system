@@ -1992,18 +1992,18 @@ def main():
             # ── Metric Row 1: Realized, Open PnL, Win Rate, Trades ──
             r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1, 1, 1])
             with r1c1:
-                _rpnl_color = _pnl_color(realized_pnl_total)
                 _rpnl_val = f'{_pnl_sign(realized_pnl_total)}${abs(realized_pnl_total):,.2f}'
                 st.markdown(metric_card(
                     label="Realized PNL",
-                    value=f'<span style="color:{_rpnl_color}">{_rpnl_val}</span>',
+                    value=_rpnl_val,
+                    value_color=_pnl_color(realized_pnl_total),
                 ), unsafe_allow_html=True)
             with r1c2:
-                _opnl_color = _pnl_color(open_pnl_total)
                 _opnl_val = f'{_pnl_sign(open_pnl_total)}${abs(open_pnl_total):,.2f}'
                 st.markdown(metric_card(
                     label="Open PNL",
-                    value=f'<span style="color:{_opnl_color}">{_opnl_val}</span>',
+                    value=_opnl_val,
+                    value_color=_pnl_color(open_pnl_total),
                 ), unsafe_allow_html=True)
             with r1c3:
                 _wr_sub = f'<div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px;">{total_winning_trades}W / {total_closed_trades - total_winning_trades}L</div>'
@@ -2150,39 +2150,323 @@ def main():
             )
 
         with tab_performance:
-            total_pnl = state.get('realized_pnl', 0)
-            total_trades = state.get('total_trades', 0)
-            balance = state.get('balance', state.get('total_balance'))
+            # ─── Fetch REAL trade data from API ───
+            perf_trades = []
+            try:
+                perf_trades = load_trading_log()
+            except Exception:
+                pass
 
-            col1, col2, col3, col4 = st.columns(4)
+            # ─── Compute metrics from closed trades ───
+            STARTING_BALANCE = 20000.0
+            closed_trades = []
+            for t in perf_trades:
+                action = t.get('action', '').upper()
+                if 'CLOSE' in action or 'EXIT' in action:
+                    closed_trades.append(t)
 
-            with col1:
-                st.metric(
+            closed_trades.sort(key=lambda x: x.get('timestamp', ''))
+
+            total_closed = len(closed_trades)
+            pnl_list = [t.get('pnl', 0) or 0 for t in closed_trades]
+            total_pnl_perf = sum(pnl_list)
+            wins = [p for p in pnl_list if p > 0]
+            losses = [p for p in pnl_list if p < 0]
+            win_count = len(wins)
+            loss_count = len(losses)
+
+            # Win Rate
+            win_rate_perf = (win_count / total_closed * 100) if total_closed > 0 else 0
+
+            # Total Return
+            total_return_pct = (total_pnl_perf / STARTING_BALANCE * 100) if STARTING_BALANCE > 0 else 0
+
+            # Best / Worst trade
+            best_trade_pnl = max(pnl_list) if pnl_list else 0
+            worst_trade_pnl = min(pnl_list) if pnl_list else 0
+            best_trade_sym = ''
+            worst_trade_sym = ''
+            for t in closed_trades:
+                p = t.get('pnl', 0) or 0
+                sym = t.get('symbol', t.get('asset', ''))
+                if sym.endswith('USDT'):
+                    sym = sym[:-4]
+                if p == best_trade_pnl and not best_trade_sym:
+                    best_trade_sym = sym
+                if p == worst_trade_pnl and not worst_trade_sym:
+                    worst_trade_sym = sym
+
+            # Profit Factor
+            gross_profit = sum(wins) if wins else 0
+            gross_loss = abs(sum(losses)) if losses else 0
+            profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (float('inf') if gross_profit > 0 else 0)
+
+            # Sharpe Ratio from individual trade returns
+            sharpe_perf = None
+            if len(pnl_list) >= 2:
+                trade_returns = [p / STARTING_BALANCE for p in pnl_list]
+                mean_ret = sum(trade_returns) / len(trade_returns)
+                var_ret = sum((r - mean_ret) ** 2 for r in trade_returns) / (len(trade_returns) - 1)
+                std_ret = var_ret ** 0.5
+                if std_ret > 0:
+                    sharpe_perf = (mean_ret / std_ret) * (252 ** 0.5)  # Annualized
+
+            # Max Drawdown from equity curve
+            equity_curve = [0.0]
+            for p in pnl_list:
+                equity_curve.append(equity_curve[-1] + p)
+            peak = equity_curve[0]
+            max_dd = 0.0
+            for eq in equity_curve:
+                if eq > peak:
+                    peak = eq
+                dd = peak - eq
+                if dd > max_dd:
+                    max_dd = dd
+            max_dd_pct = (max_dd / STARTING_BALANCE * 100) if STARTING_BALANCE > 0 else 0
+
+            # ─── Render Performance Tab ───
+            st.markdown(
+                section_header("Trading Performance", icon="📈"),
+                unsafe_allow_html=True,
+            )
+
+            # ── Row 1: Total Return, Sharpe, Max Drawdown ──
+            p1c1, p1c2, p1c3 = st.columns(3)
+            with p1c1:
+                _ret_color = _pnl_color(total_return_pct)
+                _ret_val = f'{_pnl_sign(total_return_pct)}{abs(total_return_pct):.2f}%'
+                st.markdown(metric_card(
                     label="Total Return",
-                    value="N/A",
-                    delta=f"${total_pnl:.2f}"
-                )
-            with col2:
-                st.metric(
-                    label="Portfolio Value",
-                    value=f"${balance:,.2f}" if balance is not None else "—",
-                )
-            with col3:
-                st.metric(
+                    value=f'<span style="color:{_ret_color}">{_ret_val}</span>',
+                    icon="📊",
+                ), unsafe_allow_html=True)
+            with p1c2:
+                _sharpe_val = f'{sharpe_perf:.2f}' if sharpe_perf is not None else '—'
+                st.markdown(metric_card(
+                    label="Sharpe Ratio",
+                    value=_sharpe_val,
+                    icon="📐",
+                ), unsafe_allow_html=True)
+            with p1c3:
+                st.markdown(metric_card(
+                    label="Max Drawdown",
+                    value=f'-{max_dd_pct:.2f}%',
+                    icon="📉",
+                ), unsafe_allow_html=True)
+
+            # ── Row 2: Total Trades, Win Rate, Profit Factor ──
+            p2c1, p2c2, p2c3 = st.columns(3)
+            with p2c1:
+                _tr_sub = f'<div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px;">{win_count}W / {loss_count}L</div>'
+                st.markdown(metric_card(
                     label="Total Trades",
-                    value=f"{total_trades}",
+                    value=str(total_closed),
+                    icon="🔄",
+                ) + _tr_sub, unsafe_allow_html=True)
+            with p2c2:
+                _wr_color = SUCCESS if win_rate_perf >= 50 else DANGER
+                st.markdown(metric_card(
+                    label="Win Rate",
+                    value=f'<span style="color:{_wr_color}">{win_rate_perf:.1f}%</span>',
+                    icon="🎯",
+                ), unsafe_allow_html=True)
+            with p2c3:
+                _pf_val = f'{profit_factor:.2f}' if profit_factor != float('inf') else '∞'
+                st.markdown(metric_card(
+                    label="Profit Factor",
+                    value=_pf_val,
+                    icon="⚖️",
+                ), unsafe_allow_html=True)
+
+            # ── Row 3: Total P&L, Best Trade, Worst Trade ──
+            p3c1, p3c2, p3c3 = st.columns(3)
+            with p3c1:
+                _tpnl_color = _pnl_color(total_pnl_perf)
+                _tpnl_val = f'{_pnl_sign(total_pnl_perf)}${abs(total_pnl_perf):,.2f}'
+                st.markdown(metric_card(
+                    label="Total P&L",
+                    value=f'<span style="color:{_tpnl_color}">{_tpnl_val}</span>',
+                    icon="💰",
+                ), unsafe_allow_html=True)
+            with p3c2:
+                _best_label = f'Best Trade ({best_trade_sym})' if best_trade_sym else 'Best Trade'
+                st.markdown(metric_card(
+                    label=_best_label,
+                    value=f'<span style="color:{SUCCESS}">{_pnl_sign(best_trade_pnl)}${abs(best_trade_pnl):,.2f}</span>' if pnl_list else '—',
+                    icon="🏆",
+                ), unsafe_allow_html=True)
+            with p3c3:
+                _worst_label = f'Worst Trade ({worst_trade_sym})' if worst_trade_sym else 'Worst Trade'
+                st.markdown(metric_card(
+                    label=_worst_label,
+                    value=f'<span style="color:{DANGER}">{_pnl_sign(worst_trade_pnl)}${abs(worst_trade_pnl):,.2f}</span>' if pnl_list else '—',
+                    icon="💔",
+                ), unsafe_allow_html=True)
+
+            # ── Equity Curve (SVG) ──
+            if len(equity_curve) > 1:
+                st.markdown(
+                    section_header("Equity Curve", icon="📈"),
+                    unsafe_allow_html=True,
                 )
-            with col4:
-                st.metric(
-                    label="Realized P&L",
-                    value=f"${(total_pnl or 0):,.2f}",
+                eq_svg_w, eq_svg_h = 900, 180
+                eq_n = len(equity_curve)
+                eq_min = min(equity_curve)
+                eq_max = max(equity_curve)
+                eq_range = max(abs(eq_min), abs(eq_max), 0.01)
+                eq_pad = 20
+
+                svg_pts = []
+                svg_fill = []
+                for i, val in enumerate(equity_curve):
+                    x = (i / max(eq_n - 1, 1)) * eq_svg_w
+                    y = eq_svg_h - eq_pad - ((val + eq_range) / (2 * eq_range)) * (eq_svg_h - 2 * eq_pad)
+                    svg_pts.append(f"{x:.1f},{y:.1f}")
+                    svg_fill.append(f"{x:.1f},{y:.1f}")
+
+                poly_str = ' '.join(svg_pts)
+                fill_pts = svg_fill.copy()
+                if fill_pts:
+                    fill_pts.append(f"{eq_svg_w:.1f},{eq_svg_h - eq_pad:.1f}")
+                    fill_pts.append(f"0,{eq_svg_h - eq_pad:.1f}")
+                fill_str_eq = ' '.join(fill_pts)
+
+                last_eq_val = equity_curve[-1]
+                eq_color = SUCCESS if last_eq_val >= 0 else DANGER
+                eq_fill_start = 'rgba(16,185,129,0.3)' if last_eq_val >= 0 else 'rgba(239,68,68,0.3)'
+                eq_fill_end = 'rgba(16,185,129,0.0)' if last_eq_val >= 0 else 'rgba(239,68,68,0.0)'
+                zero_y_eq = eq_svg_h - eq_pad - ((0 + eq_range) / (2 * eq_range)) * (eq_svg_h - 2 * eq_pad)
+
+                eq_svg = f'''<svg width="100%" viewBox="0 0 {eq_svg_w} {eq_svg_h}" preserveAspectRatio="none" style="display:block;">
+                    <defs><linearGradient id="perfEqGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="{eq_fill_start}"/>
+                        <stop offset="100%" stop-color="{eq_fill_end}"/>
+                    </linearGradient></defs>
+                    <line x1="0" y1="{zero_y_eq:.1f}" x2="{eq_svg_w}" y2="{zero_y_eq:.1f}" stroke="rgba(255,255,255,0.08)" stroke-width="1" stroke-dasharray="4,4"/>
+                    <polygon points="{fill_str_eq}" fill="url(#perfEqGrad)"/>
+                    <polyline points="{poly_str}" fill="none" stroke="{eq_color}" stroke-width="2.5"/>
+                </svg>'''
+                st.markdown(card_container(eq_svg), unsafe_allow_html=True)
+
+            # ── Trade History Table ──
+            if closed_trades:
+                st.markdown(
+                    section_header("Closed Trades", icon="📋"),
+                    unsafe_allow_html=True,
                 )
-            
-            backtest_file = project_root / 'data' / 'backtest_report.txt'
-            if backtest_file.exists():
-                st.markdown("### Backtest Results")
-                with open(backtest_file, 'r') as f:
-                    st.code(f.read())
+                trade_rows = []
+                for t in closed_trades:
+                    sym = t.get('symbol', t.get('asset', ''))
+                    if sym.endswith('USDT'):
+                        sym = sym[:-4] + '/USDT'
+                    ts = t.get('timestamp', '')
+                    if 'T' in ts:
+                        ts = ts.split('T')[0] + ' ' + ts.split('T')[1][:8]
+                    pnl_val = t.get('pnl', 0) or 0
+                    price = t.get('price', 0) or 0
+                    reason = t.get('reason', '—')
+                    trade_rows.append([
+                        ts,
+                        sym,
+                        f'${price:,.2f}',
+                        pnl_text(pnl_val),
+                        reason,
+                    ])
+                st.markdown(
+                    styled_table(
+                        headers=["Time", "Symbol", "Price", "P&L", "Reason"],
+                        rows=trade_rows,
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            # ── Walk-Forward Validation Results ──
+            wf_file = project_root / 'data' / 'models' / 'htf_walkforward_50pct_v2' / 'walk_forward_summary.json'
+            if wf_file.exists():
+                st.markdown(
+                    section_header("Walk-Forward Validation", icon="🔬"),
+                    unsafe_allow_html=True,
+                )
+                try:
+                    with open(wf_file, 'r') as f:
+                        wf = json.load(f)
+                    wf_sharpe = wf.get('oos_sharpe_mean', 0)
+                    wf_return = wf.get('oos_return_mean_pct', 0)
+                    wf_dd = wf.get('oos_drawdown_mean_pct', 0)
+                    wf_pos_folds = wf.get('positive_fold_pct', 0)
+                    wf_total_folds = wf.get('total_folds', 0)
+                    wf_verdict = wf.get('overfit_verdict', '—')
+
+                    wfc1, wfc2, wfc3, wfc4 = st.columns(4)
+                    with wfc1:
+                        st.markdown(metric_card(
+                            label="OOS Sharpe",
+                            value=f'{wf_sharpe:.2f}',
+                            icon="📐",
+                        ), unsafe_allow_html=True)
+                    with wfc2:
+                        _wfr_color = _pnl_color(wf_return)
+                        st.markdown(metric_card(
+                            label="OOS Return",
+                            value=f'<span style="color:{_wfr_color}">{_pnl_sign(wf_return)}{abs(wf_return):.1f}%</span>',
+                            icon="📊",
+                        ), unsafe_allow_html=True)
+                    with wfc3:
+                        st.markdown(metric_card(
+                            label="Mean Drawdown",
+                            value=f'-{wf_dd:.1f}%',
+                            icon="📉",
+                        ), unsafe_allow_html=True)
+                    with wfc4:
+                        _folds_color = SUCCESS if wf_pos_folds >= 75 else (WARNING if wf_pos_folds >= 50 else DANGER)
+                        st.markdown(metric_card(
+                            label="Positive Folds",
+                            value=f'<span style="color:{_folds_color}">{wf_pos_folds:.0f}%</span>',
+                            icon="✅",
+                        ), unsafe_allow_html=True)
+
+                    # Verdict badge
+                    verdict_color = SUCCESS if 'EXCELLENT' in wf_verdict.upper() else (WARNING if 'ACCEPTABLE' in wf_verdict.upper() else DANGER)
+                    st.markdown(
+                        card_container(
+                            f'<div style="text-align:center;padding:8px 0;">'
+                            f'<span style="color:{TEXT_MUTED};font-size:11px;text-transform:uppercase;letter-spacing:0.8px;">Overfit Verdict</span><br/>'
+                            f'<span style="color:{verdict_color};font-size:16px;font-weight:700;">{_esc(wf_verdict)}</span>'
+                            f'</div>'
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                    # Per-fold table
+                    per_fold = wf.get('per_fold', [])
+                    if per_fold:
+                        fold_rows = []
+                        for fold in per_fold:
+                            f_sharpe = fold.get('oos_sharpe', 0)
+                            f_ret = fold.get('oos_return_pct', 0)
+                            f_dd = fold.get('oos_drawdown_pct', 0)
+                            f_wr = fold.get('oos_win_rate', 0) * 100
+                            f_trades = int(fold.get('oos_trades', 0))
+                            f_period = fold.get('test_period', '—')
+                            fold_rows.append([
+                                f"Fold {fold.get('fold', '?')}",
+                                f_period,
+                                f'{f_sharpe:.2f}',
+                                pnl_text(f_ret) if f_ret != 0 else '0.00%',
+                                f'-{f_dd:.1f}%',
+                                f'{f_wr:.0f}%',
+                                str(f_trades),
+                            ])
+                        st.markdown(
+                            styled_table(
+                                headers=["Fold", "Period", "Sharpe", "Return", "Drawdown", "Win Rate", "Trades"],
+                                rows=fold_rows,
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                except Exception:
+                    pass
         
         with tab_whales:
             st.markdown("### 🐋 On-Chain Whale Analytics")

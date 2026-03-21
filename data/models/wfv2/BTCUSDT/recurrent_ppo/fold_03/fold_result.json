@@ -1,0 +1,73 @@
+{
+  "fold": 3,
+  "asset": "BTCUSDT",
+  "algorithm": "recurrent_ppo",
+  "train_start": "2023-12-20",
+  "train_end": "2024-09-20",
+  "val_start": "2024-09-20",
+  "val_end": "2024-12-20",
+  "test_start": "2024-12-20",
+  "test_end": "2025-03-20",
+  "train_bars": 6600,
+  "val_bars": 2184,
+  "test_bars": 2160,
+  "steps_trained": 300000,
+  "train_elapsed_s": 492.0,
+  "best_val_sharpe": 2.9878,
+  "val_metrics": {
+    "total_return": 0.04195051945637115,
+    "total_return_pct": 4.2,
+    "sharpe_ratio": 2.9877964155018986,
+    "sortino_ratio": 2.272228025605099,
+    "max_drawdown": 0.02348511781256021,
+    "max_drawdown_pct": 2.35,
+    "total_trades": 6,
+    "win_rate": 0.6666666666666666,
+    "profit_factor": 4.109031874028569,
+    "avg_trade_pnl": 70.92103853925248,
+    "final_balance": 10419.505194563711
+  },
+  "test_metrics": {
+    "total_return": -0.003835504654637043,
+    "total_return_pct": -0.38,
+    "sharpe_ratio": -0.4438723130694505,
+    "sortino_ratio": -0.07347273768156601,
+    "max_drawdown": 0.019446937939124536,
+    "max_drawdown_pct": 1.94,
+    "total_trades": 3,
+    "win_rate": 0.3333333333333333,
+    "profit_factor": 0.738858589963365,
+    "avg_trade_pnl": -15.283871341663106,
+    "final_balance": 9961.64495345363
+  },
+  "overfit_ratio_val_test": 6.731,
+  "overfit_flag": true,
+  "callback_history": [
+    {
+      "step": 25000,
+      "val_sharpe": 0.0,
+      "val_return_pct": 0.0,
+      "val_trades": 0,
+      "train_mean_reward": -86.6528,
+      "overfit_ratio": 8665.28
+    },
+    {
+      "step": 50000,
+      "val_sharpe": 0.0,
+      "val_return_pct": 0.0,
+      "val_trades": 0,
+      "train_mean_reward": -52.568,
+      "overfit_ratio": 5256.8
+    },
+    {
+      "step": 75000,
+      "val_sharpe": 2.9878,
+      "val_return_pct": 4.2,
+      "val_trades": 6,
+      "train_mean_reward": -34.0596,
+      "overfit_ratio": 11.4
+    }
+  ],
+  "model_path": "data/models/wfv2/BTCUSDT/recurrent_ppo/fold_03/best_model.zip",
+  "vecnorm_path": "data/models/wfv2/BTCUSDT/recurrent_ppo/fold_03/vecnorm.pkl"
+}

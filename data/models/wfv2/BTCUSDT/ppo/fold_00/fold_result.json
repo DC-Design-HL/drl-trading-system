@@ -1,0 +1,73 @@
+{
+  "fold": 0,
+  "asset": "BTCUSDT",
+  "algorithm": "ppo",
+  "train_start": "2023-03-20",
+  "train_end": "2023-12-20",
+  "val_start": "2023-12-20",
+  "val_end": "2024-03-20",
+  "test_start": "2024-03-20",
+  "test_end": "2024-06-20",
+  "train_bars": 6599,
+  "val_bars": 2184,
+  "test_bars": 2208,
+  "steps_trained": 300000,
+  "train_elapsed_s": 218.4,
+  "best_val_sharpe": 5.1592,
+  "val_metrics": {
+    "total_return": 0.17423021974702532,
+    "total_return_pct": 17.42,
+    "sharpe_ratio": 5.1591961629712335,
+    "sortino_ratio": 7.122808845803115,
+    "max_drawdown": 0.04129201713421819,
+    "max_drawdown_pct": 4.13,
+    "total_trades": 35,
+    "win_rate": 0.5714285714285714,
+    "profit_factor": 2.3439182649981722,
+    "avg_trade_pnl": 46.81285655214824,
+    "final_balance": 11742.302197470253
+  },
+  "test_metrics": {
+    "total_return": -0.041656358200345855,
+    "total_return_pct": -4.17,
+    "sharpe_ratio": -1.342751113093844,
+    "sortino_ratio": -1.7604959052548068,
+    "max_drawdown": 0.07622698210566094,
+    "max_drawdown_pct": 7.62,
+    "total_trades": 33,
+    "win_rate": 0.30303030303030304,
+    "profit_factor": 0.7607748443584682,
+    "avg_trade_pnl": -11.870252860181123,
+    "final_balance": 9583.436417996541
+  },
+  "overfit_ratio_val_test": 3.842,
+  "overfit_flag": true,
+  "callback_history": [
+    {
+      "step": 25000,
+      "val_sharpe": 3.6381,
+      "val_return_pct": 12.4,
+      "val_trades": 38,
+      "train_mean_reward": -97.7152,
+      "overfit_ratio": 26.86
+    },
+    {
+      "step": 50000,
+      "val_sharpe": 4.4785,
+      "val_return_pct": 15.35,
+      "val_trades": 40,
+      "train_mean_reward": -63.9259,
+      "overfit_ratio": 14.27
+    },
+    {
+      "step": 75000,
+      "val_sharpe": 5.1592,
+      "val_return_pct": 17.42,
+      "val_trades": 35,
+      "train_mean_reward": -41.2964,
+      "overfit_ratio": 8.0
+    }
+  ],
+  "model_path": "data/models/wfv2/BTCUSDT/ppo/fold_00/best_model.zip",
+  "vecnorm_path": "data/models/wfv2/BTCUSDT/ppo/fold_00/vecnorm.pkl"
+}
