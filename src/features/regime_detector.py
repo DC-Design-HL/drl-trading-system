@@ -7,6 +7,10 @@ Identifies market conditions to adapt trading strategy:
 - RANGING: No clear trend (ADX < 20)
 - HIGH_VOLATILITY: Large price swings (ATR > 1.5x average)
 - LOW_VOLATILITY: Quiet market (ATR < 0.5x average)
+
+Also provides HMM-based regime prediction via get_hmm_prediction()
+which loads trained regime classifier models and returns forward-looking
+transition probabilities.
 """
 
 import numpy as np
@@ -15,8 +19,15 @@ from typing import Dict, Tuple, Optional
 from dataclasses import dataclass
 from enum import Enum
 import logging
+import time
+import os
 
 logger = logging.getLogger(__name__)
+
+# ── HMM Prediction Cache ─────────────────────────────────────────────────────
+_hmm_cache: Dict[str, dict] = {}
+_hmm_cache_time: Dict[str, float] = {}
+_HMM_CACHE_TTL = 60  # 60 seconds
 
 
 class MarketRegime(Enum):
@@ -301,3 +312,75 @@ class MarketRegimeDetector:
             MarketRegime.UNKNOWN: "❓"
         }
         return emojis.get(regime, "❓")
+
+
+def get_hmm_prediction(df: pd.DataFrame, symbol: str = "BTCUSDT") -> Optional[Dict]:
+    """
+    Load trained HMM regime classifier and predict current regime with
+    forward-looking transition probabilities.
+    
+    This surfaces the HMM model (trained offline in regime_classifier.py)
+    for live use in the API and trading logic.
+    
+    Args:
+        df: DataFrame with OHLCV data (needs ~200+ bars of 1H data)
+        symbol: Trading symbol (e.g. BTCUSDT) — used to find the model file
+        
+    Returns:
+        dict with:
+            - hmm_regime: str (e.g. 'BULL_TREND', 'BEAR_TREND', etc.)
+            - transition_probs: dict mapping regime_name -> probability of transitioning
+            - regime_confidence: float (max transition probability = confidence in staying)
+            - regime_history: list of last 24 regime labels
+        Returns None if model not found or prediction fails.
+    """
+    global _hmm_cache, _hmm_cache_time
+    
+    clean_symbol = symbol.replace('/', '').upper()
+    
+    # Check cache (60s TTL)
+    if clean_symbol in _hmm_cache:
+        if time.time() - _hmm_cache_time.get(clean_symbol, 0) < _HMM_CACHE_TTL:
+            return _hmm_cache[clean_symbol]
+    
+    try:
+        from src.models.regime_classifier import RegimeClassifier
+        
+        classifier = RegimeClassifier(n_regimes=4)
+        loaded = classifier.load(symbol=clean_symbol)
+        
+        if not loaded:
+            logger.warning(f"HMM model not found for {clean_symbol}")
+            return None
+        
+        if df is None or len(df) < 200:
+            logger.warning(f"Insufficient data for HMM prediction ({len(df) if df is not None else 0} bars, need 200+)")
+            return None
+        
+        prediction = classifier.predict(df)
+        
+        result = {
+            'hmm_regime': prediction.get('current_regime', 'UNKNOWN'),
+            'transition_probs': prediction.get('transition_probs', {}),
+            'regime_confidence': prediction.get('confidence', 0.0),
+            'regime_history': prediction.get('regime_history', []),
+        }
+        
+        # Cache result
+        _hmm_cache[clean_symbol] = result
+        _hmm_cache_time[clean_symbol] = time.time()
+        
+        logger.info(
+            f"🔮 HMM Regime [{clean_symbol}]: {result['hmm_regime']} "
+            f"(confidence={result['regime_confidence']:.2%}, "
+            f"transitions={result['transition_probs']})"
+        )
+        
+        return result
+        
+    except ImportError as e:
+        logger.warning(f"HMM prediction unavailable (missing dependency): {e}")
+        return None
+    except Exception as e:
+        logger.error(f"HMM prediction error for {clean_symbol}: {e}")
+        return None

@@ -347,7 +347,7 @@ class BinanceLiquidationTracker:
         self.symbol = symbol
         self.window_minutes = window_minutes
         self.cache = {}
-        self.cache_ttl = 300  # 300 second cache (up from 30s to conserve proxy bandwidth)
+        self.cache_ttl = 120  # 120 second cache (reduced from 300s for fresher data)
         
     def start(self):
         """No-op for REST API version."""
@@ -558,7 +558,7 @@ class BinanceOITracker:
         self.symbol = symbol
         self.window_minutes = window_minutes
         self.cache = {}
-        self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
+        self.cache_ttl = 120  # 120 second cache (reduced from 300s for fresher data)
         self.oi_history = deque(maxlen=100)  # Rolling OI/price history for signal computation
     
     def get_oi_signal(self) -> Dict:
@@ -619,7 +619,7 @@ class BinanceTopTraderClient:
     def __init__(self, symbol: str = "BTCUSDT"):
         self.symbol = symbol
         self.cache = {}
-        self.cache_ttl = 300  # 300 second cache (up from 60s to conserve proxy bandwidth)
+        self.cache_ttl = 120  # 120 second cache (reduced from 300s for fresher data)
         
     def get_large_transactions(self, min_btc: float = 100) -> Dict:
         """Get top trader positioning signal using OKX Top Trader ratio."""
@@ -969,17 +969,74 @@ class WhaleTracker:
         except Exception as e:
             logger.error(f"Error getting exchange reserve: {e}")
             signals_raw['exchange_reserve'] = None
-            
+
+        # 7. OI-Funding Divergence (smart money signal)
+        # When OI rises but funding drops → smart money going long (bullish)
+        # When OI rises but funding rises extreme → retail overleveraged (bearish)
+        # When OI drops + funding extreme → cascade liquidation risk
+        oi_funding_divergence = 0.0
+        try:
+            oi_sig = signals_raw.get('oi_trend', 0) or 0
+            if abs(oi_sig) > 0.01 and abs(funding_rate) > 0.0001:
+                if oi_sig > 0.3 and funding_rate < -0.0002:
+                    # OI rising + funding negative = smart money accumulating longs
+                    oi_funding_divergence = 0.6
+                    logger.info(f"🔍 OI-Funding Divergence: BULLISH (OI↑ + Funding↓)")
+                elif oi_sig > 0.3 and funding_rate > 0.0005:
+                    # OI rising + funding very positive = retail overleveraged long
+                    oi_funding_divergence = -0.6
+                    logger.info(f"🔍 OI-Funding Divergence: BEARISH (OI↑ + Funding↑↑ = squeeze risk)")
+                elif oi_sig < -0.3 and funding_rate < -0.0005:
+                    # OI dropping + funding very negative = short squeeze forming
+                    oi_funding_divergence = 0.4
+                    logger.info(f"🔍 OI-Funding Divergence: SLIGHT BULLISH (OI↓ + Funding↓↓ = short squeeze)")
+                elif oi_sig < -0.3 and funding_rate > 0.0005:
+                    # OI dropping + funding very positive = longs closing
+                    oi_funding_divergence = -0.4
+                    logger.info(f"🔍 OI-Funding Divergence: SLIGHT BEARISH (OI↓ + Funding↑↑ = longs exiting)")
+            signals_raw['oi_funding_divergence'] = oi_funding_divergence
+        except Exception as e:
+            logger.error(f"Error computing OI-Funding divergence: {e}")
+            signals_raw['oi_funding_divergence'] = 0.0
+
         # Calculate weighted score
-        weights = {
-            'flow': 0.20,             # Real-time whale buying/selling
-            'binance_ls': 0.15,       # Smart money positioning (imbalance) [INCREASED from 0.12]
-            'oi_trend': 0.10,         # Smart money interest [INCREASED from 0.08]
-            'large_txns': 0.10,       # Whale activity [INCREASED from 0.08]
-            'fear_greed': 0.08,       # Market sentiment [INCREASED from 0.07]
-            'whale_patterns': 0.10,   # Learned whale wallet patterns [REDUCED from 0.30 - data may be stale]
-            'exchange_reserve': 0.27, # Exchange reserve delta [INCREASED from 0.15 - more reliable real-time signal]
-        }
+        # Detect if WhaleStream is actually running (producing flow data)
+        whale_stream_active = False
+        if hasattr(self, 'whale_stream'):
+            try:
+                flow_metrics = self.whale_stream.get_metrics()
+                # If we have any non-zero flow data, stream is active
+                whale_stream_active = (
+                    flow_metrics.get('exchange_inflow', 0) != 0 or
+                    flow_metrics.get('exchange_outflow', 0) != 0 or
+                    flow_metrics.get('net_flow', 0) != 0
+                )
+            except Exception:
+                whale_stream_active = False
+        
+        if whale_stream_active:
+            # Full weights when WebSocket stream is running
+            weights = {
+                'flow': 0.20,
+                'binance_ls': 0.15,
+                'oi_trend': 0.10,
+                'large_txns': 0.10,
+                'fear_greed': 0.08,
+                'whale_patterns': 0.10,
+                'exchange_reserve': 0.27,
+            }
+        else:
+            # API mode: redistribute to reliable OKX signals + F&G
+            # WhaleStream/exchange_reserve/flow/patterns get 0%
+            weights = {
+                'flow': 0.0,
+                'binance_ls': 0.30,        # OKX L/S ratio — most reliable
+                'oi_trend': 0.25,           # OKX Open Interest
+                'large_txns': 0.25,         # OKX Top Trader ratio
+                'fear_greed': 0.20,         # Fear & Greed — contrarian
+                'whale_patterns': 0.0,
+                'exchange_reserve': 0.0,
+            }
         
         total_weight = 0
         weighted_sum = 0
@@ -987,19 +1044,27 @@ class WhaleTracker:
         
         for signal_name, weight in weights.items():
             value = signals_raw.get(signal_name)
-            if value is not None:
+            if value is not None and weight > 0:
                 weighted_sum += value * weight
                 total_weight += weight
                 
                 # Track signal direction for agreement
-                if value > 0.15:
+                # Use lower threshold (0.10 instead of 0.15) to produce
+                # non-NEUTRAL signals more often from the OKX data
+                if value > 0.10:
                     signal_directions.append('bullish')
-                elif value < -0.15:
+                elif value < -0.10:
                     signal_directions.append('bearish')
                 else:
                     signal_directions.append('neutral')
                     
         combined_score = weighted_sum / total_weight if total_weight > 0 else 0
+        
+        # Apply OI-Funding divergence as a bonus modifier (not weighted, additive)
+        divergence = signals_raw.get('oi_funding_divergence', 0) or 0
+        if abs(divergence) > 0.1:
+            combined_score += divergence * 0.25  # 25% of divergence signal added
+            logger.info(f"🔍 OI-Funding divergence applied: {divergence:+.2f} → score adjust {divergence*0.25:+.3f}")
         
         # Calculate signal agreement
         bullish_count = signal_directions.count('bullish')
@@ -1019,10 +1084,11 @@ class WhaleTracker:
             signal_agreement >= self.min_signal_agreement
         )
         
-        # Determine recommendation
-        if combined_score > 0.15 and bullish_count >= bearish_count:
+        # Determine recommendation (lowered threshold from 0.15 to 0.10
+        # so the tracker produces non-NEUTRAL signals more often)
+        if combined_score > 0.10 and bullish_count >= bearish_count:
             recommendation = 'bullish'
-        elif combined_score < -0.15 and bearish_count >= bullish_count:
+        elif combined_score < -0.10 and bearish_count >= bullish_count:
             recommendation = 'bearish'
         else:
             recommendation = 'neutral'
@@ -1049,6 +1115,7 @@ class WhaleTracker:
             'oi_trend': signals_raw.get('oi_trend', 0) or 0,
             'large_txns': signals_raw.get('large_txns', 0) or 0,
             'fear_greed': signals_raw.get('fear_greed', 0) or 0,
+            'oi_funding_divergence': signals_raw.get('oi_funding_divergence', 0) or 0,
             # Aggregated
             'combined_score': np.clip(combined_score, -1, 1),
             'confidence': confidence,

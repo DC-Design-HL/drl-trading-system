@@ -252,7 +252,8 @@ def get_market_analysis():
         'funding': None,
         'order_flow': None,
         'forecast': None,
-        'news': None
+        'news': None,
+        'stablecoin': None,
     }
     
     # Try to load from state first (Consistency with Bot)
@@ -400,8 +401,8 @@ def get_market_analysis():
         if not df.empty:
             result['price'] = float(df.iloc[-1]['close'])
         
-        # Regime Detector
-        from src.features.regime_detector import MarketRegimeDetector
+        # Regime Detector (ADX-based)
+        from src.features.regime_detector import MarketRegimeDetector, get_hmm_prediction
         regime = MarketRegimeDetector()
         regime_result = regime.detect_regime(df)
         
@@ -412,6 +413,16 @@ def get_market_analysis():
             'direction': str(getattr(regime_result, 'trend_direction', 'NEUTRAL')),
             'volatility': round(getattr(regime_result, 'volatility_ratio', 1), 2)
         }
+        
+        # HMM Regime Prediction (P1.1 — forward-looking transition probabilities)
+        try:
+            hmm_data = get_hmm_prediction(df, symbol=clean_symbol)
+            if hmm_data:
+                result['regime']['hmm_regime'] = hmm_data.get('hmm_regime', 'UNKNOWN')
+                result['regime']['transition_probs'] = hmm_data.get('transition_probs', {})
+                result['regime']['regime_confidence'] = round(hmm_data.get('regime_confidence', 0), 4)
+        except Exception as hmm_err:
+            logger.warning(f"HMM regime prediction failed: {hmm_err}")
     except Exception as e:
         logger.error(f"Market data fetch error: {e}")
         result['regime'] = {'error': str(e)}
@@ -432,8 +443,36 @@ def get_market_analysis():
     # It must rely on the live_trading_multi.py to populate the state.
     # If the state is missing data, we return empty/null to indicate "System Syncing".
     
-    if not result['mtf']:
-        result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
+    # MTF Fallback (P1.4): When MTF is still "Syncing...", compute it live
+    if not result['mtf'] or result['mtf'].get('reason') == 'Syncing...':
+        try:
+            from src.features.mtf_analyzer import MultiTimeframeAnalyzer
+            mtf_analyzer = MultiTimeframeAnalyzer(symbol=clean_symbol)
+            # Pass the 1H df we already fetched above (if available)
+            mtf_result = mtf_analyzer.get_confluence(primary_df=df if 'df' in dir() else None)
+            
+            signal_summary = {}
+            for tf, sig in mtf_result.signals.items():
+                signal_summary[tf] = {
+                    'direction': sig.direction.value,
+                    'strength': round(sig.strength, 3),
+                    'rsi': round(sig.rsi, 1),
+                }
+            
+            result['mtf'] = {
+                'aligned': mtf_result.aligned,
+                'bias': mtf_result.direction.value.upper(),
+                'strength': round(mtf_result.strength, 3),
+                'reason': mtf_result.recommendation,
+                'signals': signal_summary,
+                '4h': mtf_result.signals.get('4h', None) and mtf_result.signals['4h'].direction.value or 'neutral',
+                '1h': mtf_result.signals.get('1h', None) and mtf_result.signals['1h'].direction.value or 'neutral',
+                '15m': mtf_result.signals.get('15m', None) and mtf_result.signals['15m'].direction.value or 'neutral',
+            }
+            logger.info(f"📊 MTF fallback computed for {clean_symbol}: {result['mtf']['bias']}")
+        except Exception as mtf_err:
+            logger.error(f"MTF fallback error: {mtf_err}")
+            result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
         
     if not result['funding']:
         try:
@@ -464,13 +503,15 @@ def get_market_analysis():
                 # Layer details
                 'cvd': enhanced.get('cvd', {}),
                 'taker': enhanced.get('taker', {}),
-                'notable': enhanced.get('notable', {})
+                'notable': enhanced.get('notable', {}),
+                'orderbook': enhanced.get('orderbook', {}),
             }
         except Exception as e:
             logger.error(f"OrderFlow fallback error: {e}")
             result['order_flow'] = {
                 'bias': 'neutral', 'net_flow': 0, 'large_buys': 0, 'large_sells': 0,
-                'score': 0, 'cvd': {}, 'taker': {'ratio': 0.5}, 'notable': {}
+                'score': 0, 'cvd': {}, 'taker': {'ratio': 0.5}, 'notable': {},
+                'orderbook': {'score': 0, 'bias': 'neutral'}
             }
 
     # API Server should NOT perform heavy ML analysis on the fly.
@@ -478,9 +519,23 @@ def get_market_analysis():
     if not result['forecast']:
         # Return empty forecast instead of loading PyTorch on CPU to prevent API deadlock
         pass
-        
-    if not result['mtf']:
-        result['mtf'] = {'reason': 'Syncing...', 'aligned': False, 'bias': 'NEUTRAL'}
+
+    # Stablecoin Supply Signal (P1.5)
+    try:
+        from src.features.alternative_data import AlternativeDataCollector
+        alt_collector = AlternativeDataCollector()
+        stablecoin_data = alt_collector.fetch_stablecoin_supply()
+        if stablecoin_data:
+            result['stablecoin'] = {
+                'total_supply': stablecoin_data.get('total_supply', 0),
+                'change_7d_pct': stablecoin_data.get('change_7d_pct', 0),
+                'signal': stablecoin_data.get('signal', 'neutral'),
+            }
+        else:
+            result['stablecoin'] = None
+    except Exception as sc_err:
+        logger.error(f"Stablecoin supply error: {sc_err}")
+        result['stablecoin'] = None
 
     # Store result in 60s cache before returning
     result['_fetched_at'] = time.time()

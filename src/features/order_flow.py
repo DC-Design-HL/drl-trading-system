@@ -525,17 +525,18 @@ class OrderFlowAnalyzer:
         }
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # Combined: Enhanced Signal (all 3 layers blended)
+    # Combined: Enhanced Signal (all 4 layers blended)
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     def get_enhanced_signal(self, df: pd.DataFrame = None) -> Dict:
         """
-        Get blended order flow signal from all 3 layers.
+        Get blended order flow signal from all 4 layers.
 
         Weights:
-          - CVD (OHLCV):     50% — most reliable, always available
-          - Taker ratio:     30% — aggregate buy/sell pressure
-          - Notable orders:  20% — institutional activity
+          - CVD (OHLCV):          40% — most reliable, always available
+          - Taker ratio:          25% — aggregate buy/sell pressure
+          - Notable orders:       15% — institutional activity
+          - Order Book Imbalance: 20% — bid/ask depth ratio (short-term predictor)
 
         Returns dict with composite score [-1,+1] and layer details.
         """
@@ -556,11 +557,23 @@ class OrderFlowAnalyzer:
         # Layer 3: Notable orders ($5K+)
         notable_data = self.analyze_large_orders(trades)
 
-        # Blend: 50% CVD + 30% taker + 20% notable
+        # Layer 4: Order Book Imbalance (bid/ask depth ratio)
+        ob_data = None
+        ob_score = 0.0
+        try:
+            from src.features.orderbook_imbalance import get_orderbook_imbalance
+            ob_data = get_orderbook_imbalance(self.symbol)
+            if ob_data:
+                ob_score = ob_data.get('score', 0.0)
+        except Exception as e:
+            logger.warning(f"Order book imbalance unavailable: {e}")
+
+        # Blend: 40% CVD + 25% taker + 15% notable + 20% OB imbalance
         composite_score = (
-            0.50 * cvd_data['score'] +
-            0.30 * taker_data['score'] +
-            0.20 * notable_data['score']
+            0.40 * cvd_data['score'] +
+            0.25 * taker_data['score'] +
+            0.15 * notable_data['score'] +
+            0.20 * ob_score
         )
         composite_score = float(np.clip(composite_score, -1, 1))
 
@@ -579,6 +592,7 @@ class OrderFlowAnalyzer:
             'cvd': cvd_data,
             'taker': taker_data,
             'notable': notable_data,
+            'orderbook': ob_data or {'score': 0, 'bias': 'neutral'},
             # Backward compat for dashboard
             'large_buys': notable_data['large_buys'],
             'large_sells': notable_data['large_sells'],
@@ -587,11 +601,13 @@ class OrderFlowAnalyzer:
             'total_large_volume': notable_data['total_large_volume'],
         }
 
+        ob_str = f"OB={ob_score:+.2f}({ob_data['bias'] if ob_data else 'N/A'})" if ob_data else "OB=N/A"
         logger.info(
             f"📊 Order Flow [{self.symbol}]: score={composite_score:+.2f} ({bias}) | "
             f"CVD={cvd_data['score']:+.2f}({cvd_data['trend']}) | "
             f"Taker={taker_data['score']:+.2f}(buy={taker_data['ratio']:.1%}) | "
-            f"Notable={notable_data['score']:+.2f}(B:{notable_data['large_buys']}/S:{notable_data['large_sells']})"
+            f"Notable={notable_data['score']:+.2f}(B:{notable_data['large_buys']}/S:{notable_data['large_sells']}) | "
+            f"{ob_str}"
         )
 
         # Cache result
