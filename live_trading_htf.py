@@ -352,60 +352,20 @@ class HTFLiveBot:
         self._send_telegram_alert(trade)
 
     def _send_telegram_alert(self, trade: Dict) -> None:
-        """Send trade alert to Telegram group via bot API."""
+        """Write trade alert to a pending alerts file for OpenClaw to pick up."""
         try:
-            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            chat_id = os.getenv("TELEGRAM_CHAT_ID", "-5243679323")
-            if not bot_token:
-                logger.debug("No TELEGRAM_BOT_TOKEN set, skipping alert")
-                return
-
-            import requests as req
-            action = trade.get("action", "UNKNOWN")
-            symbol = trade.get("symbol", "?")
-            price = trade.get("price", 0)
-            conf = trade.get("confidence", 0)
-            pnl = trade.get("pnl", 0)
-            balance = trade.get("balance", 0)
-            reason = trade.get("reason", "model")
-
-            if "OPEN_LONG" in action:
-                emoji = "🟢"
-                title = "LONG OPENED"
-            elif "OPEN_SHORT" in action:
-                emoji = "🔴"
-                title = "SHORT OPENED"
-            elif "CLOSE" in action:
-                emoji = "✅" if pnl > 0 else "❌"
-                title = f"POSITION CLOSED ({'+'if pnl>0 else ''}${pnl:,.2f})"
-            else:
-                emoji = "📊"
-                title = action
-
-            lines = [
-                f"{emoji} <b>HTF Trade Alert</b>",
-                f"",
-                f"<b>{title}</b> — {symbol}",
-                f"💰 Price: <code>${price:,.2f}</code>",
-                f"🎯 Confidence: <code>{conf*100:.0f}%</code>",
-            ]
-            if "CLOSE" in action and pnl != 0:
-                pnl_emoji = "📈" if pnl > 0 else "📉"
-                lines.append(f"{pnl_emoji} P&L: <code>{'+'if pnl>0 else ''}${pnl:,.2f}</code>")
-            if reason and reason != "model":
-                lines.append(f"📋 Reason: {reason}")
-            lines.append(f"💼 Balance: <code>${balance:,.2f}</code>")
-
-            text = "\n".join(lines)
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            req.post(url, json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-            }, timeout=10)
-            logger.info("Telegram alert sent: %s %s @ $%.2f", action, symbol, price)
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "trade": trade,
+                }) + "\n")
+            logger.info("Trade alert queued: %s %s @ $%.2f",
+                        trade.get("action", "?"), trade.get("symbol", "?"),
+                        trade.get("price", 0))
         except Exception as exc:
-            logger.warning("Failed to send Telegram alert: %s", exc)
+            logger.warning("Failed to queue trade alert: %s", exc)
 
     # ------------------------------------------------------------------
     # Data fetching
