@@ -51,7 +51,7 @@ logger = logging.getLogger("htf_live")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-SYMBOL = "BTCUSDT"
+SYMBOL = os.environ.get("HTF_SYMBOL", "BTCUSDT")
 STATE_FILE = Path("logs/htf_trading_state.json")
 TRADES_FILE = Path("logs/htf_trades.json")
 
@@ -87,49 +87,70 @@ FETCH_DAYS = 12
 # Model path resolution
 # ---------------------------------------------------------------------------
 
-def find_best_htf_model() -> Tuple[Optional[Path], Optional[Path]]:
+def _find_best_fold_model(wf_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
+    """Find the best model (highest OOS Sharpe) in a walk-forward directory."""
+    best_sharpe = -999.0
+    best_model_path: Optional[Path] = None
+    best_vecnorm_path: Optional[Path] = None
+
+    for fold_dir in sorted(wf_dir.iterdir()):
+        result_file = fold_dir / "fold_result.json"
+        model_zip = fold_dir / "best_model.zip"
+        if not fold_dir.is_dir():
+            continue
+        if not (result_file.exists() and model_zip.exists()):
+            continue
+        try:
+            result = json.loads(result_file.read_text())
+            oos_sharpe = float(result.get("oos_sharpe", result.get("sharpe", result.get("test_metrics", {}).get("sharpe_ratio", -999))))
+            if oos_sharpe > best_sharpe:
+                best_sharpe = oos_sharpe
+                best_model_path = model_zip
+                vn = fold_dir / "vecnorm.pkl"
+                if not vn.exists():
+                    vn = fold_dir / "best_model_vecnorm.pkl"
+                if not vn.exists():
+                    vn = fold_dir / "fold_model_vecnorm.pkl"
+                best_vecnorm_path = vn if vn.exists() else None
+        except Exception:
+            continue
+
+    if best_model_path:
+        logger.info(
+            "HTF model: walk-forward best fold (OOS Sharpe %.2f) → %s",
+            best_sharpe, best_model_path,
+        )
+    return best_model_path, best_vecnorm_path
+
+
+def find_best_htf_model(symbol: str = "BTCUSDT") -> Tuple[Optional[Path], Optional[Path]]:
     """
     Return (model_path, vecnorm_path) for the best available HTF model.
 
-    Search order:
-      1. data/models/htf_walkforward_50pct_v2/ — best OOS Sharpe fold
-      2. data/models/htf/best_model.zip        — any saved HTF model
-      3. data/models/wfv2/BTCUSDT/ppo/fold_00/ — walk-forward fallback
+    Search order (symbol-aware):
+      1. data/models/htf_walkforward_<asset>/ — best OOS Sharpe fold (e.g. htf_walkforward_eth)
+      2. data/models/htf_walkforward_50pct_v2/ — BTC default walk-forward
+      3. data/models/htf/best_model.zip        — any saved HTF model
+      4. data/models/wfv2/BTCUSDT/ppo/fold_00/ — walk-forward fallback
     """
     root = Path("data/models")
 
-    # 1. Walk-forward 50pct directory (8 folds)
+    # Derive asset name from symbol (e.g. BTCUSDT -> btc, ETHUSDT -> eth)
+    asset = symbol.replace("USDT", "").lower()
+
+    # 1. Symbol-specific walk-forward directory (e.g. htf_walkforward_eth)
+    symbol_wf_dir = root / f"htf_walkforward_{asset}"
+    if symbol_wf_dir.exists():
+        model_path, vecnorm_path = _find_best_fold_model(symbol_wf_dir)
+        if model_path:
+            return model_path, vecnorm_path
+
+    # 2. Walk-forward 50pct directory (8 folds) — BTC default
     wfv_dir = root / "htf_walkforward_50pct_v2"
     if wfv_dir.exists():
-        best_sharpe = -999.0
-        best_model_path: Optional[Path] = None
-        best_vecnorm_path: Optional[Path] = None
-
-        for fold_dir in sorted(wfv_dir.iterdir()):
-            result_file = fold_dir / "fold_result.json"
-            model_zip = fold_dir / "best_model.zip"
-            if not (result_file.exists() and model_zip.exists()):
-                continue
-            try:
-                result = json.loads(result_file.read_text())
-                oos_sharpe = float(result.get("oos_sharpe", result.get("sharpe", -999)))
-                if oos_sharpe > best_sharpe:
-                    best_sharpe = oos_sharpe
-                    best_model_path = model_zip
-                    # Companion vecnorm (two naming conventions)
-                    vn = fold_dir / "vecnorm.pkl"
-                    if not vn.exists():
-                        vn = fold_dir / "best_model_vecnorm.pkl"
-                    best_vecnorm_path = vn if vn.exists() else None
-            except Exception:
-                continue
-
-        if best_model_path:
-            logger.info(
-                "HTF model: walk-forward best fold (OOS Sharpe %.2f) → %s",
-                best_sharpe, best_model_path,
-            )
-            return best_model_path, best_vecnorm_path
+        model_path, vecnorm_path = _find_best_fold_model(wfv_dir)
+        if model_path:
+            return model_path, vecnorm_path
 
     # 2. Generic HTF model directory
     htf_best = root / "htf" / "best_model.zip"
@@ -229,7 +250,7 @@ class HTFLiveBot:
     # ------------------------------------------------------------------
 
     def _load_model(self) -> None:
-        model_path, vecnorm_path = find_best_htf_model()
+        model_path, vecnorm_path = find_best_htf_model(self.symbol)
         if model_path is None:
             logger.warning("No model loaded — bot will HOLD on every step.")
             return
@@ -264,7 +285,8 @@ class HTFLiveBot:
             from src.api.testnet_executor import get_testnet_executor
             self.testnet_executor = get_testnet_executor()
             if self.testnet_executor:
-                logger.info("Testnet mirror enabled")
+                mode = "futures (real longs/shorts)" if getattr(self.testnet_executor, '_futures_executor', None) else "spot"
+                logger.info("Testnet mirror enabled (%s)", mode)
             else:
                 logger.warning("Testnet mirror: executor not available (keys missing?)")
         except Exception as exc:
@@ -836,12 +858,30 @@ class HTFLiveBot:
     # ------------------------------------------------------------------
 
     def _mirror_testnet(self, trade: Dict) -> None:
+        """
+        Mirror a bot decision to futures testnet.
+
+        OPEN_LONG / OPEN_SHORT → places real futures order + SL/TP exchange orders.
+        CLOSE_LONG / CLOSE_SHORT → skipped (exchange exits autonomously via SL/TP).
+        """
         if not self.testnet_executor:
+            return
+        action = trade.get("action", "")
+        # Exchange handles exits via SL/TP orders — do NOT send a close
+        if "CLOSE" in action:
+            logger.debug("Testnet mirror: skipping %s — exchange exits autonomously", action)
             return
         try:
             result = self.testnet_executor.mirror_trade(trade, {})
             if result and result.get("executed"):
-                logger.info("Testnet mirror: %s @ $%.2f", trade["action"], trade.get("price", 0))
+                logger.info(
+                    "Testnet mirror: %s @ $%.2f (order=%s sl=%s tp=%s)",
+                    action,
+                    trade.get("price", 0),
+                    result.get("order_id", ""),
+                    result.get("sl_order_id", ""),
+                    result.get("tp_order_id", ""),
+                )
         except Exception as exc:
             logger.warning("Testnet mirror failed: %s", exc)
 
@@ -931,7 +971,8 @@ class HTFLiveBot:
         """
         import websocket as _websocket
 
-        url = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
+        ws_symbol = self.symbol.lower()  # e.g. "ethusdt"
+        url = f"wss://stream.binance.com:9443/ws/{ws_symbol}@aggTrade"
 
         def _on_open(ws):
             logger.info("WS price monitor connected to aggTrade stream")
@@ -1067,9 +1108,16 @@ def main():
                         help="Initial balance in USDT (default: 10000)")
     parser.add_argument("--interval", type=int, default=15,
                         help="Decision interval in minutes (default: 15)")
+    parser.add_argument("--symbol", type=str, default=None,
+                        help="Trading symbol (e.g. ETHUSDT). Overrides HTF_SYMBOL env var.")
     parser.add_argument("--once", action="store_true",
                         help="Run a single iteration and exit")
     args = parser.parse_args()
+
+    # Symbol override: CLI flag > env var > default
+    if args.symbol:
+        global SYMBOL
+        SYMBOL = args.symbol
 
     dry_run = not args.live  # live flag disables dry_run
 

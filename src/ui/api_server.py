@@ -593,64 +593,41 @@ def get_crash_log():
 
 @app.route('/api/testnet/status')
 def get_testnet_status():
-    """Get Binance testnet account status, balances and positions."""
+    """Get Binance futures testnet account status, wallet balance and open positions."""
     import os
     try:
-        api_key = os.getenv('BINANCE_TESTNET_API_KEY', '').strip()
-        api_secret = os.getenv('BINANCE_TESTNET_API_SECRET', '').strip()
+        from src.api.futures_executor import get_futures_executor
+        executor = get_futures_executor()
+        if not executor:
+            return jsonify({
+                'error': 'Futures testnet API keys not configured on server',
+                'configured': False,
+            })
 
-        if not api_key or not api_secret:
-            return jsonify({'error': 'Testnet API keys not configured on server', 'configured': False})
+        portfolio = executor.get_portfolio()
+        positions = executor.get_positions()
 
-        from src.api.binance import BinanceConnector
-        testnet = BinanceConnector(api_key=api_key, api_secret=api_secret, testnet=True)
+        wallet = portfolio.get('total_wallet_balance', 0.0)
+        avail = portfolio.get('available_balance', 0.0)
+        unrealized = portfolio.get('total_unrealized_profit', 0.0)
 
-        connectivity = testnet.test_connectivity()
-        balances = testnet.get_all_balances() or {}
-
-        portfolio_value = 0.0
-        positions_data = []
-        usdt_balance = 0.0
-
-        # Binance spot testnet only supports a limited set of trading pairs.
-        # Attempting to fetch tickers for unsupported symbols returns "Invalid symbol"
-        # and can cause slow timeouts if repeated. Limit to known testnet pairs.
-        TESTNET_QUOTE_USDT = {'BTC', 'ETH', 'BNB', 'LTC', 'TRX', 'XRP', 'SOL', 'ADA', 'DOGE'}
-
-        for currency, amounts in balances.items():
-            total = float(amounts.get('total', 0))
-            if total > 0:
-                if currency == 'USDT':
-                    portfolio_value += total
-                    usdt_balance = float(amounts.get('free', 0))
-                elif currency in TESTNET_QUOTE_USDT:
-                    try:
-                        # Use slash format — BinanceConnector.get_ticker strips the slash internally
-                        ticker = testnet.get_ticker(f"{currency}/USDT")
-                        price = float(ticker.get('last', 0))
-                        if price > 0:
-                            value_usdt = total * price
-                            portfolio_value += value_usdt
-                            positions_data.append({
-                                'asset': currency,
-                                'amount': total,
-                                'price': price,
-                                'value_usdt': value_usdt
-                            })
-                    except Exception:
-                        pass
-                # Skip currencies not in the testnet whitelist to avoid Invalid symbol hangs
+        api_key = os.getenv('BINANCE_FUTURES_API_KEY', '')
+        key_prefix = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else '***'
 
         return jsonify({
             'configured': True,
-            'connected': bool(connectivity),
-            'api_key_prefix': f"{api_key[:8]}...{api_key[-4:]}",
-            'portfolio_value': portfolio_value,
-            'usdt_balance': usdt_balance,
+            'connected': True,
+            'exchange': 'futures',
+            'api_key_prefix': key_prefix,
+            'portfolio_value': wallet + unrealized,
+            'usdt_balance': avail,
+            'total_wallet_balance': wallet,
+            'total_unrealized_profit': unrealized,
+            'total_margin_balance': portfolio.get('total_margin_balance', 0.0),
             'pnl_pct': None,
-            'pnl_usdt': None,
-            'positions': positions_data,
-            'balance_count': len(balances)
+            'pnl_usdt': unrealized,
+            'positions': positions,
+            'balance_count': len(positions),
         })
     except Exception as e:
         logger.error(f"Testnet status error: {e}")
@@ -727,14 +704,15 @@ def get_testnet_orders():
 
 @app.route('/api/testnet/trades')
 def get_testnet_trades():
-    """Get testnet trade history (bot-mirrored real orders)."""
+    """Get futures testnet trade fill history from exchange."""
     try:
-        from src.api.testnet_executor import get_testnet_executor
-        executor = get_testnet_executor()
+        from src.api.futures_executor import get_futures_executor
+        executor = get_futures_executor()
         if not executor:
-            return jsonify({'trades': [], 'error': 'Testnet not configured'})
-        limit = int(request.args.get('limit', 200))
-        trades = executor.get_trades(limit=limit)
+            return jsonify({'trades': [], 'error': 'Futures testnet not configured'})
+        symbol = request.args.get('symbol')
+        limit = int(request.args.get('limit', 500))
+        trades = executor.get_trade_history(symbol=symbol, limit=limit)
         return jsonify({'trades': trades, 'total': len(trades)})
     except Exception as e:
         logger.error(f"GET /api/testnet/trades error: {e}")
@@ -743,13 +721,13 @@ def get_testnet_trades():
 
 @app.route('/api/testnet/positions')
 def get_testnet_positions():
-    """Get current open positions on testnet with live prices and unrealized PNL."""
+    """Get open futures positions from exchange (entry price, mark price, unrealized PnL)."""
     try:
-        from src.api.testnet_executor import get_testnet_executor
-        executor = get_testnet_executor()
+        from src.api.futures_executor import get_futures_executor
+        executor = get_futures_executor()
         if not executor:
-            return jsonify({'positions': [], 'error': 'Testnet not configured'})
-        positions = executor.get_current_positions()
+            return jsonify({'positions': [], 'error': 'Futures testnet not configured'})
+        positions = executor.get_positions()
         return jsonify({'positions': positions})
     except Exception as e:
         logger.error(f"GET /api/testnet/positions error: {e}")
@@ -758,12 +736,15 @@ def get_testnet_positions():
 
 @app.route('/api/testnet/pnl')
 def get_testnet_pnl():
-    """Get testnet PNL summary: realized, unrealized, win rate, equity curve."""
+    """Get futures testnet PNL summary — all values from exchange APIs."""
     try:
-        from src.api.testnet_executor import get_testnet_executor
-        executor = get_testnet_executor()
+        from src.api.futures_executor import get_futures_executor
+        executor = get_futures_executor()
         if not executor:
-            return jsonify({'error': 'Testnet not configured', 'realized_pnl': 0, 'unrealized_pnl': 0})
+            return jsonify({
+                'error': 'Futures testnet not configured',
+                'realized_pnl': 0, 'unrealized_pnl': 0,
+            })
         summary = executor.get_pnl_summary()
         return jsonify(summary)
     except Exception as e:

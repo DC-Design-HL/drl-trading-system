@@ -1,7 +1,10 @@
 """
 Testnet Trade Executor
 Mirrors bot trading decisions to Binance Testnet with real order execution.
-Stores results in logs/testnet_trades.json (line-delimited JSON).
+
+LONG/SHORT opens → delegated to FuturesTestnetExecutor (demo-fapi.binance.com).
+Exchange handles all exits autonomously via SL/TP orders — bot does NOT close.
+Stores bot decision audit log in logs/testnet_trades.json (line-delimited JSON).
 """
 
 import os
@@ -12,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 
 from .binance import BinanceConnector
+from .futures_executor import FuturesTestnetExecutor, get_futures_executor
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +107,15 @@ class TestnetExecutor:
     """
     Executes real orders on Binance Testnet mirroring bot decisions.
 
-    LONG positions → real BUY spot orders (market 50% + limit 50%)
-    CLOSE LONG     → real SELL spot orders
-    SHORT/CLOSE SHORT → conceptual (spot testnet has no shorting);
-                        any held base currency is sold if present
+    When BINANCE_FUTURES_API_KEY is set:
+      - OPEN_LONG / OPEN_SHORT → delegates to FuturesTestnetExecutor (real shorts)
+      - CLOSE_LONG / CLOSE_SHORT → no-op (exchange exits via SL/TP orders)
+      - update_sl_tp() → cancels/replaces exchange SL order (trailing SL)
+
+    Fallback (spot testnet only, no futures keys):
+      - OPEN_LONG → real BUY spot orders (market 50% + limit 50%)
+      - CLOSE_LONG → real SELL spot orders
+      - OPEN/CLOSE SHORT → removed (no simulated shorts)
     """
 
     def __init__(self):
@@ -121,6 +130,18 @@ class TestnetExecutor:
             api_secret=api_secret,
             testnet=True,
         )
+
+        # Futures executor (preferred — supports real shorts + autonomous exits)
+        self._futures_executor = None
+        try:
+            self._futures_executor = get_futures_executor()
+            if self._futures_executor:
+                logger.info(
+                    "TestnetExecutor: futures executor active "
+                    "(demo-fapi) — real longs/shorts, autonomous SL/TP exits"
+                )
+        except Exception as exc:
+            logger.warning("FuturesTestnetExecutor not available: %s", exc)
 
         # In-memory position tracking (symbol → position dict)
         self._positions: Dict[str, Dict] = {}
@@ -187,7 +208,7 @@ class TestnetExecutor:
 
         action = bot_trade.get('action', '')
         symbol = bot_trade.get('symbol', '')
-        current_price = float(bot_trade.get('price', 0) or 0)
+        current_price = float(bot_trade.get('price', 0) or bot_trade.get('exit_price', 0) or 0)
         sl = float(bot_trade.get('sl', 0) or 0)
         tp = float(bot_trade.get('tp', 0) or 0)
         confidence = float(bot_trade.get('confidence', 0) or 0)
@@ -219,30 +240,87 @@ class TestnetExecutor:
         }
 
         try:
-            if 'OPEN_LONG' in action:
-                record = self._execute_open_long(
-                    record, ccxt_symbol, current_price, confidence, sl, tp
-                )
-            elif 'CLOSE_LONG' in action:
-                record = self._execute_close_long(record, ccxt_symbol, current_price, pnl)
-            elif 'OPEN_SHORT' in action:
-                record = self._execute_open_short(
-                    record, ccxt_symbol, current_price, confidence, sl, tp
-                )
-            elif 'CLOSE_SHORT' in action:
-                record = self._execute_close_short(record, ccxt_symbol, current_price, pnl)
+            if self._futures_executor:
+                # ── Futures path ──────────────────────────────────────────
+                # OPEN actions → real futures order + SL/TP exchange orders
+                # CLOSE actions → no-op (exchange exits autonomously via SL/TP)
+                if 'OPEN_LONG' in action:
+                    record = self._execute_futures_open(
+                        record, symbol, 'LONG', current_price, confidence,
+                        sl, tp, units,
+                    )
+                elif 'OPEN_SHORT' in action:
+                    record = self._execute_futures_open(
+                        record, symbol, 'SHORT', current_price, confidence,
+                        sl, tp, units,
+                    )
+                elif 'CLOSE_LONG' in action or 'CLOSE_SHORT' in action:
+                    # Exchange handles exit autonomously via SL/TP orders.
+                    # Record in audit log but do NOT send a close to the exchange.
+                    record['executed'] = True
+                    record['note'] = (
+                        'Exit handled autonomously by exchange SL/TP orders. '
+                        'No close order sent.'
+                    )
+                    record['pnl'] = pnl
+                    self._positions.pop(symbol, None)
+                    logger.info(
+                        "🧪 TESTNET %s (futures no-op): exchange exits autonomously",
+                        action,
+                    )
+                else:
+                    logger.warning(
+                        "TestnetExecutor: unknown action '%s' for %s", action, symbol
+                    )
+                    return None
             else:
-                logger.warning(f"TestnetExecutor: unknown action '{action}' for {symbol}")
-                return None
+                # ── Spot fallback ─────────────────────────────────────────
+                if 'OPEN_LONG' in action:
+                    record = self._execute_open_long(
+                        record, ccxt_symbol, current_price, confidence, sl, tp
+                    )
+                elif 'CLOSE_LONG' in action:
+                    record = self._execute_close_long(
+                        record, ccxt_symbol, current_price, pnl
+                    )
+                elif 'OPEN_SHORT' in action or 'CLOSE_SHORT' in action:
+                    # Spot testnet cannot short — record as skipped
+                    record['executed'] = False
+                    record['note'] = (
+                        'Short positions require futures testnet. '
+                        'Set BINANCE_FUTURES_API_KEY to enable real shorts.'
+                    )
+                    logger.warning(
+                        "TestnetExecutor: SHORT action skipped — futures keys not configured"
+                    )
+                else:
+                    logger.warning(
+                        "TestnetExecutor: unknown action '%s' for %s", action, symbol
+                    )
+                    return None
         except Exception as exc:
-            logger.error(f"TestnetExecutor error ({action} {symbol}): {exc}", exc_info=True)
+            logger.error(
+                "TestnetExecutor error (%s %s): %s", action, symbol, exc, exc_info=True
+            )
             record['error'] = str(exc)
 
         self._save_trade(record)
         return record
 
     def get_current_positions(self) -> List[Dict]:
-        """Return open positions enriched with live price + unrealized PNL."""
+        """
+        Return open positions with live price + unrealized PnL.
+        When futures executor is active: data comes directly from exchange
+        (entry price, mark price, unrealized PnL all exchange-reported).
+        Fallback: local position tracking + spot ticker prices.
+        """
+        if self._futures_executor:
+            try:
+                return self._futures_executor.get_positions()
+            except Exception as exc:
+                logger.error("Futures get_positions failed: %s", exc)
+                return []
+
         result = []
         for symbol, pos in list(self._positions.items()):
             try:
@@ -303,7 +381,23 @@ class TestnetExecutor:
         return trades[-limit:]
 
     def get_pnl_summary(self) -> Dict:
-        """Compute PNL summary + equity curve data from trade history."""
+        """
+        PnL summary.
+        When futures executor is active: all values from exchange APIs directly.
+        Fallback: computed from local audit log (spot testnet only).
+        """
+        if self._futures_executor:
+            try:
+                return self._futures_executor.get_pnl_summary()
+            except Exception as exc:
+                logger.error("Futures get_pnl_summary failed: %s", exc)
+                return {
+                    'realized_pnl': 0.0, 'unrealized_pnl': 0.0,
+                    'total_pnl': 0.0, 'total_trades': 0,
+                    'closed_trades': 0, 'winning_trades': 0,
+                    'win_rate': 0.0, 'equity_curve': [], 'error': str(exc),
+                }
+
         trades = self.get_trades(limit=10000)
 
         realized_pnl = sum(float(t.get('pnl', 0) or 0) for t in trades)
@@ -341,6 +435,62 @@ class TestnetExecutor:
         }
 
     # ── Private execution helpers ─────────────────────────────────────────────
+
+    def _execute_futures_open(
+        self, record: Dict, symbol: str, side: str, price: float,
+        confidence: float, sl: float, tp: float, units: float,
+    ) -> Dict:
+        """Delegate open to FuturesTestnetExecutor. Records result in audit log."""
+        # Compute USDT amount from units × price, or from bot balance fraction
+        usdt_amount = units * price if units > 0 else price * POSITION_SIZE
+
+        try:
+            account = self._futures_executor.get_portfolio()
+            avail = account.get('available_balance', 0.0)
+            if avail > 0:
+                usdt_amount = avail * POSITION_SIZE
+        except Exception:
+            pass  # fall back to units × price
+
+        conf_scale = max(0.5, min(1.0, confidence)) if confidence > 0 else 0.75
+        usdt_amount *= conf_scale
+
+        if usdt_amount < MIN_TRADE_VALUE_USDT:
+            record['error'] = f"Trade value ${usdt_amount:.2f} below minimum ${MIN_TRADE_VALUE_USDT}"
+            return record
+
+        if side == 'LONG':
+            result = self._futures_executor.open_long(symbol, usdt_amount, sl=sl, tp=tp)
+        else:
+            result = self._futures_executor.open_short(symbol, usdt_amount, sl=sl, tp=tp)
+
+        record['executed'] = result.get('executed', False)
+        record['order_id'] = str(result.get('order_id') or '')
+        record['sl_order_id'] = result.get('sl_order_id')
+        record['tp_order_id'] = result.get('tp_order_id')
+        record['quantity'] = result.get('quantity', 0)
+        record['mark_price'] = result.get('mark_price', price)
+        record['filled_price'] = result.get('mark_price', price)
+        record['amount'] = result.get('quantity', 0)
+        record['side'] = side
+
+        if result.get('error'):
+            record['error'] = result['error']
+
+        if record['executed']:
+            self._positions[symbol] = {
+                'side': side,
+                'entry_price': record['filled_price'],
+                'amount': record['amount'],
+                'sl': sl,
+                'tp': tp,
+                'timestamp': record['timestamp'],
+                'confidence': confidence,
+                'order_id': record['order_id'],
+                'simulated': False,
+            }
+
+        return record
 
     def _execute_open_long(
         self, record: Dict, ccxt_symbol: str, price: float,
@@ -564,23 +714,35 @@ class TestnetExecutor:
 
     def update_sl_tp(self, symbol: str, new_sl: float, new_tp: float) -> None:
         """
-        Update exchange-side OCO for an open LONG position after trailing SL adjustment.
-        Cancels the existing OCO and places a new one with updated SL/TP levels.
-        No-op for simulated shorts.
+        Update exchange-side SL order after trailing SL adjustment.
+
+        Futures path: cancel old STOP_MARKET order, place new one at new_sl.
+        Spot fallback: cancel old OCO, place new OCO.
         """
         pos = self._positions.get(symbol)
+
+        if self._futures_executor:
+            side = (pos or {}).get('side', 'LONG')
+            if new_sl > 0:
+                self._futures_executor.update_sl(symbol, side, new_sl)
+            if new_tp > 0:
+                self._futures_executor.update_tp(symbol, side, new_tp)
+            if pos:
+                pos['sl'] = new_sl
+                pos['tp'] = new_tp
+            return
+
+        # Spot fallback (OCO)
         if not pos or pos.get('simulated'):
             return
 
         ccxt_symbol = _to_ccxt_symbol(symbol)
         old_list_id = pos.get('oco_order_list_id')
 
-        # Cancel existing OCO
         if old_list_id is not None:
             self.connector.cancel_order_list(ccxt_symbol, old_list_id)
             pos['oco_order_list_id'] = None
 
-        # Place new OCO with updated levels
         amount = float(pos.get('amount', 0))
         if amount > 0 and new_sl > 0 and new_tp > 0:
             new_list_id = self._place_oco_for_long(ccxt_symbol, amount, new_sl, new_tp)
