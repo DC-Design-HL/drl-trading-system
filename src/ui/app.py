@@ -1936,8 +1936,14 @@ def main():
                 
                 # Get price / equity from raw state
                 sym_price = raw_assets.get(sym, {}).get('price', 0)
-                # Calculate True Equity mathematically instead of relying on historically corrupted bot.balance
-                sym_equity = 5000 + sym_realized + sym_open_pnl
+                # Use actual balance from state file (not accumulated trade log PnL)
+                sym_state_balance = raw_assets.get(sym, {}).get('balance', 0)
+                sym_state_rpnl = raw_assets.get(sym, {}).get('realized_pnl', 0)
+                if sym_state_balance > 0:
+                    sym_equity = sym_state_balance + sym_open_pnl
+                    sym_realized = sym_state_rpnl
+                else:
+                    sym_equity = 5000 + sym_realized + sym_open_pnl
                 
                 asset_rows.append({
                     'symbol': display_sym,
@@ -1946,6 +1952,8 @@ def main():
                     'price': sym_price,
                     'equity': sym_equity,
                     'pnl': sym_realized + sym_open_pnl,
+                    'realized': sym_realized,
+                    'open_pnl': sym_open_pnl,
                     'trades': sym_closed + (1 if sym_status != 'FLAT' else 0),
                     'open_trades': 1 if sym_status != 'FLAT' else 0,
                     'win_rate': (sym_wins / sym_closed * 100) if sym_closed > 0 else 0,
@@ -1955,12 +1963,12 @@ def main():
                     'worst': sym_worst,
                 })
             
-            # Overall metrics
-            # Fixed: Always use 4 assets (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT)
-            # Previously used len(assets_by_symbol) which only counted assets with trades
-            # Calculate from trades (single source of truth) - same logic as Agent Status sidebar
+            # Overall metrics — use state file data (not accumulated trade log PnL which inflates)
+            # Recalculate totals from asset_rows which now prefer state file balances
+            realized_pnl_total = sum(r.get('realized', 0) for r in asset_rows)
+            open_pnl_total = sum(r.get('open_pnl', 0) for r in asset_rows)
             lp_grand_total_pnl = realized_pnl_total + open_pnl_total
-            lp_total_balance = state.get('total_balance', state.get('balance'))
+            lp_total_balance = sum(r.get('equity', 0) for r in asset_rows) if asset_rows else state.get('total_balance', state.get('balance'))
             overall_win_rate = (total_winning_trades / total_closed_trades * 100) if total_closed_trades > 0 else 0
             total_trades_count = total_closed_trades + total_open_trades
             

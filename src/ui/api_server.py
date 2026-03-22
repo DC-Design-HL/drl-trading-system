@@ -57,21 +57,20 @@ def get_state():
     try:
         state = storage.load_state()
         
-        # MATHEMATICAL OVERRIDE: Calculate true global equity from trade history
-        # bypassing the historically corrupted bot balance tracker.
+        # Use state file balances directly — trade log accumulation causes inflated PnL
+        # The state files (htf_trading_state.json etc.) track realized_pnl correctly per session
         try:
-            all_trades = storage.get_trades(limit=1000)
-            realized_pnl = sum(t.get('pnl', 0) for t in all_trades if 'CLOSE' in t.get('action', '').upper() or 'EXIT' in t.get('action', '').upper())
-            
             raw_assets = state.get('raw_state', {}).get('assets', {})
-            open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if a.get('position', 0) != 0)
-
-            if all_trades or raw_assets:
-                state['total_pnl'] = realized_pnl + open_pnl
-                state['realized_pnl'] = realized_pnl + open_pnl
-                # Do not override balance — use real value from stored state
+            if not raw_assets:
+                raw_assets = state.get('assets', {})
+            # Sum realized PnL from state files (reset per session, not accumulated forever)
+            total_rpnl = sum(a.get('realized_pnl', 0) for a in raw_assets.values() if isinstance(a, dict))
+            open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if isinstance(a, dict) and a.get('position', 0) != 0)
+            if raw_assets:
+                state['total_pnl'] = total_rpnl + open_pnl
+                state['realized_pnl'] = total_rpnl + open_pnl
         except Exception as math_err:
-            logger.error(f"Failed mathematical override: {math_err}")
+            logger.error(f"Failed PnL calculation: {math_err}")
             
         # Normalize keys for frontend compatibility
         if 'total_balance' in state and 'balance' not in state:
