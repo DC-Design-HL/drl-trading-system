@@ -2737,8 +2737,8 @@ def main():
                         amt = float(p.get('amount', 0) or 0)
                         upnl = float(p.get('unrealized_pnl', 0) or 0)
                         upnl_pct = float(p.get('unrealized_pnl_pct', 0) or 0)
-                        sl_p = float(p.get('sl', 0) or 0)
-                        tp_p = float(p.get('tp', 0) or 0)
+                        sl_p = float(p.get('sl_price', 0) or p.get('sl', 0) or 0)
+                        tp_p = float(p.get('tp_price', 0) or p.get('tp', 0) or 0)
                         conf = float(p.get('confidence', 0) or 0)
                         sim = bool(p.get('simulated', False))
                         side_display = f"{side} {'(sim)' if sim else ''}"

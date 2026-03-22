@@ -468,6 +468,45 @@ class FuturesTestnetExecutor:
             ),
         }
 
+    def _load_state_and_trades(self) -> tuple:
+        """Load state files and last trades for SL/TP/confidence enrichment."""
+        import json as _json
+        import os
+
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs")
+        state_files = {
+            "BTCUSDT": os.path.join(base, "htf_trading_state.json"),
+            "ETHUSDT": os.path.join(base, "htf_trading_state_ETHUSDT.json"),
+        }
+        states: Dict[str, Dict] = {}
+        for sym, path in state_files.items():
+            try:
+                with open(path, "r") as f:
+                    states[sym] = _json.load(f)
+            except Exception:
+                pass
+
+        # Load last confidence per symbol from htf_trades.json (JSONL)
+        confidence_map: Dict[str, float] = {}
+        trades_path = os.path.join(base, "htf_trades.json")
+        try:
+            with open(trades_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        t = _json.loads(line)
+                        s = t.get("symbol", "")
+                        if "confidence" in t and s:
+                            confidence_map[s] = t["confidence"]
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return states, confidence_map
+
     def get_positions(self) -> List[Dict]:
         """
         Return open positions normalised to a shape compatible with the UI.
@@ -476,12 +515,43 @@ class FuturesTestnetExecutor:
         passed through unchanged — no local recalculation.
         """
         raw = self.connector.get_positions()
+
+        # Enrich with SL/TP prices and confidence
+        states, confidence_map = self._load_state_and_trades()
+
+        # Fetch open orders once for TP price lookup
+        open_orders: Dict[int, float] = {}
+        try:
+            for sym_key in ["BTCUSDT", "ETHUSDT"]:
+                for order in self.connector.get_open_orders(sym_key):
+                    oid = order.get("orderId")
+                    price = float(order.get("price", 0))
+                    if oid and price:
+                        open_orders[int(oid)] = price
+        except Exception as exc:
+            logger.warning("Failed to fetch open orders for TP enrichment: %s", exc)
+
         result = []
         for p in raw:
             amt = float(p.get("positionAmt", 0))
             if amt == 0:
                 continue
             sym = p.get("symbol", "")
+
+            # TP price: from open orders by tp_order_id, fallback to state file
+            tp_order_id = self._tp_orders.get(sym)
+            tp_price = None
+            if tp_order_id and int(tp_order_id) in open_orders:
+                tp_price = open_orders[int(tp_order_id)]
+            if tp_price is None and sym in states:
+                tp_price = states[sym].get("tp_price")
+
+            # SL price: from state file
+            sl_price = states.get(sym, {}).get("sl_price")
+
+            # Confidence: from trades log
+            confidence = confidence_map.get(sym)
+
             result.append(
                 {
                     "symbol": sym,
@@ -493,7 +563,10 @@ class FuturesTestnetExecutor:
                     "liquidation_price": float(p.get("liquidationPrice", 0)),
                     "leverage": int(float(p.get("leverage", 1))),
                     "sl_order_id": self._sl_orders.get(sym),
-                    "tp_order_id": self._tp_orders.get(sym),
+                    "tp_order_id": tp_order_id,
+                    "tp_price": tp_price,
+                    "sl_price": sl_price,
+                    "confidence": confidence,
                     # UI backward-compat fields
                     "unrealized_pnl_pct": (
                         float(p.get("unRealizedProfit", 0))
