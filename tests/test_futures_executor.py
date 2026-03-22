@@ -31,6 +31,7 @@ def make_executor():
         "totalPositionInitialMargin": "1000.0",
     }
     connector.get_positions.return_value = []
+    connector.get_open_orders.return_value = []
     connector.get_trade_history.return_value = []
     executor = FuturesTestnetExecutor(connector=connector)
     return executor, connector
@@ -505,6 +506,103 @@ class TestGetPnlSummary:
         result = ex.get_pnl_summary(symbol="BTCUSDT")
         conn.get_trade_history.assert_called_once_with("BTCUSDT", limit=1000)
         assert result["realized_pnl"] == 10.0
+
+
+# ── _sync_order_tracking ──────────────────────────────────────────────────────
+
+class TestSyncOrderTracking:
+    def test_loads_limit_reduconly_as_tp(self):
+        ex, conn = make_executor()
+        conn.get_open_orders.return_value = [
+            {"symbol": "BTCUSDT", "orderId": 999, "type": "LIMIT", "reduceOnly": True},
+        ]
+        ex._sync_order_tracking()
+        assert ex._tp_orders["BTCUSDT"] == 999
+        assert "BTCUSDT" not in ex._sl_orders
+
+    def test_loads_stop_market_closepositon_as_sl(self):
+        ex, conn = make_executor()
+        conn.get_open_orders.return_value = [
+            {"symbol": "ETHUSDT", "orderId": 555, "type": "STOP_MARKET", "reduceOnly": False, "closePosition": True},
+        ]
+        ex._sync_order_tracking()
+        assert ex._sl_orders["ETHUSDT"] == 555
+        assert "ETHUSDT" not in ex._tp_orders
+
+    def test_loads_stop_market_reduconly_as_sl(self):
+        ex, conn = make_executor()
+        conn.get_open_orders.return_value = [
+            {"symbol": "BTCUSDT", "orderId": 777, "type": "STOP_MARKET", "reduceOnly": True, "closePosition": False},
+        ]
+        ex._sync_order_tracking()
+        assert ex._sl_orders["BTCUSDT"] == 777
+
+    def test_ignores_non_reduconly_limit_orders(self):
+        ex, conn = make_executor()
+        conn.get_open_orders.return_value = [
+            {"symbol": "BTCUSDT", "orderId": 888, "type": "LIMIT", "reduceOnly": False},
+        ]
+        ex._sync_order_tracking()
+        assert "BTCUSDT" not in ex._tp_orders
+
+    def test_exchange_failure_does_not_raise(self):
+        ex, conn = make_executor()
+        conn.get_open_orders.side_effect = Exception("network error")
+        # Should not raise
+        ex._sync_order_tracking()
+        assert ex._sl_orders == {}
+        assert ex._tp_orders == {}
+
+    def test_called_on_construction(self):
+        connector = MagicMock(spec=__import__('src.api.binance_futures', fromlist=['BinanceFuturesConnector']).BinanceFuturesConnector)
+        connector.get_open_orders.return_value = [
+            {"symbol": "BTCUSDT", "orderId": 12345, "type": "LIMIT", "reduceOnly": True},
+        ]
+        ex = FuturesTestnetExecutor(connector=connector)
+        assert ex._tp_orders["BTCUSDT"] == 12345
+
+
+# ── ensure_tp_order ───────────────────────────────────────────────────────────
+
+class TestEnsureTpOrder:
+    def test_noop_when_already_tracked(self):
+        ex, conn = make_executor()
+        ex._tp_orders["BTCUSDT"] = 300
+        result = ex.ensure_tp_order("BTCUSDT", "LONG", 90000)
+        conn.place_take_profit_order.assert_not_called()
+        assert result == 300
+
+    def test_places_tp_when_missing(self):
+        ex, conn = make_executor()
+        conn.place_take_profit_order.return_value = {"orderId": 400}
+        result = ex.ensure_tp_order("BTCUSDT", "LONG", 90000)
+        conn.place_take_profit_order.assert_called_once_with(
+            "BTCUSDT", "SELL", 90000, close_position=True
+        )
+        assert result == 400
+        assert ex._tp_orders["BTCUSDT"] == 400
+
+    def test_short_uses_buy_side(self):
+        ex, conn = make_executor()
+        conn.place_take_profit_order.return_value = {"orderId": 401}
+        ex.ensure_tp_order("ETHUSDT", "SHORT", 1800)
+        conn.place_take_profit_order.assert_called_once_with(
+            "ETHUSDT", "BUY", 1800, close_position=True
+        )
+
+    def test_exchange_failure_returns_none(self):
+        ex, conn = make_executor()
+        conn.place_take_profit_order.side_effect = Exception("API error")
+        result = ex.ensure_tp_order("BTCUSDT", "LONG", 90000)
+        assert result is None
+        assert "BTCUSDT" not in ex._tp_orders
+
+    def test_sentinel_none_not_stored(self):
+        ex, conn = make_executor()
+        conn.place_take_profit_order.return_value = {"orderId": None, "status": "TESTNET_NOT_SUPPORTED"}
+        result = ex.ensure_tp_order("BTCUSDT", "LONG", 90000)
+        assert result is None
+        assert "BTCUSDT" not in ex._tp_orders
 
 
 # ── Factory function ──────────────────────────────────────────────────────────

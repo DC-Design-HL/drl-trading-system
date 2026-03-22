@@ -50,6 +50,80 @@ class FuturesTestnetExecutor:
         self._sl_orders: Dict[str, int] = {}
         self._tp_orders: Dict[str, int] = {}
 
+        # Re-populate order tracking from exchange on startup so that trailing
+        # SL/TP updates after a bot restart cancel the *existing* orders rather
+        # than stacking new ones on top.
+        self._sync_order_tracking()
+
+    # ── Startup sync ──────────────────────────────────────────────────────────
+
+    def _sync_order_tracking(self) -> None:
+        """
+        Re-populate _sl_orders / _tp_orders from exchange open orders.
+
+        Called once on construction so that after a bot restart the executor
+        knows which SL/TP orders already exist on the exchange.  Any open
+        STOP_MARKET (reduceOnly / closePosition) order is treated as an SL;
+        any LIMIT reduceOnly order is treated as a TP (demo-fapi fallback).
+
+        Failures are silently swallowed so they never block construction.
+        """
+        try:
+            open_orders = self.connector.get_open_orders()
+        except Exception as exc:
+            logger.warning("_sync_order_tracking: could not fetch open orders: %s", exc)
+            return
+
+        for o in open_orders:
+            sym = o.get("symbol", "")
+            if not sym:
+                continue
+            oid = o.get("orderId")
+            if oid is None:
+                continue
+            order_type = o.get("type", "")
+            reduce_only = o.get("reduceOnly", False)
+            close_position = o.get("closePosition", False)
+
+            if order_type == "STOP_MARKET" and (reduce_only or close_position):
+                self._sl_orders[sym] = oid
+            elif order_type == "LIMIT" and reduce_only:
+                # TP fallback order placed when TAKE_PROFIT_MARKET is unsupported
+                self._tp_orders[sym] = oid
+
+        if self._sl_orders or self._tp_orders:
+            logger.info(
+                "_sync_order_tracking: loaded SL=%s TP=%s from exchange",
+                dict(self._sl_orders),
+                dict(self._tp_orders),
+            )
+
+    def ensure_tp_order(self, symbol: str, side: str, tp_price: float) -> Optional[int]:
+        """
+        Ensure a TP order exists for the position.  If one is already tracked
+        (from _sync_order_tracking or a prior open) this is a no-op.  Otherwise
+        places a new LIMIT reduceOnly TP order (demo-fapi fallback).
+
+        Returns the TP order ID, or None on failure.
+        """
+        sym = symbol.upper().replace("/", "")
+        if sym in self._tp_orders:
+            return self._tp_orders[sym]
+
+        order_side = "SELL" if side.upper() == "LONG" else "BUY"
+        try:
+            tp_order = self.connector.place_take_profit_order(
+                sym, order_side, tp_price, close_position=True
+            )
+            tp_oid = tp_order.get("orderId")
+            if tp_oid is not None:
+                self._tp_orders[sym] = tp_oid
+                logger.info("ensure_tp_order: placed TP for %s @ %.2f (orderId=%s)", sym, tp_price, tp_oid)
+            return tp_oid
+        except Exception as exc:
+            logger.error("ensure_tp_order: failed for %s: %s", sym, exc)
+            return None
+
     # ── Open positions ────────────────────────────────────────────────────────
 
     def open_long(
