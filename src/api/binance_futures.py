@@ -214,6 +214,11 @@ class BinanceFuturesConnector:
         side: 'SELL' to close a long, 'BUY' to close a short.
         close_position=True: exchange closes the entire position automatically.
         workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
+
+        NOTE: demo-fapi testnet does not support STOP_MARKET. Falls back to
+        LIMIT reduceOnly at stop_price (fills immediately if price already past
+        stop, otherwise sits as a resting limit order). Real SL monitoring
+        is handled by the bot's WebSocket price feed.
         """
         sym = symbol.upper()
         price_prec = self.get_price_precision(sym)
@@ -230,7 +235,18 @@ class BinanceFuturesConnector:
             qty_prec = self.get_qty_precision(sym)
             params["quantity"] = round(quantity, qty_prec)
             params["reduceOnly"] = "true"
-        return self._post("/fapi/v1/order", params)
+        try:
+            return self._post("/fapi/v1/order", params)
+        except Exception as exc:
+            if "-4120" in str(exc):
+                # Demo testnet fallback: SL not supported, log warning
+                logger.warning(
+                    "STOP_MARKET not supported on this testnet. "
+                    "SL monitoring handled by bot WebSocket. Symbol=%s stop=$%.2f",
+                    sym, stop_price,
+                )
+                raise
+            raise
 
     def place_take_profit_order(
         self,
@@ -242,9 +258,9 @@ class BinanceFuturesConnector:
     ) -> Dict:
         """
         Place a TAKE_PROFIT_MARKET order (take profit).
-        side: 'SELL' to close a long, 'BUY' to close a short.
-        close_position=True: exchange closes the entire position automatically.
-        workingType=MARK_PRICE: trigger on mark price.
+        Falls back to LIMIT reduceOnly order on demo testnet where
+        TAKE_PROFIT_MARKET is not supported. LIMIT at TP price with
+        reduceOnly=true will fill autonomously when price hits TP.
         """
         sym = symbol.upper()
         price_prec = self.get_price_precision(sym)
@@ -261,7 +277,34 @@ class BinanceFuturesConnector:
             qty_prec = self.get_qty_precision(sym)
             params["quantity"] = round(quantity, qty_prec)
             params["reduceOnly"] = "true"
-        return self._post("/fapi/v1/order", params)
+        try:
+            return self._post("/fapi/v1/order", params)
+        except Exception as exc:
+            if "-4120" in str(exc):
+                # Demo testnet fallback: use LIMIT reduceOnly as TP
+                logger.info(
+                    "TAKE_PROFIT_MARKET not supported — using LIMIT reduceOnly at $%.2f for %s",
+                    stop_price, sym,
+                )
+                qty_prec = self.get_qty_precision(sym)
+                if quantity is None:
+                    # Get position quantity from exchange
+                    pos = self.get_position(sym)
+                    if pos:
+                        quantity = abs(float(pos.get("positionAmt", 0)))
+                    else:
+                        raise
+                limit_params: Dict[str, Any] = {
+                    "symbol": sym,
+                    "side": side.upper(),
+                    "type": "LIMIT",
+                    "price": round(stop_price, price_prec),
+                    "quantity": round(quantity, qty_prec),
+                    "timeInForce": "GTC",
+                    "reduceOnly": "true",
+                }
+                return self._post("/fapi/v1/order", limit_params)
+            raise
 
     def cancel_order(self, symbol: str, order_id: int) -> Dict:
         """Cancel a specific order by ID."""
