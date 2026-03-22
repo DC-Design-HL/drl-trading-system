@@ -52,8 +52,16 @@ logger = logging.getLogger("htf_live")
 # Constants
 # ---------------------------------------------------------------------------
 SYMBOL = os.environ.get("HTF_SYMBOL", "BTCUSDT")
-STATE_FILE = Path("logs/htf_trading_state.json")
+# STATE_FILE is set dynamically after --symbol is parsed (see _get_state_file())
 TRADES_FILE = Path("logs/htf_trades.json")
+
+
+def _get_state_file(symbol: str = None) -> Path:
+    """Return symbol-specific state file path."""
+    sym = symbol or SYMBOL
+    if sym == "BTCUSDT":
+        return Path("logs/htf_trading_state.json")  # backwards compat
+    return Path(f"logs/htf_trading_state_{sym}.json")
 
 # Validated walk-forward configuration (50% position, Sharpe 3.85)
 POSITION_SIZE = 0.50   # 50% of balance per trade
@@ -235,9 +243,12 @@ class HTFLiveBot:
         if os.getenv("TESTNET_MIRROR", "").lower() in ("1", "true", "yes"):
             self._init_testnet()
 
+        # Symbol-specific state file
+        self._state_file = _get_state_file(self.symbol)
+
         # Restore persisted state
         self._load_state()
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
         TRADES_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(
@@ -315,7 +326,7 @@ class HTFLiveBot:
         }
         # Save to local HTF state file
         try:
-            STATE_FILE.write_text(json.dumps(state, indent=2))
+            self._state_file.write_text(json.dumps(state, indent=2))
         except Exception as exc:
             logger.error("Failed to save state: %s", exc)
         # Also update shared MongoDB state so Live Portfolio reflects HTF positions
@@ -344,10 +355,18 @@ class HTFLiveBot:
             logger.debug("Failed to update shared state: %s", exc)
 
     def _load_state(self) -> None:
-        if not STATE_FILE.exists():
+        if not self._state_file.exists():
             return
         try:
-            state = json.loads(STATE_FILE.read_text())
+            state = json.loads(self._state_file.read_text())
+            # Guard: only load state that belongs to THIS symbol
+            saved_symbol = state.get("symbol", self.symbol)
+            if saved_symbol != self.symbol:
+                logger.warning(
+                    "State file symbol mismatch: file has %s, bot is %s — ignoring stale state",
+                    saved_symbol, self.symbol,
+                )
+                return
             self.balance = float(state.get("balance", self.initial_balance))
             self.position = int(state.get("position", 0))
             self.position_price = float(state.get("position_price", 0.0))
