@@ -178,6 +178,7 @@ class FuturesTestnetExecutor:
             result["mark_price"] = mark_price
             result["executed"] = True
 
+            # ── SL placement (bot-side monitoring on demo-fapi) ───────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -186,23 +187,53 @@ class FuturesTestnetExecutor:
                     sl_oid = sl_order.get("orderId")
                     if sl_oid is not None:
                         self._sl_orders[sym] = sl_oid
+                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f", sym, sl_oid, sl)
+                    else:
+                        logger.info(
+                            "SL for %s @ $%.2f will be handled by bot-side WebSocket monitoring "
+                            "(STOP_MARKET not supported on demo-fapi)", sym, sl,
+                        )
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
                     logger.warning("SL placement failed for %s: %s", sym, exc)
                     result["sl_error"] = str(exc)
 
+            # ── TP placement (CRITICAL — must succeed or close position) ──
             if tp > 0:
+                tp_oid = None
+                tp_error = None
                 try:
                     tp_order = self.connector.place_take_profit_order(
                         sym, "SELL", tp, close_position=True
                     )
                     tp_oid = tp_order.get("orderId")
-                    if tp_oid is not None:
-                        self._tp_orders[sym] = tp_oid
-                    result["tp_order_id"] = tp_oid
                 except Exception as exc:
-                    logger.warning("TP placement failed for %s: %s", sym, exc)
-                    result["tp_error"] = str(exc)
+                    tp_error = str(exc)
+
+                if tp_oid is not None:
+                    self._tp_orders[sym] = tp_oid
+                    result["tp_order_id"] = tp_oid
+                    logger.info("TP order placed for %s: orderId=%s @ $%.2f", sym, tp_oid, tp)
+                else:
+                    # TP FAILED — position is unprotected, close immediately
+                    logger.error(
+                        "❌ TP placement FAILED for LONG %s — closing position immediately. Error: %s",
+                        sym, tp_error,
+                    )
+                    try:
+                        self.connector.place_market_order(sym, "SELL", quantity)
+                        logger.info("Emergency close of LONG %s completed (qty=%s)", sym, quantity)
+                    except Exception as close_exc:
+                        logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
+                    # Cancel any SL order we placed
+                    if sym in self._sl_orders:
+                        try:
+                            self.connector.cancel_order(sym, self._sl_orders.pop(sym))
+                        except Exception:
+                            pass
+                    result["executed"] = False
+                    result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
+                    return result
 
             logger.info(
                 "🚀 FUTURES LONG opened: %s qty=%s mark=$%.2f "
@@ -266,7 +297,7 @@ class FuturesTestnetExecutor:
             result["mark_price"] = mark_price
             result["executed"] = True
 
-            # For shorts: SL is ABOVE entry, TP is BELOW entry
+            # ── SL placement (bot-side monitoring on demo-fapi) ───────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -275,23 +306,53 @@ class FuturesTestnetExecutor:
                     sl_oid = sl_order.get("orderId")
                     if sl_oid is not None:
                         self._sl_orders[sym] = sl_oid
+                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f", sym, sl_oid, sl)
+                    else:
+                        logger.info(
+                            "SL for %s @ $%.2f will be handled by bot-side WebSocket monitoring "
+                            "(STOP_MARKET not supported on demo-fapi)", sym, sl,
+                        )
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
                     logger.warning("SL placement failed for %s: %s", sym, exc)
                     result["sl_error"] = str(exc)
 
+            # ── TP placement (CRITICAL — must succeed or close position) ──
             if tp > 0:
+                tp_oid = None
+                tp_error = None
                 try:
                     tp_order = self.connector.place_take_profit_order(
                         sym, "BUY", tp, close_position=True
                     )
                     tp_oid = tp_order.get("orderId")
-                    if tp_oid is not None:
-                        self._tp_orders[sym] = tp_oid
-                    result["tp_order_id"] = tp_oid
                 except Exception as exc:
-                    logger.warning("TP placement failed for %s: %s", sym, exc)
-                    result["tp_error"] = str(exc)
+                    tp_error = str(exc)
+
+                if tp_oid is not None:
+                    self._tp_orders[sym] = tp_oid
+                    result["tp_order_id"] = tp_oid
+                    logger.info("TP order placed for %s: orderId=%s @ $%.2f", sym, tp_oid, tp)
+                else:
+                    # TP FAILED — position is unprotected, close immediately
+                    logger.error(
+                        "❌ TP placement FAILED for SHORT %s — closing position immediately. Error: %s",
+                        sym, tp_error,
+                    )
+                    try:
+                        self.connector.place_market_order(sym, "BUY", quantity)
+                        logger.info("Emergency close of SHORT %s completed (qty=%s)", sym, quantity)
+                    except Exception as close_exc:
+                        logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
+                    # Cancel any SL order we placed
+                    if sym in self._sl_orders:
+                        try:
+                            self.connector.cancel_order(sym, self._sl_orders.pop(sym))
+                        except Exception:
+                            pass
+                    result["executed"] = False
+                    result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
+                    return result
 
             logger.info(
                 "🚀 FUTURES SHORT opened: %s qty=%s mark=$%.2f "

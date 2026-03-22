@@ -135,12 +135,16 @@ class TestOpenLong:
         assert "sl_error" in result
         assert ex._sl_orders.get("BTCUSDT") is None
 
-    def test_tp_failure_logged_but_continues(self):
+    def test_tp_failure_closes_position(self):
         ex, conn = make_executor()
         conn.place_take_profit_order.side_effect = Exception("TP failed")
         result = ex.open_long("BTCUSDT", 1000, sl=80000, tp=90000)
-        assert result["executed"] is True
-        assert "tp_error" in result
+        assert result["executed"] is False
+        assert "TP placement failed" in result["error"]
+        # Should have placed a closing MARKET SELL
+        calls = conn.place_market_order.call_args_list
+        assert len(calls) == 2  # open BUY + emergency close SELL
+        assert calls[1][0][1] == "SELL"
 
     def test_market_order_failure_returns_error(self):
         ex, conn = make_executor()

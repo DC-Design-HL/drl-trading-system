@@ -128,15 +128,41 @@ class BinanceFuturesConnector:
             for s in info.get("symbols", []):
                 sname = s["symbol"]
                 # Binance provides pricePrecision / quantityPrecision directly
+                # Extract tick size and step size from filters
+                tick_size = None
+                step_size = None
+                for f in s.get("filters", []):
+                    if f.get("filterType") == "PRICE_FILTER":
+                        tick_size = float(f.get("tickSize", 0))
+                    elif f.get("filterType") == "LOT_SIZE":
+                        step_size = float(f.get("stepSize", 0))
                 self._symbol_cache[sname] = {
                     "qty_precision": int(s.get("quantityPrecision", 3)),
                     "price_precision": int(s.get("pricePrecision", 2)),
+                    "tick_size": tick_size or 0.01,
+                    "step_size": step_size or 0.001,
                 }
         except Exception as exc:
             logger.warning("Could not fetch futures exchangeInfo: %s", exc)
         return self._symbol_cache.get(
             sym, {"qty_precision": 3, "price_precision": 2}
         )
+
+    def get_tick_size(self, symbol: str) -> float:
+        return self._fetch_symbol_info(symbol)["tick_size"]
+
+    def get_step_size(self, symbol: str) -> float:
+        return self._fetch_symbol_info(symbol)["step_size"]
+
+    def round_price(self, symbol: str, price: float) -> float:
+        """Round price to the nearest valid tick size for the symbol."""
+        tick = self.get_tick_size(symbol)
+        return round(round(price / tick) * tick, self.get_price_precision(symbol))
+
+    def round_qty(self, symbol: str, qty: float) -> float:
+        """Round quantity to the nearest valid step size for the symbol."""
+        step = self.get_step_size(symbol)
+        return round(round(qty / step) * step, self.get_qty_precision(symbol))
 
     def get_qty_precision(self, symbol: str) -> int:
         return self._fetch_symbol_info(symbol)["qty_precision"]
@@ -223,12 +249,11 @@ class BinanceFuturesConnector:
         handles SL execution on demo-fapi.
         """
         sym = symbol.upper()
-        price_prec = self.get_price_precision(sym)
         params: Dict[str, Any] = {
             "symbol": sym,
             "side": side.upper(),
             "type": "STOP_MARKET",
-            "stopPrice": round(stop_price, price_prec),
+            "stopPrice": self.round_price(sym, stop_price),
             "workingType": "MARK_PRICE",
         }
         if close_position:
@@ -276,12 +301,11 @@ class BinanceFuturesConnector:
             price drops to TP, then fills. Correct.
         """
         sym = symbol.upper()
-        price_prec = self.get_price_precision(sym)
         params: Dict[str, Any] = {
             "symbol": sym,
             "side": side.upper(),
             "type": "TAKE_PROFIT_MARKET",
-            "stopPrice": round(stop_price, price_prec),
+            "stopPrice": self.round_price(sym, stop_price),
             "workingType": "MARK_PRICE",
         }
         if close_position:
@@ -311,8 +335,8 @@ class BinanceFuturesConnector:
                     "symbol": sym,
                     "side": side.upper(),
                     "type": "LIMIT",
-                    "price": round(stop_price, price_prec),
-                    "quantity": round(quantity, qty_prec),
+                    "price": self.round_price(sym, stop_price),
+                    "quantity": self.round_qty(sym, quantity),
                     "timeInForce": "GTC",
                     "reduceOnly": "true",
                 }
