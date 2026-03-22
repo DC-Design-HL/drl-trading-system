@@ -660,6 +660,15 @@ class HTFLiveBot:
             self.sl_price = new_sl
             self._save_state()
 
+            # Sync updated SL to exchange-side OCO (LONG positions only)
+            if self.position == 1 and not self.dry_run and self.testnet_executor:
+                try:
+                    self.testnet_executor.update_sl_tp(
+                        self.symbol, new_sl, self.tp_price
+                    )
+                except Exception as _exc:
+                    logger.warning("Testnet OCO update failed: %s", _exc)
+
         # --- Check if current price hits the (possibly adjusted) SL ---
         if self.position == 1:
             if self.sl_price > 0 and current_price <= self.sl_price:
@@ -912,6 +921,76 @@ class HTFLiveBot:
         return status
 
     # ------------------------------------------------------------------
+    # WebSocket price monitor
+    # ------------------------------------------------------------------
+
+    def _start_ws_monitor(self) -> None:
+        """
+        Start a background daemon thread that streams aggTrade prices from
+        Binance and triggers SL/TP closes in real-time (between 15-min loops).
+        """
+        import websocket as _websocket
+
+        url = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
+
+        def _on_open(ws):
+            logger.info("WS price monitor connected to aggTrade stream")
+
+        def _on_error(ws, error):
+            logger.warning("WS price monitor error: %s", error)
+
+        def _on_close(ws, code, msg):
+            logger.info("WS price monitor closed (code=%s)", code)
+
+        first_price_logged = [False]  # mutable container for nonlocal in Python 2-compat closure
+
+        def _on_message(ws, message):
+            try:
+                data = json.loads(message)
+                price = float(data.get("p", 0))
+                if price <= 0:
+                    return
+
+                self.current_price = price
+
+                if not first_price_logged[0]:
+                    logger.info("WS first price tick: $%.2f — stream is live", price)
+                    first_price_logged[0] = True
+
+                with self._lock:
+                    if self.position == 0:
+                        return
+                    exit_reason = self._check_sl_tp(price)
+                    if exit_reason:
+                        logger.info("WS: SL/TP triggered (%s) @ $%.2f", exit_reason, price)
+                        self._close_position(price, exit_reason, 1.0)
+
+            except Exception as exc:
+                logger.debug("WS message handler error: %s", exc)
+
+        def _run():
+            backoff = 1
+            while True:
+                try:
+                    ws = _websocket.WebSocketApp(
+                        url,
+                        on_open=_on_open,
+                        on_message=_on_message,
+                        on_error=_on_error,
+                        on_close=_on_close,
+                    )
+                    ws.run_forever()
+                except Exception as exc:
+                    logger.warning("WS run_forever exception: %s", exc)
+                logger.info("WS reconnecting in %ds...", backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+
+        t = threading.Thread(target=_run, name="ws-price-monitor", daemon=True)
+        t.start()
+        logger.info("WebSocket price monitor thread started")
+
+    # ------------------------------------------------------------------
     # Continuous loop
     # ------------------------------------------------------------------
 
@@ -922,6 +1001,7 @@ class HTFLiveBot:
             "HTF trading loop started | interval=%dmin dry_run=%s",
             self.interval_minutes, self.dry_run,
         )
+        self._start_ws_monitor()
 
         while True:
             if stop_event and stop_event.is_set():

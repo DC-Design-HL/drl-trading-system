@@ -895,6 +895,75 @@ class HTFPartialBot:
     # Continuous loop
     # ------------------------------------------------------------------
 
+    def _start_ws_monitor(self) -> None:
+        """
+        Start a background daemon thread that streams aggTrade prices from
+        Binance and triggers SL/TP closes in real-time (between 15-min loops).
+        """
+        import websocket as _websocket
+
+        url = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
+
+        def _on_open(ws):
+            logger.info("WS price monitor connected to aggTrade stream")
+
+        def _on_error(ws, error):
+            logger.warning("WS price monitor error: %s", error)
+
+        def _on_close(ws, code, msg):
+            logger.info("WS price monitor closed (code=%s)", code)
+
+        first_price_logged = [False]
+
+        def _on_message(ws, message):
+            try:
+                data = json.loads(message)
+                price = float(data.get("p", 0))
+                if price <= 0:
+                    return
+
+                self.current_price = price
+
+                if not first_price_logged[0]:
+                    logger.info("WS first price tick: $%.2f — stream is live", price)
+                    first_price_logged[0] = True
+
+                with self._lock:
+                    if self.position == 0:
+                        return
+                    exit_reason = self._check_partial_tp(price)
+                    if exit_reason:
+                        logger.info("WS: exit triggered (%s) @ $%.2f", exit_reason, price)
+                        if exit_reason in ("PARTIAL_CLOSE_1", "PARTIAL_CLOSE_2"):
+                            self._execute_partial_close(price, exit_reason)
+                        else:
+                            self._close_position(price, exit_reason, 1.0)
+
+            except Exception as exc:
+                logger.debug("WS message handler error: %s", exc)
+
+        def _run():
+            backoff = 1
+            while True:
+                try:
+                    ws = _websocket.WebSocketApp(
+                        url,
+                        on_open=_on_open,
+                        on_message=_on_message,
+                        on_error=_on_error,
+                        on_close=_on_close,
+                    )
+                    ws.run_forever()
+                except Exception as exc:
+                    logger.warning("WS run_forever exception: %s", exc)
+                logger.info("WS reconnecting in %ds...", backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+
+        t = threading.Thread(target=_run, name="ws-price-monitor", daemon=True)
+        t.start()
+        logger.info("WebSocket price monitor thread started")
+
     def run_loop(self, stop_event: Optional[threading.Event] = None) -> None:
         """Run the trading loop at `interval_minutes` cadence until stopped."""
         interval_secs = self.interval_minutes * 60
@@ -902,6 +971,7 @@ class HTFPartialBot:
             "HTF Partial TP loop started | interval=%dmin dry_run=%s",
             self.interval_minutes, self.dry_run,
         )
+        self._start_ws_monitor()
 
         while True:
             if stop_event and stop_event.is_set():

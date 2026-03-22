@@ -148,6 +148,9 @@ class TestnetExecutor:
                     'confidence': t.get('confidence', 0),
                     'order_id': t.get('order_id', ''),
                     'simulated': False,
+                    # OCO list ID is not persisted across restarts — exchange orders
+                    # must be managed manually after a bot restart.
+                    'oco_order_list_id': t.get('oco_order_list_id'),
                 }
             elif 'CLOSE_LONG' in action or action in ('STOP_LOSS', 'TAKE_PROFIT', 'TRAILING_STOP'):
                 self._positions.pop(symbol, None)
@@ -409,7 +412,17 @@ class TestnetExecutor:
             'confidence': confidence,
             'order_id': record['order_id'],
             'simulated': False,
+            'oco_order_list_id': None,
         }
+
+        # Place exchange-side OCO order (TP + SL) to catch flash wicks between polls
+        if sl > 0 and tp > 0:
+            oco_list_id = self._place_oco_for_long(
+                ccxt_symbol, market_amount, sl, tp
+            )
+            if oco_list_id is not None:
+                self._positions[record['symbol']]['oco_order_list_id'] = oco_list_id
+                record['oco_order_list_id'] = oco_list_id
 
         logger.info(
             f"🧪 TESTNET LONG opened: {ccxt_symbol} market {market_amount} @ "
@@ -420,7 +433,13 @@ class TestnetExecutor:
     def _execute_close_long(
         self, record: Dict, ccxt_symbol: str, price: float, pnl: float
     ) -> Dict:
-        """Close LONG: sell all held base currency at market."""
+        """Close LONG: cancel any OCO, then sell all held base currency at market."""
+        # Cancel outstanding OCO order before closing to avoid double-fill
+        pos = self._positions.get(record['symbol'], {})
+        oco_list_id = pos.get('oco_order_list_id')
+        if oco_list_id is not None:
+            self.connector.cancel_order_list(ccxt_symbol, oco_list_id)
+
         base_currency = ccxt_symbol.split('/')[0]
         balance = self.connector.get_balance(base_currency)
 
@@ -505,6 +524,69 @@ class TestnetExecutor:
             'simulated': True,
         }
         return record
+
+    def _place_oco_for_long(
+        self, ccxt_symbol: str, amount: float, sl: float, tp: float
+    ) -> Optional[int]:
+        """
+        Place a SELL OCO order to protect a LONG position.
+        Returns the orderListId on success, or None on failure.
+        """
+        pprec = _get_price_precision(ccxt_symbol)
+        prec = _get_amount_precision(ccxt_symbol)
+
+        tp_price = round(tp, pprec)
+        stop_price = round(sl, pprec)
+        # Limit price slightly below stop trigger as slippage buffer
+        stop_limit_price = round(sl * 0.998, pprec)
+        sell_amount = round(amount, prec)
+
+        try:
+            resp = self.connector.place_oco_order(
+                symbol=ccxt_symbol,
+                side='sell',
+                amount=sell_amount,
+                price=tp_price,
+                stop_price=stop_price,
+                stop_limit_price=stop_limit_price,
+            )
+            if resp:
+                oco_list_id = resp.get('orderListId')
+                logger.info(
+                    f"🧪 OCO placed: {ccxt_symbol} sell {sell_amount} "
+                    f"TP=${tp_price} SL_stop=${stop_price} SL_lmt=${stop_limit_price} "
+                    f"listId={oco_list_id}"
+                )
+                return oco_list_id
+        except Exception as exc:
+            logger.warning(f"OCO placement failed for {ccxt_symbol}: {exc}")
+        return None
+
+    def update_sl_tp(self, symbol: str, new_sl: float, new_tp: float) -> None:
+        """
+        Update exchange-side OCO for an open LONG position after trailing SL adjustment.
+        Cancels the existing OCO and places a new one with updated SL/TP levels.
+        No-op for simulated shorts.
+        """
+        pos = self._positions.get(symbol)
+        if not pos or pos.get('simulated'):
+            return
+
+        ccxt_symbol = _to_ccxt_symbol(symbol)
+        old_list_id = pos.get('oco_order_list_id')
+
+        # Cancel existing OCO
+        if old_list_id is not None:
+            self.connector.cancel_order_list(ccxt_symbol, old_list_id)
+            pos['oco_order_list_id'] = None
+
+        # Place new OCO with updated levels
+        amount = float(pos.get('amount', 0))
+        if amount > 0 and new_sl > 0 and new_tp > 0:
+            new_list_id = self._place_oco_for_long(ccxt_symbol, amount, new_sl, new_tp)
+            pos['oco_order_list_id'] = new_list_id
+            pos['sl'] = new_sl
+            pos['tp'] = new_tp
 
     def _execute_close_short(
         self, record: Dict, ccxt_symbol: str, price: float, pnl: float

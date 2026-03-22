@@ -1,0 +1,33 @@
+{
+  "fold": 3,
+  "train_start": "2024-09-20",
+  "train_end": "2025-01-19",
+  "val_start": "2025-01-20",
+  "val_end": "2025-03-19",
+  "test_start": "2025-03-20",
+  "test_end": "2025-05-19",
+  "train_bars": 11712,
+  "val_bars": 5664,
+  "test_bars": 5856,
+  "steps_trained": 600000,
+  "train_elapsed_s": 1479.2,
+  "val_metrics": {
+    "sharpe_ratio": 1.8782000000000003,
+    "total_return_pct": 5.52,
+    "max_drawdown_pct": 6.150000000000001,
+    "win_rate": 0.4375,
+    "total_trades": 96.0,
+    "profit_factor": 1.1822
+  },
+  "test_metrics": {
+    "sharpe_ratio": 4.1371,
+    "total_return_pct": 11.339999999999998,
+    "max_drawdown_pct": 7.400000000000001,
+    "win_rate": 0.47252747252747246,
+    "total_trades": 91.0,
+    "profit_factor": 1.4961
+  },
+  "overfit_ratio_val_test": 0.454,
+  "overfit_flag": false,
+  "model_path": "data/models/htf_walkforward_eth/fold_03/fold_model.zip"
+}

@@ -468,6 +468,77 @@ class BinanceConnector:
             logger.error(f"Error fetching orders: {e}")
             return []
             
+    def place_oco_order(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        price: float,
+        stop_price: float,
+        stop_limit_price: float,
+    ) -> Optional[Dict]:
+        """
+        Place an OCO (One-Cancels-the-Other) order via /api/v3/orderList/oco.
+
+        For a SELL OCO (closing a LONG):
+          - TAKE_PROFIT_LIMIT fires when price rises to `price`
+          - STOP_LOSS_LIMIT fires when price drops to `stop_price` (limit = stop_limit_price)
+
+        Args:
+            symbol: ccxt-format pair e.g. 'BTC/USDT'
+            side: 'sell' (only sell OCO is supported for closing longs)
+            amount: Base currency amount
+            price: Take-profit limit price
+            stop_price: Stop trigger price
+            stop_limit_price: Stop limit price (slightly below stop_price for slippage buffer)
+
+        Returns:
+            Raw API response dict, or None if failed.
+        """
+        try:
+            market_symbol = symbol.replace('/', '')
+            params = {
+                'symbol': market_symbol,
+                'side': side.upper(),
+                'quantity': str(amount),
+                'price': str(price),
+                'stopPrice': str(stop_price),
+                'stopLimitPrice': str(stop_limit_price),
+                'stopLimitTimeInForce': 'GTC',
+            }
+            response = self.exchange.private_post_orderlist_oco(params)
+            logger.info(
+                f"OCO order placed: {side} {amount} {symbol} "
+                f"TP={price} SL_stop={stop_price} SL_limit={stop_limit_price}"
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Error placing OCO order: {e}")
+            return None
+
+    def cancel_order_list(self, symbol: str, order_list_id: int) -> bool:
+        """
+        Cancel an OCO order list.
+
+        Args:
+            symbol: ccxt-format pair e.g. 'BTC/USDT'
+            order_list_id: The orderListId returned when the OCO was placed
+
+        Returns:
+            True if cancelled successfully, False otherwise.
+        """
+        try:
+            market_symbol = symbol.replace('/', '')
+            self.exchange.private_delete_orderlist({
+                'symbol': market_symbol,
+                'orderListId': order_list_id,
+            })
+            logger.info(f"OCO order list {order_list_id} cancelled for {symbol}")
+            return True
+        except Exception as e:
+            logger.error(f"Error cancelling order list {order_list_id}: {e}")
+            return False
+
     def test_connectivity(self) -> bool:
         """Test API connectivity."""
         try:
