@@ -89,6 +89,17 @@ class TestOpenLong:
         assert ex._sl_orders["BTCUSDT"] == 201
         assert ex._tp_orders["BTCUSDT"] == 301
 
+    def test_sl_sentinel_none_not_stored(self):
+        """When place_stop_loss_order returns orderId=None (demo-fapi), don't store None."""
+        ex, conn = make_executor()
+        conn.place_stop_loss_order.return_value = {
+            "orderId": None, "status": "TESTNET_NOT_SUPPORTED"
+        }
+        result = ex.open_long("BTCUSDT", 1000, sl=80000, tp=90000)
+        assert result["executed"] is True
+        assert result["sl_order_id"] is None
+        assert "BTCUSDT" not in ex._sl_orders  # None should not be stored
+
     def test_no_sl_skips_sl_order(self):
         ex, conn = make_executor()
         result = ex.open_long("BTCUSDT", 1000, sl=0, tp=90000)
@@ -171,6 +182,17 @@ class TestOpenShort:
         assert ex._sl_orders["BTCUSDT"] == 201
         assert ex._tp_orders["BTCUSDT"] == 301
 
+    def test_sl_sentinel_none_not_stored(self):
+        """When place_stop_loss_order returns sentinel on demo-fapi, don't store None."""
+        ex, conn = make_executor()
+        conn.place_stop_loss_order.return_value = {
+            "orderId": None, "status": "TESTNET_NOT_SUPPORTED"
+        }
+        result = ex.open_short("BTCUSDT", 1000, sl=90000, tp=75000)
+        assert result["executed"] is True
+        assert result["sl_order_id"] is None
+        assert "BTCUSDT" not in ex._sl_orders
+
     def test_zero_mark_price_returns_error(self):
         ex, conn = make_executor()
         conn.get_mark_price.return_value = 0.0
@@ -231,6 +253,16 @@ class TestUpdateSL:
         conn.place_stop_loss_order.side_effect = Exception("order rejected")
         result = ex.update_sl("BTCUSDT", "LONG", 80000.0)
         assert result is False
+
+    def test_sl_sentinel_update_returns_true_no_store(self):
+        """update_sl with sentinel (demo-fapi) returns True but doesn't store None."""
+        ex, conn = make_executor()
+        conn.place_stop_loss_order.return_value = {
+            "orderId": None, "status": "TESTNET_NOT_SUPPORTED"
+        }
+        result = ex.update_sl("BTCUSDT", "LONG", 82000.0)
+        assert result is True
+        assert "BTCUSDT" not in ex._sl_orders
 
 
 # ── update_tp ─────────────────────────────────────────────────────────────────

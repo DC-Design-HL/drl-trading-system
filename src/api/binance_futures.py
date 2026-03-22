@@ -215,10 +215,12 @@ class BinanceFuturesConnector:
         close_position=True: exchange closes the entire position automatically.
         workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
 
-        NOTE: demo-fapi testnet does not support STOP_MARKET. Falls back to
-        LIMIT reduceOnly at stop_price (fills immediately if price already past
-        stop, otherwise sits as a resting limit order). Real SL monitoring
-        is handled by the bot's WebSocket price feed.
+        NOTE: demo-fapi testnet does not support STOP_MARKET or any trigger/algo
+        order type (error -4120). LIMIT orders cannot replicate SL semantics
+        (a LIMIT SELL at SL price below market fills immediately, not when price
+        drops). On -4120, returns a sentinel dict with orderId=None so the caller
+        knows no exchange order was placed. Bot-side WebSocket price monitoring
+        handles SL execution on demo-fapi.
         """
         sym = symbol.upper()
         price_prec = self.get_price_precision(sym)
@@ -239,13 +241,20 @@ class BinanceFuturesConnector:
             return self._post("/fapi/v1/order", params)
         except Exception as exc:
             if "-4120" in str(exc):
-                # Demo testnet fallback: SL not supported, log warning
-                logger.warning(
-                    "STOP_MARKET not supported on this testnet. "
-                    "SL monitoring handled by bot WebSocket. Symbol=%s stop=$%.2f",
+                # demo-fapi does not support trigger/algo orders.
+                # Return a sentinel — caller should rely on bot-side SL monitoring.
+                logger.info(
+                    "STOP_MARKET not supported on demo-fapi (expected on paper trading). "
+                    "Bot-side monitoring is the SL authority. Symbol=%s stop=$%.2f",
                     sym, stop_price,
                 )
-                raise
+                return {
+                    "orderId": None,
+                    "type": "STOP_MARKET",
+                    "status": "TESTNET_NOT_SUPPORTED",
+                    "note": "demo-fapi does not support trigger orders; "
+                            "bot-side monitoring handles SL",
+                }
             raise
 
     def place_take_profit_order(
@@ -258,9 +267,13 @@ class BinanceFuturesConnector:
     ) -> Dict:
         """
         Place a TAKE_PROFIT_MARKET order (take profit).
-        Falls back to LIMIT reduceOnly order on demo testnet where
-        TAKE_PROFIT_MARKET is not supported. LIMIT at TP price with
-        reduceOnly=true will fill autonomously when price hits TP.
+
+        On demo-fapi, TAKE_PROFIT_MARKET returns -4120. Falls back to a LIMIT
+        reduceOnly order which correctly simulates TP behavior:
+          - LONG TP (side=SELL, price above market): LIMIT SELL rests until
+            price rises to TP, then fills. Correct.
+          - SHORT TP (side=BUY, price below market): LIMIT BUY rests until
+            price drops to TP, then fills. Correct.
         """
         sym = symbol.upper()
         price_prec = self.get_price_precision(sym)

@@ -110,7 +110,8 @@ class FuturesTestnetExecutor:
                         sym, "SELL", sl, close_position=True
                     )
                     sl_oid = sl_order.get("orderId")
-                    self._sl_orders[sym] = sl_oid
+                    if sl_oid is not None:
+                        self._sl_orders[sym] = sl_oid
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
                     logger.warning("SL placement failed for %s: %s", sym, exc)
@@ -122,7 +123,8 @@ class FuturesTestnetExecutor:
                         sym, "SELL", tp, close_position=True
                     )
                     tp_oid = tp_order.get("orderId")
-                    self._tp_orders[sym] = tp_oid
+                    if tp_oid is not None:
+                        self._tp_orders[sym] = tp_oid
                     result["tp_order_id"] = tp_oid
                 except Exception as exc:
                     logger.warning("TP placement failed for %s: %s", sym, exc)
@@ -197,7 +199,8 @@ class FuturesTestnetExecutor:
                         sym, "BUY", sl, close_position=True
                     )
                     sl_oid = sl_order.get("orderId")
-                    self._sl_orders[sym] = sl_oid
+                    if sl_oid is not None:
+                        self._sl_orders[sym] = sl_oid
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
                     logger.warning("SL placement failed for %s: %s", sym, exc)
@@ -209,7 +212,8 @@ class FuturesTestnetExecutor:
                         sym, "BUY", tp, close_position=True
                     )
                     tp_oid = tp_order.get("orderId")
-                    self._tp_orders[sym] = tp_oid
+                    if tp_oid is not None:
+                        self._tp_orders[sym] = tp_oid
                     result["tp_order_id"] = tp_oid
                 except Exception as exc:
                     logger.warning("TP placement failed for %s: %s", sym, exc)
@@ -250,8 +254,10 @@ class FuturesTestnetExecutor:
             sl_order = self.connector.place_stop_loss_order(
                 sym, order_side, new_sl, close_position=True
             )
-            self._sl_orders[sym] = sl_order.get("orderId")
-            logger.info("🔄 SL updated: %s → $%.2f", sym, new_sl)
+            new_id = sl_order.get("orderId")
+            if new_id is not None:
+                self._sl_orders[sym] = new_id
+            logger.info("🔄 SL updated: %s → $%.2f (orderId=%s)", sym, new_sl, new_id)
             return True
         except Exception as exc:
             logger.error("Failed to place new SL for %s: %s", sym, exc)

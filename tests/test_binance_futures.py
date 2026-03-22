@@ -350,6 +350,29 @@ class TestPlaceStopLossOrder:
         assert "closePosition" not in captured["url"]
         assert "reduceOnly=true" in captured["url"]
 
+    def test_demo_testnet_4120_returns_sentinel_not_raises(self):
+        """On demo-fapi, -4120 should return a sentinel dict (orderId=None), not raise."""
+        c = make_connector()
+        error_resp = mock_error_response({"code": -4120, "msg": "Order type not supported"}, 400)
+
+        with patch.object(c, "get_price_precision", return_value=1):
+            with patch.object(c, "get_qty_precision", return_value=3):
+                with patch.object(c._session, "post", return_value=error_resp):
+                    result = c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0)
+
+        assert result["orderId"] is None
+        assert result["status"] == "TESTNET_NOT_SUPPORTED"
+
+    def test_non_4120_error_still_raises(self):
+        """Non-4120 errors should still propagate."""
+        c = make_connector()
+        with patch.object(c, "get_price_precision", return_value=1):
+            with patch.object(c, "get_qty_precision", return_value=3):
+                with patch.object(c._session, "post",
+                                  return_value=mock_error_response({"code": -2010}, 400)):
+                    with pytest.raises(requests.HTTPError):
+                        c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0)
+
 
 class TestPlaceTakeProfitOrder:
     TP_RESP = {"orderId": 333, "type": "TAKE_PROFIT_MARKET", "side": "SELL"}
