@@ -723,9 +723,12 @@ class TestnetExecutor:
 
         if self._futures_executor:
             side = (pos or {}).get('side', 'LONG')
-            if new_sl > 0:
+            old_sl = (pos or {}).get('sl', 0)
+            old_tp = (pos or {}).get('tp', 0)
+            # Only update orders that actually changed (avoid duplicate cancels/placements)
+            if new_sl > 0 and abs(new_sl - old_sl) > 0.01:
                 self._futures_executor.update_sl(symbol, side, new_sl)
-            if new_tp > 0:
+            if new_tp > 0 and abs(new_tp - old_tp) > 0.01:
                 self._futures_executor.update_tp(symbol, side, new_tp)
             if pos:
                 pos['sl'] = new_sl

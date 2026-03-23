@@ -574,6 +574,7 @@ class FuturesTestnetExecutor:
         sym = symbol.upper().replace("/", "")
         order_side = "SELL" if side.upper() == "LONG" else "BUY"
 
+        # Cancel tracked SL order
         old_id = self._sl_orders.pop(sym, None)
         is_algo = self._algo_sl_flags.pop(sym, False)
         if old_id is not None:
@@ -598,7 +599,30 @@ class FuturesTestnetExecutor:
                         sym, new_sl, new_id, sl_order.get("_algo_order", False))
             return True
         except Exception as exc:
-            logger.error("Failed to place new SL for %s: %s", sym, exc)
+            # -4130: existing order conflicts — cancel ALL algo SL orders for this symbol and retry
+            if "-4130" in str(exc):
+                logger.warning("SL -4130 conflict for %s, clearing stale algo orders and retrying", sym)
+                try:
+                    algo_orders = self.connector.get_open_algo_orders()
+                    for ao in algo_orders:
+                        if ao.get("symbol") == sym and ao.get("orderType") == "STOP_MARKET":
+                            self.connector.cancel_algo_order(algo_id=ao["algoId"])
+                            logger.info("Cancelled stale SL algo %s for %s", ao["algoId"], sym)
+                    import time; time.sleep(1)
+                    sl_order = self.connector.place_stop_loss_order(
+                        sym, order_side, new_sl, close_position=True
+                    )
+                    new_id = sl_order.get("orderId")
+                    if new_id is not None:
+                        self._sl_orders[sym] = new_id
+                        if sl_order.get("_algo_order"):
+                            self._algo_sl_flags[sym] = True
+                    logger.info("🔄 SL updated (after stale cleanup): %s → $%.2f (orderId=%s)", sym, new_sl, new_id)
+                    return True
+                except Exception as retry_exc:
+                    logger.error("Failed to place SL for %s even after stale cleanup: %s", sym, retry_exc)
+            else:
+                logger.error("Failed to place new SL for %s: %s", sym, exc)
             return False
 
     def update_tp(self, symbol: str, side: str, new_tp: float) -> bool:
@@ -634,7 +658,30 @@ class FuturesTestnetExecutor:
                         sym, new_tp, new_id, tp_order.get("_algo_order", False))
             return True
         except Exception as exc:
-            logger.error("Failed to place new TP for %s: %s", sym, exc)
+            # -4130: existing order conflicts — cancel ALL algo TP orders for this symbol and retry
+            if "-4130" in str(exc):
+                logger.warning("TP -4130 conflict for %s, clearing stale algo orders and retrying", sym)
+                try:
+                    algo_orders = self.connector.get_open_algo_orders()
+                    for ao in algo_orders:
+                        if ao.get("symbol") == sym and ao.get("orderType") == "TAKE_PROFIT_MARKET":
+                            self.connector.cancel_algo_order(algo_id=ao["algoId"])
+                            logger.info("Cancelled stale TP algo %s for %s", ao["algoId"], sym)
+                    import time; time.sleep(1)
+                    tp_order = self.connector.place_take_profit_order(
+                        sym, order_side, new_tp, close_position=True
+                    )
+                    new_id = tp_order.get("orderId")
+                    if new_id is not None:
+                        self._tp_orders[sym] = new_id
+                        if tp_order.get("_algo_order"):
+                            self._algo_tp_flags[sym] = True
+                    logger.info("🔄 TP updated (after stale cleanup): %s → $%.2f (orderId=%s)", sym, new_tp, new_id)
+                    return True
+                except Exception as retry_exc:
+                    logger.error("Failed to place TP for %s even after stale cleanup: %s", sym, retry_exc)
+            else:
+                logger.error("Failed to place new TP for %s: %s", sym, exc)
             return False
 
     # ── Portfolio / position data ─────────────────────────────────────────────
