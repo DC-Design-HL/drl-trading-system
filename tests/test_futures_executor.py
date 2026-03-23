@@ -32,6 +32,7 @@ def make_executor():
     }
     connector.get_positions.return_value = []
     connector.get_open_orders.return_value = []
+    connector.get_open_algo_orders.return_value = []
     connector.get_trade_history.return_value = []
     executor = FuturesTestnetExecutor(connector=connector)
     return executor, connector
@@ -227,7 +228,7 @@ class TestUpdateSL:
         result = ex.update_sl("BTCUSDT", "LONG", 81000.0)
 
         assert result is True
-        conn.cancel_order.assert_called_once_with("BTCUSDT", 201)
+        conn.cancel_order.assert_called_once_with("BTCUSDT", 201, is_algo=False)
         conn.place_stop_loss_order.assert_called_once_with(
             "BTCUSDT", "SELL", 81000.0, close_position=True
         )
@@ -279,7 +280,7 @@ class TestUpdateTP:
         result = ex.update_tp("BTCUSDT", "LONG", 92000.0)
 
         assert result is True
-        conn.cancel_order.assert_called_once_with("BTCUSDT", 301)
+        conn.cancel_order.assert_called_once_with("BTCUSDT", 301, is_algo=False)
         conn.place_take_profit_order.assert_called_once_with(
             "BTCUSDT", "SELL", 92000.0, close_position=True
         )
@@ -562,6 +563,7 @@ class TestSyncOrderTracking:
         connector.get_open_orders.return_value = [
             {"symbol": "BTCUSDT", "orderId": 12345, "type": "LIMIT", "reduceOnly": True},
         ]
+        connector.get_open_algo_orders.return_value = []
         ex = FuturesTestnetExecutor(connector=connector)
         assert ex._tp_orders["BTCUSDT"] == 12345
 

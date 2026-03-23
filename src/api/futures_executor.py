@@ -46,9 +46,13 @@ class FuturesTestnetExecutor:
                 api_key=api_key, api_secret=api_secret
             )
 
-        # symbol → exchange order_id for the live SL/TP orders
+        # symbol → exchange order_id (or algoId) for the live SL/TP orders
         self._sl_orders: Dict[str, int] = {}
         self._tp_orders: Dict[str, int] = {}
+
+        # Track which orders are algo orders (need algo cancel endpoint)
+        self._algo_sl_flags: Dict[str, bool] = {}
+        self._algo_tp_flags: Dict[str, bool] = {}
 
         # Re-populate order tracking from exchange on startup so that trailing
         # SL/TP updates after a bot restart cancel the *existing* orders rather
@@ -66,17 +70,21 @@ class FuturesTestnetExecutor:
         Re-populate _sl_orders / _tp_orders from exchange open orders.
 
         Called once on construction so that after a bot restart the executor
-        knows which SL/TP orders already exist on the exchange.  Any open
-        STOP_MARKET (reduceOnly / closePosition) order is treated as an SL;
-        any LIMIT reduceOnly order is treated as a TP (demo-fapi fallback).
+        knows which SL/TP orders already exist on the exchange.
+
+        Checks BOTH standard open orders AND algo open orders:
+          - Standard: STOP_MARKET (reduceOnly/closePosition) → SL;
+                      LIMIT reduceOnly → TP (demo-fapi fallback).
+          - Algo: STOP_MARKET → SL; TAKE_PROFIT_MARKET → TP.
 
         Failures are silently swallowed so they never block construction.
         """
+        # ── Standard orders ───────────────────────────────────────────
         try:
             open_orders = self.connector.get_open_orders()
         except Exception as exc:
             logger.warning("_sync_order_tracking: could not fetch open orders: %s", exc)
-            return
+            open_orders = []
 
         for o in open_orders:
             sym = o.get("symbol", "")
@@ -95,11 +103,44 @@ class FuturesTestnetExecutor:
                 # TP fallback order placed when TAKE_PROFIT_MARKET is unsupported
                 self._tp_orders[sym] = oid
 
+        # ── Algo orders ───────────────────────────────────────────────
+        try:
+            algo_orders = self.connector.get_open_algo_orders()
+        except Exception as exc:
+            logger.warning("_sync_order_tracking: could not fetch algo orders: %s", exc)
+            algo_orders = []
+
+        for o in algo_orders:
+            sym = o.get("symbol", "")
+            if not sym:
+                continue
+            algo_id = o.get("algoId")
+            if algo_id is None:
+                continue
+            order_type = o.get("orderType", "")
+            algo_status = o.get("algoStatus", "")
+
+            # Only track active algo orders
+            if algo_status not in ("NEW", "ACTIVE"):
+                continue
+
+            if order_type in ("STOP_MARKET", "STOP"):
+                if sym not in self._sl_orders:
+                    self._sl_orders[sym] = algo_id
+                    self._algo_sl_flags[sym] = True
+            elif order_type in ("TAKE_PROFIT_MARKET", "TAKE_PROFIT"):
+                if sym not in self._tp_orders:
+                    self._tp_orders[sym] = algo_id
+                    self._algo_tp_flags[sym] = True
+
         if self._sl_orders or self._tp_orders:
             logger.info(
-                "_sync_order_tracking: loaded SL=%s TP=%s from exchange",
+                "_sync_order_tracking: loaded SL=%s TP=%s from exchange "
+                "(algo_sl=%s algo_tp=%s)",
                 dict(self._sl_orders),
                 dict(self._tp_orders),
+                dict(self._algo_sl_flags),
+                dict(self._algo_tp_flags),
             )
 
     def ensure_sl_tp_for_open_positions(self) -> None:
@@ -148,13 +189,15 @@ class FuturesTestnetExecutor:
                     sl_oid = sl_order.get("orderId")
                     if sl_oid is not None:
                         self._sl_orders[sym] = sl_oid
+                        if sl_order.get("_algo_order"):
+                            self._algo_sl_flags[sym] = True
                         logger.info(
-                            "✅ SL order placed for %s: orderId=%s @ $%.2f",
-                            sym, sl_oid, sl_price,
+                            "✅ SL order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                            sym, sl_oid, sl_price, sl_order.get("_algo_order", False),
                         )
                     else:
                         logger.warning(
-                            "SL for %s @ $%.2f: STOP_MARKET not supported on this testnet. "
+                            "SL for %s @ $%.2f: conditional orders not supported. "
                             "Bot-side monitoring will handle SL.", sym, sl_price,
                         )
                 except Exception as exc:
@@ -175,9 +218,11 @@ class FuturesTestnetExecutor:
                     tp_oid = tp_order.get("orderId")
                     if tp_oid is not None:
                         self._tp_orders[sym] = tp_oid
+                        if tp_order.get("_algo_order"):
+                            self._algo_tp_flags[sym] = True
                         logger.info(
-                            "✅ TP order placed for %s: orderId=%s @ $%.2f",
-                            sym, tp_oid, tp_price,
+                            "✅ TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                            sym, tp_oid, tp_price, tp_order.get("_algo_order", False),
                         )
                 except Exception as exc:
                     logger.error("Failed to place missing TP for %s: %s", sym, exc)
@@ -264,7 +309,7 @@ class FuturesTestnetExecutor:
             result["mark_price"] = mark_price
             result["executed"] = True
 
-            # ── SL placement (bot-side monitoring on demo-fapi) ───────────
+            # ── SL placement ──────────────────────────────────────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -273,11 +318,14 @@ class FuturesTestnetExecutor:
                     sl_oid = sl_order.get("orderId")
                     if sl_oid is not None:
                         self._sl_orders[sym] = sl_oid
-                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f", sym, sl_oid, sl)
+                        if sl_order.get("_algo_order"):
+                            self._algo_sl_flags[sym] = True
+                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                    sym, sl_oid, sl, sl_order.get("_algo_order", False))
                     else:
                         logger.info(
                             "SL for %s @ $%.2f will be handled by bot-side WebSocket monitoring "
-                            "(STOP_MARKET not supported on demo-fapi)", sym, sl,
+                            "(conditional orders not supported)", sym, sl,
                         )
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
@@ -288,6 +336,7 @@ class FuturesTestnetExecutor:
             if tp > 0:
                 tp_oid = None
                 tp_error = None
+                tp_order = None
                 try:
                     tp_order = self.connector.place_take_profit_order(
                         sym, "SELL", tp, close_position=True
@@ -298,8 +347,11 @@ class FuturesTestnetExecutor:
 
                 if tp_oid is not None:
                     self._tp_orders[sym] = tp_oid
+                    if tp_order and tp_order.get("_algo_order"):
+                        self._algo_tp_flags[sym] = True
                     result["tp_order_id"] = tp_oid
-                    logger.info("TP order placed for %s: orderId=%s @ $%.2f", sym, tp_oid, tp)
+                    logger.info("TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                sym, tp_oid, tp, tp_order.get("_algo_order", False) if tp_order else False)
                 else:
                     # TP FAILED — position is unprotected, close immediately
                     logger.error(
@@ -314,7 +366,8 @@ class FuturesTestnetExecutor:
                     # Cancel any SL order we placed
                     if sym in self._sl_orders:
                         try:
-                            self.connector.cancel_order(sym, self._sl_orders.pop(sym))
+                            is_algo = self._algo_sl_flags.pop(sym, False)
+                            self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
                         except Exception:
                             pass
                     result["executed"] = False
@@ -383,7 +436,7 @@ class FuturesTestnetExecutor:
             result["mark_price"] = mark_price
             result["executed"] = True
 
-            # ── SL placement (bot-side monitoring on demo-fapi) ───────────
+            # ── SL placement ──────────────────────────────────────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -392,11 +445,14 @@ class FuturesTestnetExecutor:
                     sl_oid = sl_order.get("orderId")
                     if sl_oid is not None:
                         self._sl_orders[sym] = sl_oid
-                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f", sym, sl_oid, sl)
+                        if sl_order.get("_algo_order"):
+                            self._algo_sl_flags[sym] = True
+                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                    sym, sl_oid, sl, sl_order.get("_algo_order", False))
                     else:
                         logger.info(
                             "SL for %s @ $%.2f will be handled by bot-side WebSocket monitoring "
-                            "(STOP_MARKET not supported on demo-fapi)", sym, sl,
+                            "(conditional orders not supported)", sym, sl,
                         )
                     result["sl_order_id"] = sl_oid
                 except Exception as exc:
@@ -407,6 +463,7 @@ class FuturesTestnetExecutor:
             if tp > 0:
                 tp_oid = None
                 tp_error = None
+                tp_order = None
                 try:
                     tp_order = self.connector.place_take_profit_order(
                         sym, "BUY", tp, close_position=True
@@ -417,8 +474,11 @@ class FuturesTestnetExecutor:
 
                 if tp_oid is not None:
                     self._tp_orders[sym] = tp_oid
+                    if tp_order and tp_order.get("_algo_order"):
+                        self._algo_tp_flags[sym] = True
                     result["tp_order_id"] = tp_oid
-                    logger.info("TP order placed for %s: orderId=%s @ $%.2f", sym, tp_oid, tp)
+                    logger.info("TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                sym, tp_oid, tp, tp_order.get("_algo_order", False) if tp_order else False)
                 else:
                     # TP FAILED — position is unprotected, close immediately
                     logger.error(
@@ -433,7 +493,8 @@ class FuturesTestnetExecutor:
                     # Cancel any SL order we placed
                     if sym in self._sl_orders:
                         try:
-                            self.connector.cancel_order(sym, self._sl_orders.pop(sym))
+                            is_algo = self._algo_sl_flags.pop(sym, False)
+                            self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
                         except Exception:
                             pass
                     result["executed"] = False
@@ -463,12 +524,14 @@ class FuturesTestnetExecutor:
         order_side = "SELL" if side.upper() == "LONG" else "BUY"
 
         old_id = self._sl_orders.pop(sym, None)
+        is_algo = self._algo_sl_flags.pop(sym, False)
         if old_id is not None:
             try:
-                self.connector.cancel_order(sym, old_id)
+                self.connector.cancel_order(sym, old_id, is_algo=is_algo)
             except Exception as exc:
                 logger.warning(
-                    "Could not cancel old SL %s for %s: %s", old_id, sym, exc
+                    "Could not cancel old SL %s for %s (algo=%s): %s",
+                    old_id, sym, is_algo, exc,
                 )
 
         try:
@@ -478,7 +541,10 @@ class FuturesTestnetExecutor:
             new_id = sl_order.get("orderId")
             if new_id is not None:
                 self._sl_orders[sym] = new_id
-            logger.info("🔄 SL updated: %s → $%.2f (orderId=%s)", sym, new_sl, new_id)
+                if sl_order.get("_algo_order"):
+                    self._algo_sl_flags[sym] = True
+            logger.info("🔄 SL updated: %s → $%.2f (orderId=%s algo=%s)",
+                        sym, new_sl, new_id, sl_order.get("_algo_order", False))
             return True
         except Exception as exc:
             logger.error("Failed to place new SL for %s: %s", sym, exc)
@@ -495,20 +561,26 @@ class FuturesTestnetExecutor:
         order_side = "SELL" if side.upper() == "LONG" else "BUY"
 
         old_id = self._tp_orders.pop(sym, None)
+        is_algo = self._algo_tp_flags.pop(sym, False)
         if old_id is not None:
             try:
-                self.connector.cancel_order(sym, old_id)
+                self.connector.cancel_order(sym, old_id, is_algo=is_algo)
             except Exception as exc:
                 logger.warning(
-                    "Could not cancel old TP %s for %s: %s", old_id, sym, exc
+                    "Could not cancel old TP %s for %s (algo=%s): %s",
+                    old_id, sym, is_algo, exc,
                 )
 
         try:
             tp_order = self.connector.place_take_profit_order(
                 sym, order_side, new_tp, close_position=True
             )
-            self._tp_orders[sym] = tp_order.get("orderId")
-            logger.info("🔄 TP updated: %s → $%.2f", sym, new_tp)
+            new_id = tp_order.get("orderId")
+            self._tp_orders[sym] = new_id
+            if tp_order.get("_algo_order"):
+                self._algo_tp_flags[sym] = True
+            logger.info("🔄 TP updated: %s → $%.2f (orderId=%s algo=%s)",
+                        sym, new_tp, new_id, tp_order.get("_algo_order", False))
             return True
         except Exception as exc:
             logger.error("Failed to place new TP for %s: %s", sym, exc)
@@ -527,9 +599,11 @@ class FuturesTestnetExecutor:
         for sym in list(self._sl_orders):
             if sym not in open_symbols:
                 self._sl_orders.pop(sym, None)
+                self._algo_sl_flags.pop(sym, None)
         for sym in list(self._tp_orders):
             if sym not in open_symbols:
                 self._tp_orders.pop(sym, None)
+                self._algo_tp_flags.pop(sym, None)
         return positions
 
     def get_portfolio(self) -> Dict[str, float]:
@@ -605,7 +679,7 @@ class FuturesTestnetExecutor:
         # Enrich with SL/TP prices and confidence
         states, confidence_map = self._load_state_and_trades()
 
-        # Fetch open orders once for TP price lookup
+        # Fetch open orders once for TP price lookup (both standard and algo)
         open_orders: Dict[int, float] = {}
         try:
             for sym_key in ["BTCUSDT", "ETHUSDT"]:
@@ -616,6 +690,16 @@ class FuturesTestnetExecutor:
                         open_orders[int(oid)] = price
         except Exception as exc:
             logger.warning("Failed to fetch open orders for TP enrichment: %s", exc)
+
+        # Also check algo orders for trigger prices
+        try:
+            for algo_order in self.connector.get_open_algo_orders():
+                algo_id = algo_order.get("algoId")
+                trigger_price = float(algo_order.get("triggerPrice", 0))
+                if algo_id and trigger_price:
+                    open_orders[int(algo_id)] = trigger_price
+        except Exception as exc:
+            logger.warning("Failed to fetch algo orders for TP/SL enrichment: %s", exc)
 
         result = []
         for p in raw:

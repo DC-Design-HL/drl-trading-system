@@ -236,19 +236,45 @@ class BinanceFuturesConnector:
         close_position: bool = True,
     ) -> Dict:
         """
-        Place a STOP_MARKET order (stop loss).
+        Place a STOP_MARKET stop loss order.
+
+        Strategy (in order):
+          1. Try the Algo Order API (POST /fapi/v1/algoOrder) — the new
+             required endpoint since Binance migrated conditional orders.
+             Returns algoId instead of orderId.
+          2. Fall back to the legacy order API (POST /fapi/v1/order) in case
+             the Algo endpoint is not yet available on this environment.
+          3. On -4120 (STOP_ORDER_SWITCH_ALGO) from legacy, return a sentinel
+             so the caller can rely on bot-side WebSocket monitoring.
+
         side: 'SELL' to close a long, 'BUY' to close a short.
         close_position=True: exchange closes the entire position automatically.
         workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
-
-        NOTE: demo-fapi testnet does not support STOP_MARKET or any trigger/algo
-        order type (error -4120). LIMIT orders cannot replicate SL semantics
-        (a LIMIT SELL at SL price below market fills immediately, not when price
-        drops). On -4120, returns a sentinel dict with orderId=None so the caller
-        knows no exchange order was placed. Bot-side WebSocket price monitoring
-        handles SL execution on demo-fapi.
         """
         sym = symbol.upper()
+
+        # ── Try Algo Order API first ──────────────────────────────────
+        try:
+            result = self.place_stop_loss_algo(
+                sym, side, stop_price,
+                quantity=quantity,
+                close_position=close_position,
+            )
+            algo_id = result.get("algoId")
+            logger.info(
+                "SL STOP_MARKET placed via Algo API: %s side=%s trigger=$%.2f algoId=%s",
+                sym, side, stop_price, algo_id,
+            )
+            # Normalize: add orderId pointing to algoId for backward compat
+            result["orderId"] = algo_id
+            result["_algo_order"] = True
+            return result
+        except Exception as algo_exc:
+            logger.warning(
+                "Algo order SL failed for %s (will try legacy): %s", sym, algo_exc
+            )
+
+        # ── Fallback: legacy order API ────────────────────────────────
         params: Dict[str, Any] = {
             "symbol": sym,
             "side": side.upper(),
@@ -266,10 +292,9 @@ class BinanceFuturesConnector:
             return self._post("/fapi/v1/order", params)
         except Exception as exc:
             if "-4120" in str(exc):
-                # demo-fapi does not support trigger/algo orders.
-                # Return a sentinel — caller should rely on bot-side SL monitoring.
+                # Neither algo nor legacy worked — return sentinel.
                 logger.info(
-                    "STOP_MARKET not supported on demo-fapi (expected on paper trading). "
+                    "STOP_MARKET not supported via either API path. "
                     "Bot-side monitoring is the SL authority. Symbol=%s stop=$%.2f",
                     sym, stop_price,
                 )
@@ -277,7 +302,7 @@ class BinanceFuturesConnector:
                     "orderId": None,
                     "type": "STOP_MARKET",
                     "status": "TESTNET_NOT_SUPPORTED",
-                    "note": "demo-fapi does not support trigger orders; "
+                    "note": "Conditional orders not supported; "
                             "bot-side monitoring handles SL",
                 }
             raise
@@ -293,14 +318,37 @@ class BinanceFuturesConnector:
         """
         Place a TAKE_PROFIT_MARKET order (take profit).
 
-        On demo-fapi, TAKE_PROFIT_MARKET returns -4120. Falls back to a LIMIT
-        reduceOnly order which correctly simulates TP behavior:
-          - LONG TP (side=SELL, price above market): LIMIT SELL rests until
-            price rises to TP, then fills. Correct.
-          - SHORT TP (side=BUY, price below market): LIMIT BUY rests until
-            price drops to TP, then fills. Correct.
+        Strategy (in order):
+          1. Try the Algo Order API (POST /fapi/v1/algoOrder) — the new
+             required endpoint since Binance migrated conditional orders.
+          2. Fall back to the legacy order API (POST /fapi/v1/order).
+          3. On -4120, fall back to LIMIT reduceOnly which correctly simulates
+             TP behavior for both LONG and SHORT positions.
         """
         sym = symbol.upper()
+
+        # ── Try Algo Order API first ──────────────────────────────────
+        try:
+            result = self.place_take_profit_algo(
+                sym, side, stop_price,
+                quantity=quantity,
+                close_position=close_position,
+            )
+            algo_id = result.get("algoId")
+            logger.info(
+                "TP TAKE_PROFIT_MARKET placed via Algo API: %s side=%s trigger=$%.2f algoId=%s",
+                sym, side, stop_price, algo_id,
+            )
+            # Normalize: add orderId pointing to algoId for backward compat
+            result["orderId"] = algo_id
+            result["_algo_order"] = True
+            return result
+        except Exception as algo_exc:
+            logger.warning(
+                "Algo order TP failed for %s (will try legacy): %s", sym, algo_exc
+            )
+
+        # ── Fallback: legacy order API ────────────────────────────────
         params: Dict[str, Any] = {
             "symbol": sym,
             "side": side.upper(),
@@ -318,7 +366,7 @@ class BinanceFuturesConnector:
             return self._post("/fapi/v1/order", params)
         except Exception as exc:
             if "-4120" in str(exc):
-                # Demo testnet fallback: use LIMIT reduceOnly as TP
+                # Last resort: use LIMIT reduceOnly as TP
                 logger.info(
                     "TAKE_PROFIT_MARKET not supported — using LIMIT reduceOnly at $%.2f for %s",
                     stop_price, sym,
@@ -343,18 +391,62 @@ class BinanceFuturesConnector:
                 return self._post("/fapi/v1/order", limit_params)
             raise
 
-    def cancel_order(self, symbol: str, order_id: int) -> Dict:
-        """Cancel a specific order by ID."""
-        return self._delete(
-            "/fapi/v1/order",
-            {"symbol": symbol.upper(), "orderId": order_id},
-        )
+    def cancel_order(self, symbol: str, order_id: int, is_algo: bool = False) -> Dict:
+        """
+        Cancel a specific order by ID.
+
+        If is_algo=True, cancels via the Algo Order API (DELETE /fapi/v1/algoOrder).
+        Otherwise uses the standard order API (DELETE /fapi/v1/order).
+
+        If standard cancel fails with a 'not found' type error, automatically
+        retries as an algo order cancel.
+        """
+        if is_algo:
+            return self.cancel_algo_order(algo_id=order_id)
+
+        try:
+            return self._delete(
+                "/fapi/v1/order",
+                {"symbol": symbol.upper(), "orderId": order_id},
+            )
+        except Exception as exc:
+            # If the order is not found in regular orders, try algo orders
+            err_str = str(exc)
+            if "-2011" in err_str or "Unknown order" in err_str:
+                logger.info(
+                    "Order %s not found in regular orders for %s, trying algo cancel...",
+                    order_id, symbol,
+                )
+                try:
+                    return self.cancel_algo_order(algo_id=order_id)
+                except Exception as algo_exc:
+                    logger.warning("Algo cancel also failed for %s: %s", order_id, algo_exc)
+                    raise exc  # Re-raise original error
+            raise
 
     def cancel_all_orders(self, symbol: str) -> Dict:
-        """Cancel all open orders for a symbol."""
-        return self._delete(
-            "/fapi/v1/allOpenOrders", {"symbol": symbol.upper()}
-        )
+        """
+        Cancel all open orders for a symbol — both standard and algo orders.
+        """
+        results = {}
+
+        # Cancel standard orders
+        try:
+            results["standard"] = self._delete(
+                "/fapi/v1/allOpenOrders", {"symbol": symbol.upper()}
+            )
+        except Exception as exc:
+            logger.warning("cancel_all standard orders failed for %s: %s", symbol, exc)
+            results["standard_error"] = str(exc)
+
+        # Cancel algo orders
+        try:
+            results["algo"] = self.cancel_all_algo_orders(symbol)
+        except Exception as exc:
+            logger.warning("cancel_all algo orders failed for %s: %s", symbol, exc)
+            results["algo_error"] = str(exc)
+
+        return results
 
     def get_open_orders(self, symbol: Optional[str] = None) -> List[Dict]:
         """Fetch all open orders, optionally filtered by symbol."""
@@ -387,6 +479,252 @@ class BinanceFuturesConnector:
         return self._get(
             "/fapi/v1/ticker/price", params={"symbol": symbol.upper().replace("/", "")}
         )
+
+    # ── Algo Order API ─────────────────────────────────────────────────────
+    #
+    # Binance migrated conditional orders (STOP_MARKET, TAKE_PROFIT_MARKET,
+    # STOP, TAKE_PROFIT, TRAILING_STOP_MARKET) to the Algo Order API.
+    # The old /fapi/v1/order endpoint returns error -4120 for these types.
+    # These methods use POST/DELETE/GET /fapi/v1/algoOrder and related endpoints.
+
+    def place_algo_order(
+        self,
+        symbol: str,
+        side: str,
+        order_type: str,
+        trigger_price: float,
+        quantity: Optional[float] = None,
+        price: Optional[float] = None,
+        close_position: bool = False,
+        reduce_only: bool = False,
+        working_type: str = "MARK_PRICE",
+        price_protect: bool = False,
+        position_side: str = "BOTH",
+        time_in_force: str = "GTC",
+        client_algo_id: Optional[str] = None,
+        callback_rate: Optional[float] = None,
+        activate_price: Optional[float] = None,
+    ) -> Dict:
+        """
+        Place an algo order via POST /fapi/v1/algoOrder.
+
+        Used for conditional orders: STOP_MARKET, TAKE_PROFIT_MARKET,
+        STOP, TAKE_PROFIT, TRAILING_STOP_MARKET.
+
+        Args:
+            symbol:         Trading pair (e.g. 'BTCUSDT').
+            side:           'BUY' or 'SELL'.
+            order_type:     STOP_MARKET, TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT,
+                            or TRAILING_STOP_MARKET.
+            trigger_price:  Price at which the order triggers.
+            quantity:        Order quantity. Cannot be sent with closePosition=true.
+            price:          Limit price (for STOP / TAKE_PROFIT limit orders).
+            close_position: If true, closes the entire position on trigger.
+            reduce_only:    If true, only reduces position. Cannot combine with
+                            closePosition or Hedge Mode.
+            working_type:   MARK_PRICE or CONTRACT_PRICE (default MARK_PRICE).
+            price_protect:  Enable price protection (default False).
+            position_side:  BOTH (One-way) or LONG/SHORT (Hedge Mode).
+            time_in_force:  GTC, IOC, FOK, GTX (default GTC).
+            client_algo_id: Custom client order ID (auto-generated if omitted).
+            callback_rate:  For TRAILING_STOP_MARKET, 0.1–10 (1 = 1%).
+            activate_price: For TRAILING_STOP_MARKET, activation price.
+
+        Returns:
+            Algo order response dict with algoId, clientAlgoId, algoStatus, etc.
+        """
+        sym = symbol.upper()
+        params: Dict[str, Any] = {
+            "algoType": "CONDITIONAL",
+            "symbol": sym,
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "triggerPrice": self.round_price(sym, trigger_price),
+            "workingType": working_type,
+            "positionSide": position_side.upper(),
+            "timeInForce": time_in_force,
+        }
+
+        if close_position:
+            params["closePosition"] = "true"
+        elif quantity is not None:
+            params["quantity"] = self.round_qty(sym, quantity)
+            if reduce_only:
+                params["reduceOnly"] = "true"
+
+        if price is not None:
+            params["price"] = self.round_price(sym, price)
+
+        if price_protect:
+            params["priceProtect"] = "TRUE"
+
+        if client_algo_id is not None:
+            params["clientAlgoId"] = client_algo_id
+
+        if callback_rate is not None:
+            params["callbackRate"] = callback_rate
+
+        if activate_price is not None:
+            params["activatePrice"] = self.round_price(sym, activate_price)
+
+        return self._post("/fapi/v1/algoOrder", params)
+
+    def cancel_algo_order(
+        self,
+        algo_id: Optional[int] = None,
+        client_algo_id: Optional[str] = None,
+    ) -> Dict:
+        """
+        Cancel an active algo order via DELETE /fapi/v1/algoOrder.
+
+        Either algo_id or client_algo_id must be provided.
+
+        Returns:
+            Response dict with algoId, clientAlgoId, code, msg.
+        """
+        params: Dict[str, Any] = {}
+        if algo_id is not None:
+            params["algoId"] = algo_id
+        if client_algo_id is not None:
+            params["clientAlgoId"] = client_algo_id
+        if not params:
+            raise ValueError("Either algo_id or client_algo_id must be provided")
+        return self._delete("/fapi/v1/algoOrder", params)
+
+    def cancel_all_algo_orders(self, symbol: str) -> Dict:
+        """
+        Cancel all open algo orders for a symbol via DELETE /fapi/v1/algoOpenOrders.
+
+        Returns:
+            Response dict with code and msg.
+        """
+        return self._delete(
+            "/fapi/v1/algoOpenOrders", {"symbol": symbol.upper()}
+        )
+
+    def get_open_algo_orders(
+        self, symbol: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Get all open algo orders via GET /fapi/v1/openAlgoOrders.
+
+        Weight: 1 for a single symbol, 40 without symbol filter.
+
+        Returns:
+            List of open algo order dicts.
+        """
+        params: Dict[str, Any] = {}
+        if symbol:
+            params["symbol"] = symbol.upper()
+        return self._get("/fapi/v1/openAlgoOrders", params=params, signed=True)
+
+    def get_algo_order(
+        self,
+        algo_id: Optional[int] = None,
+        client_algo_id: Optional[str] = None,
+    ) -> Dict:
+        """
+        Query a specific algo order via GET /fapi/v1/algoOrder.
+
+        Either algo_id or client_algo_id must be provided.
+
+        Returns:
+            Algo order detail dict.
+        """
+        params: Dict[str, Any] = {}
+        if algo_id is not None:
+            params["algoId"] = algo_id
+        if client_algo_id is not None:
+            params["clientAlgoId"] = client_algo_id
+        if not params:
+            raise ValueError("Either algo_id or client_algo_id must be provided")
+        return self._get("/fapi/v1/algoOrder", params=params, signed=True)
+
+    def get_all_algo_orders(
+        self,
+        symbol: str,
+        algo_id: Optional[int] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        page: Optional[int] = None,
+        limit: int = 500,
+    ) -> List[Dict]:
+        """
+        Get all algo orders (active, CANCELED, TRIGGERED, FINISHED)
+        via GET /fapi/v1/allAlgoOrders.
+
+        Weight: 5.
+
+        Returns:
+            List of algo order dicts.
+        """
+        params: Dict[str, Any] = {
+            "symbol": symbol.upper(),
+            "limit": min(limit, 1000),
+        }
+        if algo_id is not None:
+            params["algoId"] = algo_id
+        if start_time is not None:
+            params["startTime"] = start_time
+        if end_time is not None:
+            params["endTime"] = end_time
+        if page is not None:
+            params["page"] = page
+        return self._get("/fapi/v1/allAlgoOrders", params=params, signed=True)
+
+    # ── Algo-based SL/TP convenience methods ─────────────────────────────────
+
+    def place_stop_loss_algo(
+        self,
+        symbol: str,
+        side: str,
+        stop_price: float,
+        quantity: Optional[float] = None,
+        close_position: bool = True,
+    ) -> Dict:
+        """
+        Place a STOP_MARKET algo order (stop loss) via the Algo Order API.
+
+        side: 'SELL' to close a long, 'BUY' to close a short.
+        close_position=True: exchange closes the entire position automatically.
+        workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
+        """
+        return self.place_algo_order(
+            symbol=symbol,
+            side=side,
+            order_type="STOP_MARKET",
+            trigger_price=stop_price,
+            quantity=quantity,
+            close_position=close_position,
+            working_type="MARK_PRICE",
+        )
+
+    def place_take_profit_algo(
+        self,
+        symbol: str,
+        side: str,
+        stop_price: float,
+        quantity: Optional[float] = None,
+        close_position: bool = True,
+    ) -> Dict:
+        """
+        Place a TAKE_PROFIT_MARKET algo order (take profit) via the Algo Order API.
+
+        side: 'SELL' to close a long, 'BUY' to close a short.
+        close_position=True: exchange closes the entire position automatically.
+        workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
+        """
+        return self.place_algo_order(
+            symbol=symbol,
+            side=side,
+            order_type="TAKE_PROFIT_MARKET",
+            trigger_price=stop_price,
+            quantity=quantity,
+            close_position=close_position,
+            working_type="MARK_PRICE",
+        )
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def get_mark_price(self, symbol: str) -> float:
         """

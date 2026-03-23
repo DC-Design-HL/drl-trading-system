@@ -299,23 +299,29 @@ class TestPlaceMarketOrder:
 
 
 class TestPlaceStopLossOrder:
-    SL_RESP = {"orderId": 222, "type": "STOP_MARKET", "side": "SELL"}
+    # Algo order response format (new path)
+    ALGO_SL_RESP = {"algoId": 222, "clientAlgoId": "test", "algoType": "CONDITIONAL",
+                    "orderType": "STOP_MARKET", "symbol": "BTCUSDT", "side": "SELL",
+                    "algoStatus": "NEW", "triggerPrice": "80000.0"}
 
-    def test_long_sl_uses_sell_side(self):
+    def test_long_sl_uses_sell_side_via_algo(self):
+        """SL now tries algo API first. On success, orderId = algoId."""
         c = make_connector()
         captured = {}
 
         def fake_post(url, **kwargs):
             captured["url"] = url
-            return mock_response(self.SL_RESP)
+            return mock_response(self.ALGO_SL_RESP)
 
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
                 with patch.object(c._session, "post", side_effect=fake_post):
                     result = c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0)
 
-        assert result["orderId"] == 222
+        assert result["orderId"] == 222  # orderId mapped from algoId
+        assert result["_algo_order"] is True
         assert "SELL" in captured["url"]
+        assert "algoOrder" in captured["url"]
         assert "STOP_MARKET" in captured["url"]
         assert "closePosition=true" in captured["url"]
 
@@ -325,7 +331,7 @@ class TestPlaceStopLossOrder:
 
         def fake_post(url, **kwargs):
             captured["url"] = url
-            return mock_response({**self.SL_RESP, "side": "BUY"})
+            return mock_response({**self.ALGO_SL_RESP, "side": "BUY"})
 
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
@@ -340,31 +346,41 @@ class TestPlaceStopLossOrder:
 
         def fake_post(url, **kwargs):
             captured["url"] = url
-            return mock_response(self.SL_RESP)
+            return mock_response(self.ALGO_SL_RESP)
+
+        with patch.object(c, "get_price_precision", return_value=1):
+            with patch.object(c, "get_qty_precision", return_value=3):
+                with patch.object(c, "get_step_size", return_value=0.001):
+                    with patch.object(c._session, "post", side_effect=fake_post):
+                        c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0, quantity=0.1, close_position=False)
+
+        # Algo path sends quantity but not reduceOnly with closePosition omitted
+        assert "quantity=0.1" in captured["url"]
+
+    def test_algo_fails_falls_back_to_legacy_then_4120_sentinel(self):
+        """When algo fails and legacy gives -4120, return sentinel."""
+        c = make_connector()
+        call_count = [0]
+        error_resp = mock_error_response({"code": -4120, "msg": "Order type not supported"}, 400)
+
+        def fake_post(url, **kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # Algo order fails
+                return error_resp
+            # Legacy also fails with -4120
+            return error_resp
 
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
                 with patch.object(c._session, "post", side_effect=fake_post):
-                    c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0, quantity=0.1, close_position=False)
-
-        assert "closePosition" not in captured["url"]
-        assert "reduceOnly=true" in captured["url"]
-
-    def test_demo_testnet_4120_returns_sentinel_not_raises(self):
-        """On demo-fapi, -4120 should return a sentinel dict (orderId=None), not raise."""
-        c = make_connector()
-        error_resp = mock_error_response({"code": -4120, "msg": "Order type not supported"}, 400)
-
-        with patch.object(c, "get_price_precision", return_value=1):
-            with patch.object(c, "get_qty_precision", return_value=3):
-                with patch.object(c._session, "post", return_value=error_resp):
                     result = c.place_stop_loss_order("BTCUSDT", "SELL", 80000.0)
 
         assert result["orderId"] is None
         assert result["status"] == "TESTNET_NOT_SUPPORTED"
 
     def test_non_4120_error_still_raises(self):
-        """Non-4120 errors should still propagate."""
+        """Non-4120 errors should still propagate when both algo and legacy fail."""
         c = make_connector()
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
@@ -375,15 +391,20 @@ class TestPlaceStopLossOrder:
 
 
 class TestPlaceTakeProfitOrder:
-    TP_RESP = {"orderId": 333, "type": "TAKE_PROFIT_MARKET", "side": "SELL"}
+    # Algo order response format (new path)
+    ALGO_TP_RESP = {"algoId": 333, "clientAlgoId": "test", "algoType": "CONDITIONAL",
+                    "orderType": "TAKE_PROFIT_MARKET", "symbol": "BTCUSDT", "side": "SELL",
+                    "algoStatus": "NEW", "triggerPrice": "90000.0"}
 
-    def test_long_tp(self):
+    def test_long_tp_via_algo(self):
+        """TP now tries algo API first. On success, orderId = algoId."""
         c = make_connector()
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
-                with patch.object(c._session, "post", return_value=mock_response(self.TP_RESP)):
+                with patch.object(c._session, "post", return_value=mock_response(self.ALGO_TP_RESP)):
                     result = c.place_take_profit_order("BTCUSDT", "SELL", 90000.0)
-        assert result["orderId"] == 333
+        assert result["orderId"] == 333  # orderId mapped from algoId
+        assert result["_algo_order"] is True
 
     def test_short_tp_buy_side(self):
         c = make_connector()
@@ -391,7 +412,7 @@ class TestPlaceTakeProfitOrder:
 
         def fake_post(url, **kwargs):
             captured["url"] = url
-            return mock_response({**self.TP_RESP, "side": "BUY"})
+            return mock_response({**self.ALGO_TP_RESP, "side": "BUY"})
 
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
@@ -400,6 +421,7 @@ class TestPlaceTakeProfitOrder:
 
         assert "BUY" in captured["url"]
         assert "TAKE_PROFIT_MARKET" in captured["url"]
+        assert "algoOrder" in captured["url"]
 
     def test_with_quantity_no_close_position(self):
         c = make_connector()
@@ -407,14 +429,15 @@ class TestPlaceTakeProfitOrder:
 
         def fake_post(url, **kwargs):
             captured["url"] = url
-            return mock_response(self.TP_RESP)
+            return mock_response(self.ALGO_TP_RESP)
 
         with patch.object(c, "get_price_precision", return_value=1):
             with patch.object(c, "get_qty_precision", return_value=3):
-                with patch.object(c._session, "post", side_effect=fake_post):
-                    c.place_take_profit_order("BTCUSDT", "SELL", 90000.0, quantity=0.05, close_position=False)
+                with patch.object(c, "get_step_size", return_value=0.001):
+                    with patch.object(c._session, "post", side_effect=fake_post):
+                        c.place_take_profit_order("BTCUSDT", "SELL", 90000.0, quantity=0.05, close_position=False)
 
-        assert "closePosition" not in captured["url"]
+        assert "quantity=0.05" in captured["url"]
 
 
 class TestCancelOrder:
@@ -425,7 +448,16 @@ class TestCancelOrder:
             result = c.cancel_order("BTCUSDT", 111)
         assert result["orderId"] == 111
 
-    def test_cancel_api_error_raises(self):
+    def test_cancel_algo_order(self):
+        c = make_connector()
+        resp = {"algoId": 999, "code": "200", "msg": "success"}
+        with patch.object(c._session, "delete", return_value=mock_response(resp)):
+            result = c.cancel_order("BTCUSDT", 999, is_algo=True)
+        assert result["algoId"] == 999
+
+    def test_cancel_unknown_order_tries_algo_then_raises(self):
+        """When regular cancel gets -2011 (Unknown order), tries algo cancel.
+        If algo also fails, re-raises original error."""
         c = make_connector()
         with patch.object(
             c._session, "delete",
@@ -436,21 +468,27 @@ class TestCancelOrder:
 
 
 class TestCancelAllOrders:
-    def test_cancel_all(self):
+    def test_cancel_all_both_standard_and_algo(self):
+        """cancel_all_orders now cancels both standard and algo orders."""
         c = make_connector()
         resp = {"code": 200, "msg": "The operation of cancel all open order is done."}
         with patch.object(c._session, "delete", return_value=mock_response(resp)):
             result = c.cancel_all_orders("BTCUSDT")
-        assert result["code"] == 200
+        # Result now has 'standard' and 'algo' keys
+        assert result["standard"]["code"] == 200
+        assert result["algo"]["code"] == 200
 
-    def test_error_raises(self):
+    def test_partial_failure_does_not_raise(self):
+        """cancel_all_orders swallows per-type errors instead of raising."""
         c = make_connector()
         with patch.object(
             c._session, "delete",
             return_value=mock_error_response({}, 400)
         ):
-            with pytest.raises(requests.HTTPError):
-                c.cancel_all_orders("BTCUSDT")
+            # Should NOT raise — errors are captured per-type
+            result = c.cancel_all_orders("BTCUSDT")
+        assert "standard_error" in result
+        assert "algo_error" in result
 
 
 class TestGetOpenOrders:
