@@ -56,7 +56,110 @@ def get_state():
     """Get current trading state."""
     try:
         state = storage.load_state()
-        
+
+        # ── Reconcile bot state with ACTUAL exchange positions ─────────
+        # The bot's state files may disagree with exchange reality (e.g. bot
+        # says LONG but exchange has SHORT).  Exchange is the source of truth.
+        try:
+            from src.api.futures_executor import get_futures_executor
+            executor = get_futures_executor()
+            if executor:
+                exchange_positions = executor.get_positions()
+                # Build lookup: symbol → exchange position dict
+                exchange_map = {p['symbol']: p for p in exchange_positions}
+
+                raw_assets = state.get('raw_state', {}).get('assets', {})
+                if not raw_assets:
+                    raw_assets = state.get('assets', {})
+
+                for sym, asset in raw_assets.items():
+                    if not isinstance(asset, dict):
+                        continue
+                    ex_pos = exchange_map.get(sym)
+                    if ex_pos:
+                        # Exchange has a position for this symbol
+                        ex_side = ex_pos.get('side', '')  # 'LONG' or 'SHORT'
+                        ex_amt = ex_pos.get('amount', 0)
+                        ex_entry = ex_pos.get('entry_price', 0)
+                        ex_upnl = ex_pos.get('unrealized_pnl', 0)
+
+                        # Derive position int from exchange side
+                        if ex_side == 'LONG':
+                            ex_position_int = 1
+                        elif ex_side == 'SHORT':
+                            ex_position_int = -1
+                        else:
+                            ex_position_int = 0
+
+                        bot_position = asset.get('position', 0)
+                        if bot_position != ex_position_int:
+                            logger.warning(
+                                "STATE MISMATCH for %s: bot says position=%d (%s) but "
+                                "exchange has %s (amt=%.6f). Using exchange as source of truth.",
+                                sym, bot_position,
+                                {1: 'LONG', -1: 'SHORT', 0: 'FLAT'}.get(bot_position, '?'),
+                                ex_side, ex_amt,
+                            )
+                            asset['position'] = ex_position_int
+                            asset['position_label'] = ex_side
+                            asset['entry_price'] = ex_entry
+                            asset['units'] = ex_amt
+                            asset['_exchange_reconciled'] = True
+
+                        # Always use exchange unrealized PnL (more accurate)
+                        asset['pnl'] = ex_upnl
+
+                        # Enrich with SL/TP from exchange position data
+                        if ex_pos.get('sl_price') is not None:
+                            asset['sl_price'] = ex_pos['sl_price']
+                        if ex_pos.get('tp_price') is not None:
+                            asset['tp_price'] = ex_pos['tp_price']
+                    else:
+                        # Exchange has NO position but bot thinks it does
+                        bot_position = asset.get('position', 0)
+                        if bot_position != 0:
+                            logger.warning(
+                                "STATE MISMATCH for %s: bot says position=%d but "
+                                "exchange has NO open position. Marking as FLAT.",
+                                sym, bot_position,
+                            )
+                            asset['position'] = 0
+                            asset['position_label'] = 'FLAT'
+                            asset['pnl'] = 0
+                            asset['_exchange_reconciled'] = True
+
+                # Update state with reconciled assets
+                if 'raw_state' in state and 'assets' in state['raw_state']:
+                    state['raw_state']['assets'] = raw_assets
+                elif 'assets' in state:
+                    state['assets'] = raw_assets
+
+                # Also correct the on-disk state files when a mismatch is detected,
+                # so the bot picks up the correct direction on next restart.
+                for sym, asset in raw_assets.items():
+                    if not isinstance(asset, dict) or not asset.get('_exchange_reconciled'):
+                        continue
+                    try:
+                        if sym == 'BTCUSDT':
+                            sf = PROJECT_ROOT / 'logs' / 'htf_trading_state.json'
+                        else:
+                            sf = PROJECT_ROOT / 'logs' / f'htf_trading_state_{sym}.json'
+                        if sf.exists():
+                            with open(sf, 'r') as fh:
+                                file_state = json.load(fh)
+                            ex_pos = exchange_map.get(sym)
+                            if ex_pos:
+                                file_state['position'] = asset['position']
+                                file_state['position_price'] = ex_pos.get('entry_price', file_state.get('position_price', 0))
+                                file_state['position_units'] = ex_pos.get('amount', file_state.get('position_units', 0))
+                                with open(sf, 'w') as fh:
+                                    json.dump(file_state, fh, indent=2)
+                                logger.info("Corrected state file %s: position=%d", sf.name, asset['position'])
+                    except Exception as sf_err:
+                        logger.warning("Could not correct state file for %s: %s", sym, sf_err)
+        except Exception as reconcile_err:
+            logger.error(f"Exchange reconciliation failed (using bot state as fallback): {reconcile_err}")
+
         # Use state file balances directly — trade log accumulation causes inflated PnL
         # The state files (htf_trading_state.json etc.) track realized_pnl correctly per session
         try:

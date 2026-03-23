@@ -298,6 +298,17 @@ class HTFLiveBot:
             if self.testnet_executor:
                 mode = "futures (real longs/shorts)" if getattr(self.testnet_executor, '_futures_executor', None) else "spot"
                 logger.info("Testnet mirror enabled (%s)", mode)
+
+                # On startup: verify SL/TP orders exist for all open exchange positions.
+                # The FuturesTestnetExecutor already does this in __init__, but log it
+                # explicitly so the HTF bot startup log shows the verification happened.
+                futures_exec = getattr(self.testnet_executor, '_futures_executor', None)
+                if futures_exec:
+                    logger.info(
+                        "Startup SL/TP verification: SL orders=%s, TP orders=%s",
+                        dict(futures_exec._sl_orders),
+                        dict(futures_exec._tp_orders),
+                    )
             else:
                 logger.warning("Testnet mirror: executor not available (keys missing?)")
         except Exception as exc:

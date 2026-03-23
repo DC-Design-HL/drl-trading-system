@@ -55,6 +55,10 @@ class FuturesTestnetExecutor:
         # than stacking new ones on top.
         self._sync_order_tracking()
 
+        # Verify that all open positions have SL/TP orders on exchange.
+        # Places missing ones using prices from bot state files.
+        self.ensure_sl_tp_for_open_positions()
+
     # ── Startup sync ──────────────────────────────────────────────────────────
 
     def _sync_order_tracking(self) -> None:
@@ -97,6 +101,88 @@ class FuturesTestnetExecutor:
                 dict(self._sl_orders),
                 dict(self._tp_orders),
             )
+
+    def ensure_sl_tp_for_open_positions(self) -> None:
+        """
+        Verify that all open exchange positions have SL and TP orders.
+        If any are missing, place them using prices from bot state files.
+
+        Called on startup to catch situations where the bot placed a position
+        but the SL/TP order was never created (or was cancelled/expired).
+        """
+        try:
+            positions = self.connector.get_positions()
+        except Exception as exc:
+            logger.warning("ensure_sl_tp_for_open_positions: could not fetch positions: %s", exc)
+            return
+
+        if not positions:
+            return
+
+        states, _ = self._load_state_and_trades()
+
+        for pos in positions:
+            sym = pos.get("symbol", "")
+            amt = float(pos.get("positionAmt", 0))
+            if amt == 0 or not sym:
+                continue
+
+            side = "LONG" if amt > 0 else "SHORT"
+            order_side_sl = "SELL" if side == "LONG" else "BUY"
+            order_side_tp = "SELL" if side == "LONG" else "BUY"
+
+            state = states.get(sym, {})
+            sl_price = float(state.get("sl_price", 0))
+            tp_price = float(state.get("tp_price", 0))
+
+            # ── Check SL ──────────────────────────────────────────────
+            if sym not in self._sl_orders and sl_price > 0:
+                logger.warning(
+                    "⚠️ Missing SL order for %s %s position (state SL=$%.2f). Placing now...",
+                    sym, side, sl_price,
+                )
+                try:
+                    sl_order = self.connector.place_stop_loss_order(
+                        sym, order_side_sl, sl_price, close_position=True
+                    )
+                    sl_oid = sl_order.get("orderId")
+                    if sl_oid is not None:
+                        self._sl_orders[sym] = sl_oid
+                        logger.info(
+                            "✅ SL order placed for %s: orderId=%s @ $%.2f",
+                            sym, sl_oid, sl_price,
+                        )
+                    else:
+                        logger.warning(
+                            "SL for %s @ $%.2f: STOP_MARKET not supported on this testnet. "
+                            "Bot-side monitoring will handle SL.", sym, sl_price,
+                        )
+                except Exception as exc:
+                    logger.error("Failed to place missing SL for %s: %s", sym, exc)
+            elif sym in self._sl_orders:
+                logger.info("SL order already exists for %s (orderId=%s)", sym, self._sl_orders[sym])
+
+            # ── Check TP ──────────────────────────────────────────────
+            if sym not in self._tp_orders and tp_price > 0:
+                logger.warning(
+                    "⚠️ Missing TP order for %s %s position (state TP=$%.2f). Placing now...",
+                    sym, side, tp_price,
+                )
+                try:
+                    tp_order = self.connector.place_take_profit_order(
+                        sym, order_side_tp, tp_price, close_position=True
+                    )
+                    tp_oid = tp_order.get("orderId")
+                    if tp_oid is not None:
+                        self._tp_orders[sym] = tp_oid
+                        logger.info(
+                            "✅ TP order placed for %s: orderId=%s @ $%.2f",
+                            sym, tp_oid, tp_price,
+                        )
+                except Exception as exc:
+                    logger.error("Failed to place missing TP for %s: %s", sym, exc)
+            elif sym in self._tp_orders:
+                logger.info("TP order already exists for %s (orderId=%s)", sym, self._tp_orders[sym])
 
     def ensure_tp_order(self, symbol: str, side: str, tp_price: float) -> Optional[int]:
         """
