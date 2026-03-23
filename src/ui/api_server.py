@@ -703,7 +703,19 @@ def get_testnet_orders():
 
 @app.route('/api/testnet/trades')
 def get_testnet_trades():
-    """Get futures testnet trade fill history from exchange."""
+    """Get futures testnet trade fill history from exchange.
+
+    The raw Binance /fapi/v1/userTrades response uses exchange field names
+    (``time``, ``side``, ``qty``, ``realizedPnl``, …).  We normalise them
+    here so the Streamlit UI can display every column without guessing.
+
+    Normalised fields added to each record:
+      timestamp  — ISO-8601 string derived from ``time`` (ms epoch)
+      action     — human-readable label: OPEN_LONG, CLOSE_LONG, etc.
+      amount     — alias of ``qty``
+      pnl        — alias of ``realizedPnl`` (None for opening trades)
+      filled_price — alias of ``price``
+    """
     try:
         from src.api.futures_executor import get_futures_executor
         executor = get_futures_executor()
@@ -711,8 +723,42 @@ def get_testnet_trades():
             return jsonify({'trades': [], 'error': 'Futures testnet not configured'})
         symbol = request.args.get('symbol')
         limit = int(request.args.get('limit', 500))
-        trades = executor.get_trade_history(symbol=symbol, limit=limit)
-        return jsonify({'trades': trades, 'total': len(trades)})
+        raw_trades = executor.get_trade_history(symbol=symbol, limit=limit)
+
+        normalised: list = []
+        for t in raw_trades:
+            rec = dict(t)  # shallow copy — keep raw fields for debugging
+
+            # ── timestamp ──────────────────────────────────────────────
+            raw_time = t.get('time', 0)
+            if raw_time:
+                from datetime import datetime as _dt, timezone as _tz
+                try:
+                    dt = _dt.fromtimestamp(int(raw_time) / 1000, tz=_tz.utc)
+                    rec['timestamp'] = dt.isoformat()
+                except Exception:
+                    rec['timestamp'] = ''
+            else:
+                rec['timestamp'] = t.get('timestamp', '')
+
+            # ── action (derive from side + realizedPnl) ────────────────
+            side = t.get('side', '').upper()
+            realized = float(t.get('realizedPnl', 0) or 0)
+            if side == 'BUY':
+                rec['action'] = 'CLOSE_SHORT' if realized != 0 else 'OPEN_LONG'
+            elif side == 'SELL':
+                rec['action'] = 'CLOSE_LONG' if realized != 0 else 'OPEN_SHORT'
+            else:
+                rec['action'] = t.get('action', side or '—')
+
+            # ── amount / filled_price / pnl ────────────────────────────
+            rec['amount'] = float(t.get('qty', t.get('amount', 0)) or 0)
+            rec['filled_price'] = float(t.get('price', 0) or 0)
+            rec['pnl'] = realized if realized != 0 else None
+
+            normalised.append(rec)
+
+        return jsonify({'trades': normalised, 'total': len(normalised)})
     except Exception as e:
         logger.error(f"GET /api/testnet/trades error: {e}")
         return jsonify({'trades': [], 'error': str(e)})

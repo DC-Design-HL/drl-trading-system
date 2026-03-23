@@ -2776,7 +2776,15 @@ def main():
                     st.markdown("### 📈 Equity Curve (Cumulative PNL)")
                     try:
                         eq_df = pd.DataFrame(equity_curve)
-                        eq_df['timestamp'] = pd.to_datetime(eq_df['timestamp'], errors='coerce')
+                        # Timestamps may be ISO-8601 strings or raw ms epoch ints.
+                        # Try ISO first; if mostly NaT, fall back to unit='ms'.
+                        raw_ts = eq_df['timestamp'].copy()
+                        eq_df['timestamp'] = pd.to_datetime(raw_ts, errors='coerce')
+                        if eq_df['timestamp'].isna().sum() > len(eq_df) * 0.5:
+                            eq_df['timestamp'] = pd.to_datetime(
+                                pd.to_numeric(raw_ts, errors='coerce'),
+                                unit='ms', errors='coerce',
+                            )
                         eq_df = eq_df.dropna(subset=['timestamp'])
                         if not eq_df.empty:
                             import plotly.graph_objects as go
@@ -2816,16 +2824,47 @@ def main():
                 if all_trades:
                     trade_rows = []
                     for t in reversed(all_trades):  # newest first
-                        ts = t.get('timestamp', '')[:19].replace('T', ' ') if t.get('timestamp') else '—'
+                        # Timestamp: normalised 'timestamp' (ISO-8601) or
+                        # raw 'time' (ms epoch) from Binance
+                        ts_raw = t.get('timestamp', '')
+                        if ts_raw:
+                            ts = str(ts_raw)[:19].replace('T', ' ')
+                        else:
+                            raw_time = t.get('time', 0)
+                            if raw_time:
+                                try:
+                                    from datetime import datetime as _dt, timezone as _tz
+                                    ts = _dt.fromtimestamp(int(raw_time) / 1000, tz=_tz.utc).strftime('%Y-%m-%d %H:%M:%S')
+                                except Exception:
+                                    ts = '—'
+                            else:
+                                ts = '—'
+
                         sym = t.get('symbol', '—')
-                        action = t.get('action', '—')
+
+                        # Action: normalised 'action' or derive from side + realizedPnl
+                        action = t.get('action', '')
+                        if not action or action == '—':
+                            side = t.get('side', '').upper()
+                            rpnl = float(t.get('realizedPnl', 0) or 0)
+                            if side == 'BUY':
+                                action = 'CLOSE_SHORT' if rpnl != 0 else 'OPEN_LONG'
+                            elif side == 'SELL':
+                                action = 'CLOSE_LONG' if rpnl != 0 else 'OPEN_SHORT'
+                            else:
+                                action = side or '—'
+
+                        # Price, Amount, PNL — normalised fields or raw Binance fields
                         price_v = float(t.get('filled_price') or t.get('price', 0) or 0)
-                        amt = float(t.get('amount', 0) or 0)
+                        amt = float(t.get('amount') or t.get('qty', 0) or 0)
                         pnl_v = t.get('pnl')
+                        if pnl_v is None:
+                            rpnl_raw = t.get('realizedPnl')
+                            if rpnl_raw is not None and float(rpnl_raw) != 0:
+                                pnl_v = float(rpnl_raw)
                         pnl_str = f"${float(pnl_v):+,.4f}" if pnl_v is not None else "—"
-                        oid = str(t.get('order_id', '') or '—')[:16]
-                        executed = '✅' if t.get('executed') else '❌'
-                        err = t.get('error', '')
+
+                        oid = str(t.get('order_id') or t.get('orderId', '') or '—')[:16]
                         trade_rows.append({
                             'Time': ts,
                             'Symbol': sym,
@@ -2834,8 +2873,6 @@ def main():
                             'Amount': f"{amt:.6f}" if amt else "—",
                             'PNL': pnl_str,
                             'Order ID': oid,
-                            'OK': executed,
-                            'Error': err if err else '',
                         })
                     st.dataframe(
                         pd.DataFrame(trade_rows),

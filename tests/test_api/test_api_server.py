@@ -64,7 +64,8 @@ class TestStateEndpoint:
     """Test /api/state endpoint."""
 
     @patch('src.ui.api_server.storage')
-    def test_get_state_success(self, mock_storage, client):
+    @patch('src.api.futures_executor.get_futures_executor', return_value=None)
+    def test_get_state_success(self, mock_executor, mock_storage, client):
         """Test successful state retrieval."""
         # Mock storage response
         mock_storage.load_state.return_value = {
@@ -79,6 +80,7 @@ class TestStateEndpoint:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert 'balance' in data
+        # Balance comes from storage when exchange override is unavailable
         assert data['balance'] == 10000.0
 
     @patch('src.ui.api_server.storage')
@@ -288,18 +290,18 @@ class TestModelEndpoint:
         mock_exists.return_value = False
         mock_storage.load_state.return_value = {}
 
-        # 6 winning, 4 losing = 60% win rate
+        # 6 winning, 4 losing = 60% win rate (action must contain CLOSE or EXIT)
         mock_storage.get_trades.return_value = [
-            {'pnl': 100.0},
-            {'pnl': 50.0},
-            {'pnl': -30.0},
-            {'pnl': 75.0},
-            {'pnl': -20.0},
-            {'pnl': 120.0},
-            {'pnl': 90.0},
-            {'pnl': -40.0},
-            {'pnl': 60.0},
-            {'pnl': -10.0},
+            {'action': 'CLOSE_LONG', 'pnl': 100.0},
+            {'action': 'CLOSE_LONG', 'pnl': 50.0},
+            {'action': 'CLOSE_SHORT', 'pnl': -30.0},
+            {'action': 'EXIT', 'pnl': 75.0},
+            {'action': 'CLOSE_LONG', 'pnl': -20.0},
+            {'action': 'CLOSE_SHORT', 'pnl': 120.0},
+            {'action': 'EXIT', 'pnl': 90.0},
+            {'action': 'CLOSE_LONG', 'pnl': -40.0},
+            {'action': 'CLOSE_SHORT', 'pnl': 60.0},
+            {'action': 'EXIT', 'pnl': -10.0},
         ]
 
         response = client.get('/api/model')

@@ -647,9 +647,18 @@ class FuturesTestnetExecutor:
             pnl_val = float(t.get("realizedPnl", 0))
             if pnl_val != 0:
                 cumulative += pnl_val
+                # Convert ms epoch → ISO-8601 so pd.to_datetime works without unit=
+                raw_time = t.get("time", 0)
+                try:
+                    from datetime import datetime as _dt, timezone as _tz
+                    ts_str = _dt.fromtimestamp(
+                        int(raw_time) / 1000, tz=_tz.utc
+                    ).isoformat()
+                except Exception:
+                    ts_str = str(raw_time)
                 equity_curve.append(
                     {
-                        "timestamp": t.get("time", ""),
+                        "timestamp": ts_str,
                         "cumulative_pnl": round(cumulative, 4),
                         "trade_pnl": round(pnl_val, 4),
                         "symbol": t.get("symbol", ""),
