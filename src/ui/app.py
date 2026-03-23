@@ -1762,7 +1762,17 @@ def main():
         
         with tab_chart:
             # TradingView Chart with WebSocket
+            # Fetch trades from testnet trade history (exchange fills) — state.get('trades') is empty
             trades = state.get('trades', [])
+            if not trades:
+                try:
+                    _api = get_api_url()
+                    _sym_clean = st.session_state.selected_asset.replace('/', '').upper()
+                    _trades_resp = requests.get(f'{_api}/api/testnet/trades?symbol={_sym_clean}&limit=100', timeout=10)
+                    if _trades_resp.ok:
+                        trades = _trades_resp.json().get('trades', [])
+                except Exception:
+                    trades = []
             chart_html = create_tradingview_chart_with_websocket(df, trades, st.session_state.timeframe, st.session_state.selected_asset)
             # Append timestamp comment to force re-render since components.html doesn't support key
             # Create a placeholder for the chart to force re-rendering
