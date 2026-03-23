@@ -693,7 +693,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
         }}
     </style>
     
-    <script src="https://unpkg.com/lightweight-charts@5.1.0/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
     <script>
         (function() {{
             const container = document.getElementById('{chart_id}');
