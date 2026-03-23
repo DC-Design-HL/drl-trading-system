@@ -529,6 +529,12 @@ def main():
                         print(f"[alerter] Skipping malformed JSON: {e}", flush=True)
                         continue
 
+                    # Only send testnet (htf) alerts — skip paper trade bots
+                    strategy = alert.get("strategy", alert.get("trade", {}).get("strategy", "htf"))
+                    if strategy in ("partial", "hybrid"):
+                        print(f"[alerter] Skipping paper trade alert ({strategy})", flush=True)
+                        continue
+
                     message = format_alert(alert)
                     if send_telegram(message):
                         sent_count += 1
