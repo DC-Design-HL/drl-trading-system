@@ -7,6 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
+import bisect
 import json
 import time
 from datetime import datetime, timedelta
@@ -429,18 +430,43 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             'color': color,
         })
     
+    # Build sorted list of candle open-times so we can snap trade markers
+    # to the nearest candle.  lightweight-charts v4 REQUIRES that every
+    # marker time matches an existing candle time, otherwise the marker is
+    # silently dropped.  It also requires all markers sorted ascending.
+    candle_times = sorted(c['time'] for c in candlestick_data)
+
+    def _snap_to_candle(unix_ts: int) -> int | None:
+        """Return the candle open-time closest to *unix_ts*, or None if
+        the trade falls outside the chart's visible range."""
+        if not candle_times:
+            return None
+        idx = bisect.bisect_left(candle_times, unix_ts)
+        # Pick whichever neighbour is closest
+        candidates = []
+        if idx < len(candle_times):
+            candidates.append(candle_times[idx])
+        if idx > 0:
+            candidates.append(candle_times[idx - 1])
+        best = min(candidates, key=lambda ct: abs(ct - unix_ts))
+        return best
+
     # Create markers for trades
     markers = []
     for trade in trades:
         if 'price' in trade and 'timestamp' in trade:
             try:
                 ts = datetime.fromisoformat(trade['timestamp'].replace('Z', '+00:00'))
+                raw_time = int(ts.timestamp())
+                snapped = _snap_to_candle(raw_time)
+                if snapped is None:
+                    continue
                 action = trade.get('action', '')
                 reason = trade.get('reason', '').lower()
                 
                 if 'OPEN_LONG' in action:
                     markers.append({
-                        'time': int(ts.timestamp()),
+                        'time': snapped,
                         'position': 'belowBar',
                         'color': '#26a69a',
                         'shape': 'arrowUp',
@@ -448,7 +474,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     })
                 elif 'OPEN_SHORT' in action:
                     markers.append({
-                        'time': int(ts.timestamp()),
+                        'time': snapped,
                         'position': 'aboveBar',
                         'color': '#ef5350',
                         'shape': 'arrowDown',
@@ -461,7 +487,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     
                     if exit_label == 'EXIT(SL)':
                         markers.append({
-                            'time': int(ts.timestamp()),
+                            'time': snapped,
                             'position': 'aboveBar',
                             'color': '#ff4444',
                             'shape': 'square',
@@ -469,7 +495,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                         })
                     elif exit_label == 'EXIT(TP)':
                         markers.append({
-                            'time': int(ts.timestamp()),
+                            'time': snapped,
                             'position': 'belowBar',
                             'color': '#00e676',
                             'shape': 'square',
@@ -477,14 +503,18 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                         })
                     else:
                         markers.append({
-                            'time': int(ts.timestamp()),
+                            'time': snapped,
                             'position': 'aboveBar',
                             'color': '#ffc107',
                             'shape': 'circle',
                             'text': 'EXIT',
                         })
-            except:
-                pass
+            except Exception:
+                continue
+
+    # lightweight-charts requires markers sorted by time ascending;
+    # unsorted markers cause ALL markers to be silently dropped.
+    markers.sort(key=lambda m: m['time'])
     
     # Get OHLC for display
     last_candle = df.iloc[-1]
@@ -623,9 +653,13 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             let candleData = {json.dumps(candlestick_data)};
             candlestickSeries.setData(candleData);
             
-            // Add markers for trades
+            // Add markers for trades (entries + exits)
             const markers = {json.dumps(markers)};
             if (markers.length > 0) {{
+                // Defensive: ensure ascending time order (library silently
+                // drops ALL markers if they are not sorted)
+                markers.sort((a, b) => a.time - b.time);
+                console.log('[chart] Setting', markers.length, 'markers:', markers.map(m => m.text));
                 candlestickSeries.setMarkers(markers);
             }}
             
