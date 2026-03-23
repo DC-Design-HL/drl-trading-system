@@ -162,6 +162,12 @@ def format_open_trade(alert: dict) -> str:
     if sl > 0:
         lines.append(f"🛑 SL: ${sl:,.2f}{_pct(price, sl)}")
 
+    # Position size in USDT
+    units = trade.get("units", position.get("units", 0))
+    position_usdt = units * price if units and price else trade.get("trade_value", 0)
+    if position_usdt > 0:
+        lines.append(f"📐 Size: ${position_usdt:,.2f} USDT ({units:.4f} units)")
+
     lines.append(f"📊 Confidence: {confidence * 100:.0f}%")
     lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
 
@@ -170,9 +176,6 @@ def format_open_trade(alert: dict) -> str:
     if signal_lines:
         lines.append("")
         lines.extend(signal_lines)
-
-    lines.append("")
-    lines.append(f"💼 Trade Value: ${balance:,.2f}")
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -219,6 +222,13 @@ def format_close_trade(alert: dict) -> str:
 
     pnl_emoji = "📈" if pnl >= 0 else "📉"
     lines.append(f"{pnl_emoji} PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
+
+    # Position size in USDT
+    units = trade.get("units", 0)
+    close_price = exit_price or entry_price
+    position_usdt = units * close_price if units and close_price else 0
+    if position_usdt > 0:
+        lines.append(f"📐 Size: ${position_usdt:,.2f} USDT ({units:.4f} units)")
 
     if reason:
         lines.append(f"📋 Reason: {reason}")
@@ -273,6 +283,14 @@ def format_partial_close(alert: dict) -> str:
         f"{pnl_emoji} PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}",
         f"📦 Remaining: {remaining_pct:.0f}% of position",
     ]
+
+    # Position size in USDT (closed portion)
+    closed_units = trade.get("units", 0)
+    close_price = exit_price or entry_price
+    closed_usdt = closed_units * close_price if closed_units and close_price else 0
+    remaining_usdt = remaining * close_price if remaining and close_price else 0
+    if closed_usdt > 0:
+        lines.append(f"📐 Closed: ${closed_usdt:,.2f} USDT | Remaining: ${remaining_usdt:,.2f} USDT")
 
     if reason:
         lines.append(f"📋 Reason: {reason}")
