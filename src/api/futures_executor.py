@@ -15,6 +15,7 @@ Design principles:
 
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from .binance_futures import BinanceFuturesConnector
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LEVERAGE = 1
 POSITION_SIZE = 0.25  # Fraction of available balance used per trade
+
+# Delay (seconds) between opening a position and placing SL/TP algo orders.
+# Binance needs time to register the position before algo orders referencing
+# it can be accepted (avoids error -4509: TIF GTE requires open position).
+SL_TP_PLACEMENT_DELAY = 2.0
 
 
 class FuturesTestnetExecutor:
@@ -182,26 +188,41 @@ class FuturesTestnetExecutor:
                     "⚠️ Missing SL order for %s %s position (state SL=$%.2f). Placing now...",
                     sym, side, sl_price,
                 )
-                try:
-                    sl_order = self.connector.place_stop_loss_order(
-                        sym, order_side_sl, sl_price, close_position=True
+                sl_placed = False
+                for attempt in range(1, 4):
+                    try:
+                        sl_order = self.connector.place_stop_loss_order(
+                            sym, order_side_sl, sl_price, close_position=True
+                        )
+                        sl_oid = sl_order.get("orderId")
+                        if sl_oid is not None:
+                            self._sl_orders[sym] = sl_oid
+                            if sl_order.get("_algo_order"):
+                                self._algo_sl_flags[sym] = True
+                            logger.info(
+                                "✅ SL order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                sym, sl_oid, sl_price, sl_order.get("_algo_order", False),
+                            )
+                            sl_placed = True
+                        else:
+                            logger.warning(
+                                "SL for %s @ $%.2f: conditional orders not supported. "
+                                "Bot-side monitoring will handle SL.", sym, sl_price,
+                            )
+                            sl_placed = True  # sentinel is acceptable
+                        break
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to place missing SL for %s (attempt %d/3): %s",
+                            sym, attempt, exc,
+                        )
+                        if attempt < 3:
+                            time.sleep(2.0)
+                if not sl_placed:
+                    logger.error(
+                        "❌ All SL placement attempts failed for %s %s @ $%.2f",
+                        sym, side, sl_price,
                     )
-                    sl_oid = sl_order.get("orderId")
-                    if sl_oid is not None:
-                        self._sl_orders[sym] = sl_oid
-                        if sl_order.get("_algo_order"):
-                            self._algo_sl_flags[sym] = True
-                        logger.info(
-                            "✅ SL order placed for %s: orderId=%s @ $%.2f (algo=%s)",
-                            sym, sl_oid, sl_price, sl_order.get("_algo_order", False),
-                        )
-                    else:
-                        logger.warning(
-                            "SL for %s @ $%.2f: conditional orders not supported. "
-                            "Bot-side monitoring will handle SL.", sym, sl_price,
-                        )
-                except Exception as exc:
-                    logger.error("Failed to place missing SL for %s: %s", sym, exc)
             elif sym in self._sl_orders:
                 logger.info("SL order already exists for %s (orderId=%s)", sym, self._sl_orders[sym])
 
@@ -211,21 +232,35 @@ class FuturesTestnetExecutor:
                     "⚠️ Missing TP order for %s %s position (state TP=$%.2f). Placing now...",
                     sym, side, tp_price,
                 )
-                try:
-                    tp_order = self.connector.place_take_profit_order(
-                        sym, order_side_tp, tp_price, close_position=True
-                    )
-                    tp_oid = tp_order.get("orderId")
-                    if tp_oid is not None:
-                        self._tp_orders[sym] = tp_oid
-                        if tp_order.get("_algo_order"):
-                            self._algo_tp_flags[sym] = True
-                        logger.info(
-                            "✅ TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
-                            sym, tp_oid, tp_price, tp_order.get("_algo_order", False),
+                tp_placed = False
+                for attempt in range(1, 4):
+                    try:
+                        tp_order = self.connector.place_take_profit_order(
+                            sym, order_side_tp, tp_price, close_position=True
                         )
-                except Exception as exc:
-                    logger.error("Failed to place missing TP for %s: %s", sym, exc)
+                        tp_oid = tp_order.get("orderId")
+                        if tp_oid is not None:
+                            self._tp_orders[sym] = tp_oid
+                            if tp_order.get("_algo_order"):
+                                self._algo_tp_flags[sym] = True
+                            logger.info(
+                                "✅ TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                                sym, tp_oid, tp_price, tp_order.get("_algo_order", False),
+                            )
+                            tp_placed = True
+                        break
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to place missing TP for %s (attempt %d/3): %s",
+                            sym, attempt, exc,
+                        )
+                        if attempt < 3:
+                            time.sleep(2.0)
+                if not tp_placed:
+                    logger.error(
+                        "❌ All TP placement attempts failed for %s %s @ $%.2f",
+                        sym, side, tp_price,
+                    )
             elif sym in self._tp_orders:
                 logger.info("TP order already exists for %s (orderId=%s)", sym, self._tp_orders[sym])
 
@@ -308,6 +343,14 @@ class FuturesTestnetExecutor:
             result["quantity"] = quantity
             result["mark_price"] = mark_price
             result["executed"] = True
+
+            # Wait for position to register on Binance before placing algo orders
+            if sl > 0 or tp > 0:
+                logger.info(
+                    "Waiting %.1fs for LONG %s position to register before placing SL/TP...",
+                    SL_TP_PLACEMENT_DELAY, sym,
+                )
+                time.sleep(SL_TP_PLACEMENT_DELAY)
 
             # ── SL placement ──────────────────────────────────────────
             if sl > 0:
@@ -435,6 +478,14 @@ class FuturesTestnetExecutor:
             result["quantity"] = quantity
             result["mark_price"] = mark_price
             result["executed"] = True
+
+            # Wait for position to register on Binance before placing algo orders
+            if sl > 0 or tp > 0:
+                logger.info(
+                    "Waiting %.1fs for SHORT %s position to register before placing SL/TP...",
+                    SL_TP_PLACEMENT_DELAY, sym,
+                )
+                time.sleep(SL_TP_PLACEMENT_DELAY)
 
             # ── SL placement ──────────────────────────────────────────
             if sl > 0:

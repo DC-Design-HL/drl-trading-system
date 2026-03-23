@@ -500,7 +500,7 @@ class BinanceFuturesConnector:
         working_type: str = "MARK_PRICE",
         price_protect: bool = False,
         position_side: str = "BOTH",
-        time_in_force: str = "GTC",
+        time_in_force: Optional[str] = None,
         client_algo_id: Optional[str] = None,
         callback_rate: Optional[float] = None,
         activate_price: Optional[float] = None,
@@ -525,7 +525,10 @@ class BinanceFuturesConnector:
             working_type:   MARK_PRICE or CONTRACT_PRICE (default MARK_PRICE).
             price_protect:  Enable price protection (default False).
             position_side:  BOTH (One-way) or LONG/SHORT (Hedge Mode).
-            time_in_force:  GTC, IOC, FOK, GTX (default GTC).
+            time_in_force:  GTC, IOC, FOK, GTX. Only sent for limit-type orders
+                            (STOP, TAKE_PROFIT). Omitted for market-type orders
+                            (STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET)
+                            to avoid error -4509 (TIF GTE requires open position).
             client_algo_id: Custom client order ID (auto-generated if omitted).
             callback_rate:  For TRAILING_STOP_MARKET, 0.1–10 (1 = 1%).
             activate_price: For TRAILING_STOP_MARKET, activation price.
@@ -534,16 +537,24 @@ class BinanceFuturesConnector:
             Algo order response dict with algoId, clientAlgoId, algoStatus, etc.
         """
         sym = symbol.upper()
+        otype = order_type.upper()
         params: Dict[str, Any] = {
             "algoType": "CONDITIONAL",
             "symbol": sym,
             "side": side.upper(),
-            "type": order_type.upper(),
+            "type": otype,
             "triggerPrice": self.round_price(sym, trigger_price),
             "workingType": working_type,
             "positionSide": position_side.upper(),
-            "timeInForce": time_in_force,
         }
+
+        # Only include timeInForce for limit-type algo orders (STOP, TAKE_PROFIT).
+        # Market-type orders (STOP_MARKET, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET)
+        # must NOT send timeInForce — Binance maps it to GTE internally which
+        # requires an already-registered open position (error -4509).
+        market_types = {"STOP_MARKET", "TAKE_PROFIT_MARKET", "TRAILING_STOP_MARKET"}
+        if otype not in market_types:
+            params["timeInForce"] = time_in_force or "GTC"
 
         if close_position:
             params["closePosition"] = "true"
@@ -681,23 +692,46 @@ class BinanceFuturesConnector:
         stop_price: float,
         quantity: Optional[float] = None,
         close_position: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
     ) -> Dict:
         """
         Place a STOP_MARKET algo order (stop loss) via the Algo Order API.
+
+        Includes retry logic: if the order fails (e.g. position not yet
+        registered on Binance's side after a recent open), retries up to
+        max_retries times with retry_delay seconds between attempts.
 
         side: 'SELL' to close a long, 'BUY' to close a short.
         close_position=True: exchange closes the entire position automatically.
         workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
         """
-        return self.place_algo_order(
-            symbol=symbol,
-            side=side,
-            order_type="STOP_MARKET",
-            trigger_price=stop_price,
-            quantity=quantity,
-            close_position=close_position,
-            working_type="MARK_PRICE",
-        )
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                return self.place_algo_order(
+                    symbol=symbol,
+                    side=side,
+                    order_type="STOP_MARKET",
+                    trigger_price=stop_price,
+                    quantity=quantity,
+                    close_position=close_position,
+                    working_type="MARK_PRICE",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    logger.warning(
+                        "SL algo order attempt %d/%d failed for %s: %s — retrying in %.1fs",
+                        attempt, max_retries, symbol, exc, retry_delay,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(
+                        "SL algo order failed after %d attempts for %s: %s",
+                        max_retries, symbol, exc,
+                    )
+        raise last_exc  # type: ignore[misc]
 
     def place_take_profit_algo(
         self,
@@ -706,23 +740,46 @@ class BinanceFuturesConnector:
         stop_price: float,
         quantity: Optional[float] = None,
         close_position: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 2.0,
     ) -> Dict:
         """
         Place a TAKE_PROFIT_MARKET algo order (take profit) via the Algo Order API.
+
+        Includes retry logic: if the order fails (e.g. position not yet
+        registered on Binance's side after a recent open), retries up to
+        max_retries times with retry_delay seconds between attempts.
 
         side: 'SELL' to close a long, 'BUY' to close a short.
         close_position=True: exchange closes the entire position automatically.
         workingType=MARK_PRICE: trigger on mark price (avoids wick triggers).
         """
-        return self.place_algo_order(
-            symbol=symbol,
-            side=side,
-            order_type="TAKE_PROFIT_MARKET",
-            trigger_price=stop_price,
-            quantity=quantity,
-            close_position=close_position,
-            working_type="MARK_PRICE",
-        )
+        last_exc = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                return self.place_algo_order(
+                    symbol=symbol,
+                    side=side,
+                    order_type="TAKE_PROFIT_MARKET",
+                    trigger_price=stop_price,
+                    quantity=quantity,
+                    close_position=close_position,
+                    working_type="MARK_PRICE",
+                )
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    logger.warning(
+                        "TP algo order attempt %d/%d failed for %s: %s — retrying in %.1fs",
+                        attempt, max_retries, symbol, exc, retry_delay,
+                    )
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(
+                        "TP algo order failed after %d attempts for %s: %s",
+                        max_retries, symbol, exc,
+                    )
+        raise last_exc  # type: ignore[misc]
 
     # ── Public API ────────────────────────────────────────────────────────────
 
