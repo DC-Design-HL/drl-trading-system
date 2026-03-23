@@ -452,7 +452,8 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
         return best
 
     # Create markers for trades
-    markers = []
+    # ── Phase 1: build one raw marker per trade ────────────────────────
+    _raw_markers: list[dict] = []
     for trade in trades:
         if 'price' in trade and 'timestamp' in trade:
             try:
@@ -462,55 +463,148 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                 if snapped is None:
                     continue
                 action = trade.get('action', '')
-                reason = trade.get('reason', '').lower()
-                
+                # Defensive: reason can be None, missing, or a string
+                reason = str(trade.get('reason') or '').lower()
+
                 if 'OPEN_LONG' in action:
-                    markers.append({
+                    _raw_markers.append({
                         'time': snapped,
                         'position': 'belowBar',
                         'color': '#26a69a',
                         'shape': 'arrowUp',
                         'text': 'LONG',
+                        '_kind': 'entry',
                     })
                 elif 'OPEN_SHORT' in action:
-                    markers.append({
+                    _raw_markers.append({
                         'time': snapped,
                         'position': 'aboveBar',
                         'color': '#ef5350',
                         'shape': 'arrowDown',
                         'text': 'SHORT',
+                        '_kind': 'entry',
                     })
                 elif 'CLOSE' in action:
                     # Determine exit reason from explicit reason field or
                     # infer from fill price vs SL/TP prices
                     exit_label = _classify_exit_reason(trade, trades)
-                    
+
                     if exit_label == 'EXIT(SL)':
-                        markers.append({
+                        _raw_markers.append({
                             'time': snapped,
                             'position': 'aboveBar',
                             'color': '#ff4444',
                             'shape': 'square',
                             'text': 'EXIT(SL)',
+                            '_kind': 'exit',
                         })
                     elif exit_label == 'EXIT(TP)':
-                        markers.append({
+                        _raw_markers.append({
                             'time': snapped,
                             'position': 'belowBar',
                             'color': '#00e676',
                             'shape': 'square',
                             'text': 'EXIT(TP)',
+                            '_kind': 'exit',
                         })
                     else:
-                        markers.append({
+                        _raw_markers.append({
                             'time': snapped,
                             'position': 'aboveBar',
                             'color': '#ffc107',
-                            'shape': 'circle',
+                            'shape': 'square',
                             'text': 'EXIT',
+                            '_kind': 'exit',
                         })
             except Exception:
                 continue
+
+    # ── Phase 2: deduplicate per candle ────────────────────────────────
+    # lightweight-charts renders all markers at a given time, but when many
+    # trades snap to the same candle (e.g. 20+ scalps in one hour) the
+    # stacked markers overflow the visible chart area making exits invisible.
+    # Aggregate: keep at most ONE entry marker and ONE exit marker per candle.
+    from collections import defaultdict as _defaultdict
+    _by_candle: dict[int, dict] = _defaultdict(lambda: {'entries': [], 'exits': []})
+    for m in _raw_markers:
+        bucket = 'exits' if m['_kind'] == 'exit' else 'entries'
+        _by_candle[m['time']][bucket].append(m)
+
+    markers: list[dict] = []
+    for candle_time in sorted(_by_candle):
+        group = _by_candle[candle_time]
+
+        # ── entry marker (belowBar) ──
+        entries = group['entries']
+        if entries:
+            n_long = sum(1 for e in entries if e['text'] == 'LONG')
+            n_short = sum(1 for e in entries if e['text'] == 'SHORT')
+            if n_long and n_short:
+                label = f'L×{n_long}+S×{n_short}' if (n_long + n_short) > 1 else entries[0]['text']
+                markers.append({
+                    'time': candle_time,
+                    'position': 'belowBar',
+                    'color': '#26a69a',
+                    'shape': 'arrowUp',
+                    'text': label,
+                })
+            elif n_long:
+                markers.append({
+                    'time': candle_time,
+                    'position': 'belowBar',
+                    'color': '#26a69a',
+                    'shape': 'arrowUp',
+                    'text': f'LONG×{n_long}' if n_long > 1 else 'LONG',
+                })
+            elif n_short:
+                markers.append({
+                    'time': candle_time,
+                    'position': 'aboveBar',
+                    'color': '#ef5350',
+                    'shape': 'arrowDown',
+                    'text': f'SHORT×{n_short}' if n_short > 1 else 'SHORT',
+                })
+
+        # ── exit marker (aboveBar / belowBar for TP) ──
+        exits = group['exits']
+        if exits:
+            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
+            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
+            n_plain = sum(1 for e in exits if e['text'] == 'EXIT')
+            total_exits = len(exits)
+
+            if total_exits == 1:
+                # Single exit: use its original styling
+                ex = exits[0]
+                markers.append({
+                    'time': candle_time,
+                    'position': ex['position'],
+                    'color': ex['color'],
+                    'shape': ex['shape'],
+                    'text': ex['text'],
+                })
+            else:
+                # Multiple exits: aggregate into one marker
+                if n_sl or n_tp:
+                    parts = []
+                    if n_sl:
+                        parts.append(f'SL×{n_sl}')
+                    if n_tp:
+                        parts.append(f'TP×{n_tp}')
+                    if n_plain:
+                        parts.append(f'×{n_plain}')
+                    label = 'EXIT(' + '+'.join(parts) + ')'
+                else:
+                    label = f'EXIT×{total_exits}'
+                # Colour: red if any SL, green if all TP, amber otherwise
+                color = '#ff4444' if n_sl else ('#00e676' if n_tp and not n_plain else '#ffc107')
+                markers.append({
+                    'time': candle_time,
+                    'position': 'aboveBar',
+                    'color': color,
+                    'shape': 'square',
+                    'text': label,
+                })
 
     # lightweight-charts requires markers sorted by time ascending;
     # unsorted markers cause ALL markers to be silently dropped.
