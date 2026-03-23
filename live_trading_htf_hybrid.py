@@ -423,6 +423,43 @@ class HTFHybridBot:
         except Exception as exc:
             logger.warning("Failed to queue trade alert: %s", exc)
 
+    def _write_sltp_update_alert(self, old_price: float, new_price: float, reason: str, update_type: str = "SL") -> None:
+        """Write SL/TP update alert to the shared alerts file."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
+
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "strategy": "hybrid",
+                    "trade": {
+                        "type": f"{update_type}_UPDATE",
+                        "update_type": update_type,
+                        "symbol": self.symbol,
+                        "old_price": old_price,
+                        "new_price": new_price,
+                        "reason": reason,
+                        "direction": direction,
+                    },
+                    "signals": {},
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "original_units": self.original_units,
+                        "partial_exits": self.partial_exits,
+                        "trailing_active": self.trailing_active,
+                        "peak_price": self.peak_price,
+                        "direction": direction,
+                    },
+                }, default=_json_safe) + "\n")
+            logger.info("%s update alert queued: $%.2f → $%.2f (%s)", update_type, old_price, new_price, reason)
+        except Exception as exc:
+            logger.warning("Failed to queue SL/TP update alert: %s", exc)
+
     # ------------------------------------------------------------------
     # Data fetching (identical to original)
     # ------------------------------------------------------------------
@@ -655,6 +692,7 @@ class HTFHybridBot:
                         old_sl, self.sl_price, self.peak_price,
                     )
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, self.sl_price, f"Trailing (peak=${self.peak_price:,.2f})")
 
                 # Check trailing SL hit
                 if current_price <= self.sl_price:
@@ -677,6 +715,7 @@ class HTFHybridBot:
                         old_sl, self.sl_price, self.peak_price,
                     )
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, self.sl_price, f"Trailing (peak=${self.peak_price:,.2f})")
 
                 # Check trailing SL hit
                 if current_price >= self.sl_price:
@@ -704,12 +743,14 @@ class HTFHybridBot:
                     if choch_sl > new_sl:
                         new_sl = choch_sl
                 if new_sl > self.sl_price:
+                    old_sl = self.sl_price
                     logger.info(
                         "🔄 [Hybrid] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
                         self.sl_price, new_sl, confidence,
                     )
                     self.sl_price = new_sl
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, new_sl, f"BOS/CHOCH(conf={confidence:.2f})")
 
             elif self.position == -1:  # SHORT
                 if sig.get("bos_bearish") and not sig.get("fake_bos") and swing_high > 0:
@@ -721,12 +762,14 @@ class HTFHybridBot:
                     if new_sl <= 0 or choch_sl < new_sl:
                         new_sl = choch_sl
                 if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+                    old_sl = self.sl_price
                     logger.info(
                         "🔄 [Hybrid] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
                         self.sl_price, new_sl, confidence,
                     )
                     self.sl_price = new_sl
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, new_sl, f"BOS/CHOCH(conf={confidence:.2f})")
 
         # --- Phase 1: Before partial close ---
 

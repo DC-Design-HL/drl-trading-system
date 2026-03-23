@@ -415,6 +415,41 @@ class HTFPartialBot:
         except Exception as exc:
             logger.warning("Failed to queue trade alert: %s", exc)
 
+    def _write_sltp_update_alert(self, old_price: float, new_price: float, reason: str, update_type: str = "SL") -> None:
+        """Write SL/TP update alert to the shared alerts file."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
+
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "strategy": "partial",
+                    "trade": {
+                        "type": f"{update_type}_UPDATE",
+                        "update_type": update_type,
+                        "symbol": self.symbol,
+                        "old_price": old_price,
+                        "new_price": new_price,
+                        "reason": reason,
+                        "direction": direction,
+                    },
+                    "signals": {},
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "original_units": self.original_units,
+                        "partial_exits": self.partial_exits,
+                        "direction": direction,
+                    },
+                }, default=_json_safe) + "\n")
+            logger.info("%s update alert queued: $%.2f → $%.2f (%s)", update_type, old_price, new_price, reason)
+        except Exception as exc:
+            logger.warning("Failed to queue SL/TP update alert: %s", exc)
+
     # ------------------------------------------------------------------
     # Data fetching (identical to original)
     # ------------------------------------------------------------------
@@ -650,12 +685,14 @@ class HTFPartialBot:
                     if choch_sl > new_sl:
                         new_sl = choch_sl
                 if new_sl > self.sl_price:
+                    old_sl = self.sl_price
                     logger.info(
                         "🔄 [Partial] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
                         self.sl_price, new_sl, confidence,
                     )
                     self.sl_price = new_sl
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, new_sl, f"BOS/CHOCH(conf={confidence:.2f})")
 
             elif self.position == -1:  # SHORT
                 if sig.get("bos_bearish") and not sig.get("fake_bos") and swing_high > 0:
@@ -667,12 +704,14 @@ class HTFPartialBot:
                     if new_sl <= 0 or choch_sl < new_sl:
                         new_sl = choch_sl
                 if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+                    old_sl = self.sl_price
                     logger.info(
                         "🔄 [Partial] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
                         self.sl_price, new_sl, confidence,
                     )
                     self.sl_price = new_sl
                     self._save_state()
+                    self._write_sltp_update_alert(old_sl, new_sl, f"BOS/CHOCH(conf={confidence:.2f})")
 
         # --- Stop loss: -1.5% on remaining position ---
         if self.position == 1:

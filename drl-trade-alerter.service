@@ -1,0 +1,14 @@
+[Unit]
+Description=DRL Trading System - Trade Alert Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.openclaw/projects/drl-trading-system/repo
+ExecStart=/usr/bin/python3 trade_alerter.py
+Restart=always
+RestartSec=5
+EnvironmentFile=/root/.openclaw/projects/drl-trading-system/repo/.env
+
+[Install]
+WantedBy=multi-user.target

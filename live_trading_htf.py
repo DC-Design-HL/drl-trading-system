@@ -484,6 +484,7 @@ class HTFLiveBot:
             with open(alert_file, "a") as f:
                 f.write(json.dumps({
                     "timestamp": datetime.now().isoformat(),
+                    "strategy": "htf",
                     "trade": trade,
                     "signals": signal_summary,
                     "position": {
@@ -499,6 +500,69 @@ class HTFLiveBot:
                         trade.get("price", 0))
         except Exception as exc:
             logger.warning("Failed to queue trade alert: %s", exc)
+
+    def _write_sltp_update_alert(
+        self, sl_changed: bool, tp_changed: bool,
+        old_sl: float, new_sl: float,
+        old_tp: float, new_tp: float,
+        reason: str,
+    ) -> None:
+        """Write SL/TP update alert to the shared alerts file."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
+
+            with open(alert_file, "a") as f:
+                if sl_changed and old_sl != new_sl:
+                    f.write(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "strategy": "htf",
+                        "trade": {
+                            "type": "SL_UPDATE",
+                            "update_type": "SL",
+                            "symbol": self.symbol,
+                            "old_price": old_sl,
+                            "new_price": new_sl,
+                            "reason": reason,
+                            "direction": direction,
+                        },
+                        "signals": {},
+                        "position": {
+                            "entry_price": self.position_price,
+                            "sl_price": new_sl,
+                            "tp_price": self.tp_price,
+                            "units": self.position_units,
+                            "direction": direction,
+                        },
+                    }) + "\n")
+
+                if tp_changed and old_tp != new_tp:
+                    f.write(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "strategy": "htf",
+                        "trade": {
+                            "type": "TP_UPDATE",
+                            "update_type": "TP",
+                            "symbol": self.symbol,
+                            "old_price": old_tp,
+                            "new_price": new_tp,
+                            "reason": reason,
+                            "direction": direction,
+                        },
+                        "signals": {},
+                        "position": {
+                            "entry_price": self.position_price,
+                            "sl_price": self.sl_price,
+                            "tp_price": new_tp,
+                            "units": self.position_units,
+                            "direction": direction,
+                        },
+                    }) + "\n")
+
+            logger.info("SL/TP update alert queued for %s", self.symbol)
+        except Exception as exc:
+            logger.warning("Failed to queue SL/TP update alert: %s", exc)
 
     # ------------------------------------------------------------------
     # Data fetching
@@ -887,6 +951,9 @@ class HTFLiveBot:
 
         # --- Apply and log SL/TP changes ---
         if sl_changed or tp_changed:
+            old_sl_price = self.sl_price
+            old_tp_price = self.tp_price
+
             if sl_changed:
                 logger.info(
                     "🔄 SL adjusted: $%.2f → $%.2f (reason=%s, profit=%.2f%%, peak=$%.2f)",
@@ -903,6 +970,14 @@ class HTFLiveBot:
                 self.tp_price = new_tp
 
             self._save_state()
+
+            # Write SL/TP update alerts to the shared alerts file
+            self._write_sltp_update_alert(
+                sl_changed, tp_changed,
+                old_sl_price, self.sl_price,
+                old_tp_price, self.tp_price,
+                adjustment_reason or "trailing",
+            )
 
             # Sync updated SL/TP to exchange (for testnet bots: both LONG and SHORT)
             if not self.dry_run and self.testnet_executor:
