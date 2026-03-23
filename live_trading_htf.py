@@ -256,6 +256,11 @@ class HTFLiveBot:
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         TRADES_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+        # Sync balance from exchange on startup for testnet bots
+        # (handles case where no state file exists yet)
+        if not self.dry_run and not self._state_file.exists():
+            self._sync_balance_from_exchange()
+
         logger.info(
             "HTFLiveBot ready | symbol=%s dry_run=%s balance=%.2f",
             self.symbol, self.dry_run, self.balance,
@@ -398,11 +403,55 @@ class HTFLiveBot:
                 "State restored: pos=%d price=%.2f balance=%.2f",
                 self.position, self.position_price, self.balance,
             )
+            # Sync balance from exchange for testnet bots (not dry_run)
+            if not self.dry_run:
+                self._sync_balance_from_exchange()
             # Check liquidation safety on state restore (if in a position)
             if self.position != 0:
                 self._check_liquidation_safety()
         except Exception as exc:
             logger.warning("Could not restore state: %s", exc)
+
+    def _sync_balance_from_exchange(self) -> None:
+        """
+        Fetch real USDT balance from Binance Futures testnet and override
+        the internally tracked balance.
+
+        This prevents the bot from using inflated balances accumulated during
+        training/simulation. Only called for testnet bots (not dry_run).
+        """
+        try:
+            from src.api.futures_executor import get_futures_executor
+            executor = get_futures_executor()
+            if executor is None:
+                logger.warning("Balance sync: futures executor unavailable, keeping state balance")
+                return
+
+            real_balance = executor.get_account_balance('USDT')
+            if real_balance <= 0:
+                logger.warning(
+                    "Balance sync: exchange returned $%.2f — keeping state balance $%.2f",
+                    real_balance, self.balance,
+                )
+                return
+
+            old_balance = self.balance
+            if abs(old_balance - real_balance) > 1.0:  # Only log if meaningful difference
+                logger.info(
+                    "💰 Balance sync: state=$%,.2f → exchange=$%,.2f (corrected)",
+                    old_balance, real_balance,
+                )
+            else:
+                logger.info(
+                    "💰 Balance sync: state=$%,.2f ≈ exchange=$%,.2f (in sync)",
+                    old_balance, real_balance,
+                )
+
+            self.balance = real_balance
+            self.initial_balance = real_balance  # Reset baseline for PnL calculations
+            self._save_state()
+        except Exception as exc:
+            logger.warning("Balance sync failed: %s — keeping state balance $%.2f", exc, self.balance)
 
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
@@ -1205,8 +1254,9 @@ class HTFLiveBot:
 
         if not self.dry_run:
             self._log_trade(trade)
-            self._save_state()
             self._mirror_testnet(trade)
+            # Sync balance from exchange after opening position
+            self._sync_balance_from_exchange()
         else:
             logger.info("[DRY RUN] Trade not executed")
 
@@ -1260,8 +1310,9 @@ class HTFLiveBot:
 
         if not self.dry_run:
             self._log_trade(trade)
-            self._save_state()
             self._mirror_testnet(trade)
+            # Sync balance from exchange after closing position
+            self._sync_balance_from_exchange()
         else:
             logger.info("[DRY RUN] Close not recorded")
 

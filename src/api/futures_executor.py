@@ -800,6 +800,30 @@ class FuturesTestnetExecutor:
 
     # ── Portfolio / position data ─────────────────────────────────────────────
 
+    def get_account_balance(self, asset: str = 'USDT') -> float:
+        """
+        Get real balance for a specific asset from Binance Futures testnet.
+
+        Uses /fapi/v2/account endpoint and looks up the asset in the assets array.
+        Falls back to totalWalletBalance if asset-specific lookup fails.
+
+        Returns the wallet balance as a float, or 0.0 on failure.
+        """
+        try:
+            account = self.connector.get_account()
+
+            # Try to find the specific asset in the assets array
+            assets = account.get("assets", [])
+            for a in assets:
+                if a.get("asset", "").upper() == asset.upper():
+                    return float(a.get("walletBalance", 0))
+
+            # Fallback: use totalWalletBalance (sum of all assets)
+            return float(account.get("totalWalletBalance", 0))
+        except Exception as exc:
+            logger.error("get_account_balance failed: %s", exc)
+            return 0.0
+
     def sync_positions(self) -> List[Dict]:
         """
         Fetch open positions from exchange and clean up stale order-ID tracking
