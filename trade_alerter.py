@@ -64,10 +64,11 @@ def send_telegram(text: str) -> bool:
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    # Use plain text (no parse_mode) to avoid Markdown/HTML parsing failures
+    # that cause 400 errors and silently drop alerts
     payload = json.dumps({
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
+        "text": text.replace("*", "").replace("_", ""),
         "disable_web_page_preview": True,
     }).encode("utf-8")
 

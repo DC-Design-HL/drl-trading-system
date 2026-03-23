@@ -497,7 +497,7 @@ class HTFLiveBot:
                         "units": self.position_units,
                         "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
                     },
-                }) + "\n")
+                }, default=str) + "\n")
             logger.info("Trade alert queued: %s %s @ $%.2f",
                         trade.get("action", "?"), trade.get("symbol", "?"),
                         trade.get("price", 0))
