@@ -340,6 +340,70 @@ def _load_whale_alerts_local() -> list:
     return whale_alerts
 
 
+def _classify_exit_reason(close_trade: dict, all_trades: list) -> str:
+    """Classify a CLOSE trade as EXIT(SL), EXIT(TP), or EXIT.
+
+    Strategy:
+    1. Check explicit 'reason' field (handles 'SL', 'stop_loss', 'TP', 'take_profit')
+    2. If no reason, find the matching OPEN trade and compare fill price vs SL/TP
+    3. Fallback to 'EXIT' when reason cannot be determined
+    """
+    reason = str(close_trade.get('reason', '')).lower().strip()
+
+    # 1. Explicit reason field
+    if reason in ('sl', 'stop_loss', 'stoploss'):
+        return 'EXIT(SL)'
+    if reason in ('tp', 'take_profit', 'takeprofit'):
+        return 'EXIT(TP)'
+
+    # 2. Infer from fill price vs SL/TP on the matching OPEN trade
+    fill_price = float(close_trade.get('price', 0) or close_trade.get('exit_price', 0) or close_trade.get('filled_price', 0) or 0)
+    if fill_price <= 0:
+        return 'EXIT'
+
+    # Check if the close trade itself has SL/TP data (some formats include it)
+    sl_price = float(close_trade.get('sl', 0) or close_trade.get('sl_price', 0) or 0)
+    tp_price = float(close_trade.get('tp', 0) or close_trade.get('tp_price', 0) or 0)
+
+    # If not on the close trade, find the preceding OPEN trade for this symbol
+    if sl_price <= 0 and tp_price <= 0:
+        close_sym = (close_trade.get('symbol', '') or close_trade.get('asset', '')).replace('/', '').upper()
+        close_ts = close_trade.get('timestamp', '')
+        for t in reversed(all_trades):
+            t_action = t.get('action', '')
+            if 'OPEN' not in t_action:
+                continue
+            t_sym = (t.get('symbol', '') or t.get('asset', '')).replace('/', '').upper()
+            t_ts = t.get('timestamp', '')
+            if t_sym == close_sym and t_ts < close_ts:
+                sl_price = float(t.get('sl', 0) or t.get('sl_price', 0) or 0)
+                tp_price = float(t.get('tp', 0) or t.get('tp_price', 0) or 0)
+                break
+
+    if sl_price <= 0 and tp_price <= 0:
+        return 'EXIT'
+
+    # Compare fill price proximity to SL vs TP (within 0.3% tolerance)
+    TOLERANCE = 0.003
+    sl_dist = abs(fill_price - sl_price) / fill_price if sl_price > 0 else float('inf')
+    tp_dist = abs(fill_price - tp_price) / fill_price if tp_price > 0 else float('inf')
+
+    if sl_dist < TOLERANCE and sl_dist <= tp_dist:
+        return 'EXIT(SL)'
+    if tp_dist < TOLERANCE and tp_dist < sl_dist:
+        return 'EXIT(TP)'
+
+    # If PnL is available, use it as a secondary heuristic
+    pnl = float(close_trade.get('pnl', 0) or close_trade.get('realizedPnl', 0) or 0)
+    if sl_price > 0 and tp_price > 0:
+        if pnl < 0 and sl_dist < tp_dist:
+            return 'EXIT(SL)'
+        if pnl > 0 and tp_dist < sl_dist:
+            return 'EXIT(TP)'
+
+    return 'EXIT'
+
+
 def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, timeframe: str = '1h', symbol: str = 'BTC/USDT') -> str:
     """Create TradingView Lightweight Charts HTML with WebSocket live updates."""
     if df.empty:
@@ -372,7 +436,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             try:
                 ts = datetime.fromisoformat(trade['timestamp'].replace('Z', '+00:00'))
                 action = trade.get('action', '')
-                reason = trade.get('reason', 'model')
+                reason = trade.get('reason', '').lower()
                 
                 if 'OPEN_LONG' in action:
                     markers.append({
@@ -391,22 +455,25 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                         'text': 'SHORT',
                     })
                 elif 'CLOSE' in action:
-                    # Differentiate exit types
-                    if reason == 'stop_loss':
+                    # Determine exit reason from explicit reason field or
+                    # infer from fill price vs SL/TP prices
+                    exit_label = _classify_exit_reason(trade, trades)
+                    
+                    if exit_label == 'EXIT(SL)':
                         markers.append({
                             'time': int(ts.timestamp()),
                             'position': 'aboveBar',
                             'color': '#ff4444',
                             'shape': 'square',
-                            'text': 'SL',
+                            'text': 'EXIT(SL)',
                         })
-                    elif reason == 'take_profit':
+                    elif exit_label == 'EXIT(TP)':
                         markers.append({
                             'time': int(ts.timestamp()),
-                            'position': 'aboveBar',
-                            'color': '#00ff88',
+                            'position': 'belowBar',
+                            'color': '#00e676',
                             'shape': 'square',
-                            'text': 'TP',
+                            'text': 'EXIT(TP)',
                         })
                     else:
                         markers.append({
@@ -864,7 +931,6 @@ def render_trade_history(trades: list):
         price = trade.get('price', 0)
         pnl = trade.get('pnl', 0)
         timestamp = trade.get('timestamp', '')
-        reason = trade.get('reason', 'model')
         
         try:
             ts = datetime.fromisoformat(timestamp)
@@ -872,7 +938,7 @@ def render_trade_history(trades: list):
         except Exception:
             time_str = ''
         
-        # Determine display based on action and reason
+        # Determine display based on action and exit classification
         if 'OPEN_LONG' in action:
             badge_color = SUCCESS
             side = "LONG"
@@ -880,12 +946,13 @@ def render_trade_history(trades: list):
             badge_color = DANGER
             side = "SHORT"
         elif 'CLOSE' in action:
-            if reason == 'stop_loss':
+            exit_label = _classify_exit_reason(trade, trades)
+            if exit_label == 'EXIT(SL)':
                 badge_color = DANGER
-                side = "SL"
-            elif reason == 'take_profit':
+                side = "EXIT(SL)"
+            elif exit_label == 'EXIT(TP)':
                 badge_color = SUCCESS
-                side = "TP"
+                side = "EXIT(TP)"
             else:
                 badge_color = WARNING
                 side = "EXIT"
@@ -1677,8 +1744,9 @@ def main():
 
 
             # Info about trade markers
-            num_trades = len([t for t in trades if 'OPEN' in t.get('action', '')])
-            st.caption(f"📍 {num_trades} trade signals on chart • Switch timeframes to see trades at different intervals")
+            num_opens = len([t for t in trades if 'OPEN' in t.get('action', '')])
+            num_closes = len([t for t in trades if 'CLOSE' in t.get('action', '')])
+            st.caption(f"📍 {num_opens} entries + {num_closes} exits on chart • 🟢 LONG ▲ • 🔴 SHORT ▼ • EXIT(SL) ■ • EXIT(TP) ■ • EXIT ●")
             
             # Trading Controls Section
             st.markdown("---")
