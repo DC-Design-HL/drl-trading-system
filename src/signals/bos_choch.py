@@ -16,8 +16,9 @@ Theory:
     rejection, volume divergence, or rapid reversal within 3 bars.
 
 Multi-timeframe approach:
-  The primary analysis runs on the 15-minute chart.  1H and 4H signals
-  serve as confirmation / override layers to increase confidence.
+  The primary analysis runs on the 5-minute chart for faster signal
+  detection.  1H and 4H signals serve as confirmation / override layers
+  to increase confidence.
 
 Author:  Builder bot
 Date:    2026-03-23
@@ -470,7 +471,7 @@ class MarketStructure:
 
     def get_signals(
         self,
-        df_15m: pd.DataFrame,
+        df_primary: pd.DataFrame,
         df_1h: Optional[pd.DataFrame] = None,
         df_4h: Optional[pd.DataFrame] = None,
     ) -> Dict:
@@ -478,8 +479,17 @@ class MarketStructure:
         Main entry point: analyse up to 3 timeframes and return aggregated
         market structure signals.
 
-        The 15-minute analysis is *primary*; 1H and 4H provide confirmation
-        that raises or lowers the confidence score.
+        The primary timeframe (typically 5m) drives signal detection; 1H and
+        4H provide confirmation that raises or lowers the confidence score.
+
+        Parameters
+        ----------
+        df_primary : DataFrame
+            Primary timeframe OHLCV data (5m candles recommended).
+        df_1h : DataFrame, optional
+            1-hour candles for confirmation.
+        df_4h : DataFrame, optional
+            4-hour candles for confirmation.
 
         Returns
         -------
@@ -488,8 +498,8 @@ class MarketStructure:
             fake_bos, fake_choch, last_swing_high, last_swing_low,
             trend, confidence
         """
-        # --- Primary: 15-minute ---
-        r15 = self._analyze_single_tf(df_15m)
+        # --- Primary timeframe (5m) ---
+        r15 = self._analyze_single_tf(df_primary)
 
         # --- Higher timeframes (optional) ---
         r1h = self._analyze_single_tf(df_1h) if df_1h is not None else None
@@ -550,16 +560,17 @@ class MarketStructure:
         # Clamp confidence to [0, 1]
         result.confidence = float(np.clip(result.confidence, 0.0, 1.0))
 
-        logger.debug(
+        logger.info(
             "MarketStructure signals: trend=%s bos_bull=%s bos_bear=%s "
             "choch_bull=%s choch_bear=%s fake_bos=%s fake_choch=%s "
-            "swing_high=%.2f swing_low=%.2f conf=%.2f",
+            "swing_high=%.2f swing_low=%.2f conf=%.2f (swings=%d)",
             result.trend,
             result.bos_bullish, result.bos_bearish,
             result.choch_bullish, result.choch_bearish,
             result.fake_bos, result.fake_choch,
             result.last_swing_high, result.last_swing_low,
             result.confidence,
+            len(r15.signals),
         )
 
         return result.to_dict()

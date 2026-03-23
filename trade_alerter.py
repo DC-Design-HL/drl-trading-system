@@ -327,6 +327,9 @@ def format_sl_tp_update(alert: dict) -> str:
     old_price = trade.get("old_price", 0)
     new_price = trade.get("new_price", 0)
     reason = trade.get("reason", "trailing")
+    profit_pct = trade.get("profit_pct", None)
+    current_price = trade.get("current_price", 0)
+    entry_price = position.get("entry_price", 0)
 
     if update_type == "TP":
         emoji = "🎯"
@@ -345,8 +348,21 @@ def format_sl_tp_update(alert: dict) -> str:
         f"{emoji} *{label}* — {symbol} {direction}",
         f"${old_price:,.2f} → ${new_price:,.2f}{pct_change}",
         f"📋 Reason: {reason}",
-        f"📈 Strategy: {_format_strategy(strategy)}",
     ]
+
+    # Show entry and current price for context
+    if entry_price > 0:
+        lines.append(f"💰 Entry: ${entry_price:,.2f}")
+    if current_price > 0:
+        lines.append(f"📍 Current: ${current_price:,.2f}")
+
+    # Show profit %
+    if profit_pct is not None:
+        profit_sign = "+" if profit_pct >= 0 else ""
+        profit_emoji = "📈" if profit_pct >= 0 else "📉"
+        lines.append(f"{profit_emoji} Profit: {profit_sign}{profit_pct:.1f}%")
+
+    lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:

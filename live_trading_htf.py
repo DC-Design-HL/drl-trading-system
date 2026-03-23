@@ -231,7 +231,8 @@ class HTFLiveBot:
         self.fetcher = MultiAssetDataFetcher()
 
         # BOS/CHOCH market structure detector
-        self.market_structure = MarketStructure(swing_lookback=5)
+        # swing_lookback=8 for 5m candles (noisier than 15m, needs wider window)
+        self.market_structure = MarketStructure(swing_lookback=8)
         self._last_structure_signals: Dict = {}
 
         # Storage (shared with main bot)
@@ -565,6 +566,14 @@ class HTFLiveBot:
             alert_file.parent.mkdir(parents=True, exist_ok=True)
             direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
 
+            # Compute current profit %
+            profit_pct = 0.0
+            if self.position_price > 0 and self.current_price > 0:
+                if self.position == 1:
+                    profit_pct = ((self.current_price - self.position_price) / self.position_price) * 100
+                elif self.position == -1:
+                    profit_pct = ((self.position_price - self.current_price) / self.position_price) * 100
+
             with open(alert_file, "a") as f:
                 if sl_changed and old_sl != new_sl:
                     f.write(json.dumps({
@@ -578,6 +587,8 @@ class HTFLiveBot:
                             "new_price": new_sl,
                             "reason": reason,
                             "direction": direction,
+                            "profit_pct": round(profit_pct, 2),
+                            "current_price": self.current_price,
                         },
                         "signals": {},
                         "position": {
@@ -601,6 +612,8 @@ class HTFLiveBot:
                             "new_price": new_tp,
                             "reason": reason,
                             "direction": direction,
+                            "profit_pct": round(profit_pct, 2),
+                            "current_price": self.current_price,
                         },
                         "signals": {},
                         "position": {
@@ -765,14 +778,31 @@ class HTFLiveBot:
     # BOS/CHOCH market structure data
     # ------------------------------------------------------------------
 
-    def _fetch_htf_candles(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    def _fetch_structure_candles(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], Optional[pd.DataFrame]]:
         """
-        Fetch 1H and 4H OHLCV candles for BOS/CHOCH multi-timeframe analysis.
+        Fetch 5m, 1H and 4H OHLCV candles for BOS/CHOCH multi-timeframe analysis.
 
-        Returns (df_1h, df_4h).  Either may be None on fetch failure.
+        Returns (df_5m, df_1h, df_4h).  Any may be None on fetch failure.
         """
+        df_5m = None
         df_1h = None
         df_4h = None
+
+        # 5m candles — primary BOS/CHOCH timeframe (faster signal detection)
+        try:
+            df_5m = self.fetcher.fetch_asset(self.symbol, "5m", days=FETCH_DAYS)
+            if df_5m is not None and not df_5m.empty:
+                if not isinstance(df_5m.index, pd.DatetimeIndex):
+                    if "timestamp" in df_5m.columns:
+                        df_5m["timestamp"] = pd.to_datetime(df_5m["timestamp"])
+                        df_5m = df_5m.set_index("timestamp")
+                    else:
+                        df_5m.index = pd.to_datetime(df_5m.index)
+                df_5m = df_5m.sort_index()
+                logger.info("Fetched %d 5m bars for BOS/CHOCH", len(df_5m))
+        except Exception as exc:
+            logger.warning("Failed to fetch 5m candles for BOS/CHOCH: %s", exc)
+
         try:
             df_1h = self.fetcher.fetch_asset(self.symbol, "1h", days=FETCH_DAYS)
             if df_1h is not None and not df_1h.empty:
@@ -801,22 +831,44 @@ class HTFLiveBot:
         except Exception as exc:
             logger.debug("Failed to fetch 4H candles: %s", exc)
 
-        return df_1h, df_4h
+        return df_5m, df_1h, df_4h
 
-    def _get_structure_signals(self, df_15m: Optional[pd.DataFrame] = None) -> Dict:
+    def _get_structure_signals(self, trigger: bool = False) -> Dict:
         """
         Get the latest BOS/CHOCH signals.  Caches the result so it is only
         recomputed once per iteration (not on every WS tick).
 
-        If *df_15m* is provided, a fresh analysis is run and cached.
+        If *trigger* is True, a fresh analysis is run using 5m candles as
+        the primary timeframe and 1H/4H for multi-timeframe confirmation.
         Otherwise the cached result from the last iteration is returned.
         """
-        if df_15m is not None:
+        if trigger:
             try:
-                df_1h, df_4h = self._fetch_htf_candles()
-                self._last_structure_signals = self.market_structure.get_signals(
-                    df_15m, df_1h=df_1h, df_4h=df_4h,
-                )
+                df_5m, df_1h, df_4h = self._fetch_structure_candles()
+                if df_5m is None or df_5m.empty:
+                    logger.warning("BOS/CHOCH: no 5m data available — skipping")
+                    self._last_structure_signals = {}
+                else:
+                    self._last_structure_signals = self.market_structure.get_signals(
+                        df_5m, df_1h=df_1h, df_4h=df_4h,
+                    )
+                    # Log BOS/CHOCH signal state every iteration at INFO level
+                    sig = self._last_structure_signals
+                    logger.info(
+                        "BOS/CHOCH signals: bos_bull=%s bos_bear=%s choch_bull=%s "
+                        "choch_bear=%s fake_bos=%s fake_choch=%s trend=%s "
+                        "swing_high=$%.2f swing_low=$%.2f conf=%.2f",
+                        sig.get("bos_bullish", False),
+                        sig.get("bos_bearish", False),
+                        sig.get("choch_bullish", False),
+                        sig.get("choch_bearish", False),
+                        sig.get("fake_bos", False),
+                        sig.get("fake_choch", False),
+                        sig.get("trend", "unknown"),
+                        sig.get("last_swing_high", 0.0),
+                        sig.get("last_swing_low", 0.0),
+                        sig.get("confidence", 0.0),
+                    )
             except Exception as exc:
                 logger.warning("BOS/CHOCH signal computation failed: %s", exc)
                 self._last_structure_signals = {}
@@ -1042,6 +1094,10 @@ class HTFLiveBot:
                 if sig.get("bos_bullish") and not sig.get("fake_bos") and swing_low > 0:
                     bos_sl = swing_low * (1.0 - buffer_pct)
                     if bos_sl > new_sl:
+                        logger.info(
+                            "🔄 BOS bullish → trailing SL to swing low $%.2f (was $%.2f, conf=%.2f)",
+                            bos_sl, new_sl, confidence,
+                        )
                         new_sl = bos_sl
                         adjustment_reason = f"BOS_bullish(conf={confidence:.2f})"
                     # Extend TP to next swing high if it's above current TP
@@ -1056,22 +1112,30 @@ class HTFLiveBot:
                 if sig.get("choch_bearish") and not sig.get("fake_choch"):
                     choch_sl = entry + 0.75 * (current_price - entry)
                     if choch_sl > new_sl:
+                        logger.info(
+                            "🔄 CHOCH bearish → tightening SL to lock 75%% profit $%.2f (was $%.2f, conf=%.2f)",
+                            choch_sl, new_sl, confidence,
+                        )
                         new_sl = choch_sl
                         adjustment_reason = f"CHOCH_bearish(conf={confidence:.2f})"
 
                 # Fake BOS bearish → explicitly ignore (hold position)
                 if sig.get("fake_bos") and sig.get("bos_bearish"):
-                    logger.debug("Fake BOS bearish detected — ignoring, holding LONG")
+                    logger.info("⚠️ Fake BOS bearish detected — ignoring, holding LONG")
 
                 # Fake CHOCH bullish → ignore (don't over-tighten)
                 if sig.get("fake_choch") and sig.get("choch_bullish"):
-                    logger.debug("Fake CHOCH bullish detected — ignoring")
+                    logger.info("⚠️ Fake CHOCH bullish detected — ignoring")
 
             elif self.position == -1:  # ── SHORT ──
                 # BOS bearish (continuation) → trail SL to swing high
                 if sig.get("bos_bearish") and not sig.get("fake_bos") and swing_high > 0:
                     bos_sl = swing_high * (1.0 + buffer_pct)
                     if new_sl <= 0 or bos_sl < new_sl:
+                        logger.info(
+                            "🔄 BOS bearish → trailing SL to swing high $%.2f (was $%.2f, conf=%.2f)",
+                            bos_sl, new_sl, confidence,
+                        )
                         new_sl = bos_sl
                         adjustment_reason = f"BOS_bearish(conf={confidence:.2f})"
                     # Extend TP to next swing low
@@ -1086,16 +1150,20 @@ class HTFLiveBot:
                 if sig.get("choch_bullish") and not sig.get("fake_choch"):
                     choch_sl = entry - 0.75 * (entry - current_price)
                     if new_sl <= 0 or choch_sl < new_sl:
+                        logger.info(
+                            "🔄 CHOCH bullish → tightening SL to lock 75%% profit $%.2f (was $%.2f, conf=%.2f)",
+                            choch_sl, new_sl, confidence,
+                        )
                         new_sl = choch_sl
                         adjustment_reason = f"CHOCH_bullish(conf={confidence:.2f})"
 
                 # Fake BOS bullish → ignore
                 if sig.get("fake_bos") and sig.get("bos_bullish"):
-                    logger.debug("Fake BOS bullish detected — ignoring, holding SHORT")
+                    logger.info("⚠️ Fake BOS bullish detected — ignoring, holding SHORT")
 
                 # Fake CHOCH bearish → ignore
                 if sig.get("fake_choch") and sig.get("choch_bearish"):
-                    logger.debug("Fake CHOCH bearish detected — ignoring")
+                    logger.info("⚠️ Fake CHOCH bearish detected — ignoring")
 
         # --- Safety: SL must never move to a worse position ---
         sl_changed = False
@@ -1383,8 +1451,8 @@ class HTFLiveBot:
             # 1b. Update peak price for trailing stop tracking
             self._update_peak_price(current_price)
 
-            # 1c. Compute BOS/CHOCH structure signals (cached for this iteration)
-            self._get_structure_signals(df_15m)
+            # 1c. Compute BOS/CHOCH structure signals on 5m candles (cached for this iteration)
+            self._get_structure_signals(trigger=True)
 
             # 2. Check SL/TP before computing new action (uses cached BOS/CHOCH)
             exit_reason = self._check_sl_tp(current_price)
