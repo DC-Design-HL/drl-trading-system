@@ -455,7 +455,9 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
     # ── Phase 1: build one raw marker per trade ────────────────────────
     _raw_markers: list[dict] = []
     for trade in trades:
-        if 'price' in trade and 'timestamp' in trade:
+        # CLOSE trades may use 'exit_price' instead of 'price'
+        has_price = 'price' in trade or 'exit_price' in trade or 'filled_price' in trade
+        if has_price and 'timestamp' in trade:
             try:
                 ts = datetime.fromisoformat(trade['timestamp'].replace('Z', '+00:00'))
                 raw_time = int(ts.timestamp())
@@ -519,100 +521,78 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             except Exception:
                 continue
 
-    # ── Phase 2: deduplicate per candle ────────────────────────────────
-    # lightweight-charts renders all markers at a given time, but when many
-    # trades snap to the same candle (e.g. 20+ scalps in one hour) the
-    # stacked markers overflow the visible chart area making exits invisible.
-    # Aggregate: keep at most ONE entry marker and ONE exit marker per candle.
+    # ── Phase 2: split into entry markers + exit markers ─────────────
+    # lightweight-charts only allows ONE marker per time per series.
+    # FIX: put entry markers on the candlestick series and exit markers
+    # on a separate invisible LineSeries.  Both render independently.
     from collections import defaultdict as _defaultdict
-    _by_candle: dict[int, dict] = _defaultdict(lambda: {'entries': [], 'exits': []})
+
+    # Aggregate per-candle for each kind
+    _entry_by_candle: dict[int, list] = _defaultdict(list)
+    _exit_by_candle: dict[int, list] = _defaultdict(list)
     for m in _raw_markers:
-        bucket = 'exits' if m['_kind'] == 'exit' else 'entries'
-        _by_candle[m['time']][bucket].append(m)
+        if m['_kind'] == 'exit':
+            _exit_by_candle[m['time']].append(m)
+        else:
+            _entry_by_candle[m['time']].append(m)
 
-    # CRITICAL: lightweight-charts v4 only supports ONE marker per time value.
-    # If we emit two markers at the same time, only the last one renders.
-    # Solution: merge entry+exit into a single combined marker per candle.
-    markers: list[dict] = []
-    for candle_time in sorted(_by_candle):
-        group = _by_candle[candle_time]
-        entries = group['entries']
-        exits = group['exits']
+    # Build entry markers (one per candle on candlestickSeries)
+    entry_markers: list[dict] = []
+    for candle_time in sorted(_entry_by_candle):
+        entries = _entry_by_candle[candle_time]
+        n_long = sum(1 for e in entries if e['text'] == 'LONG')
+        n_short = sum(1 for e in entries if e['text'] == 'SHORT')
+        if n_long and n_short:
+            label = f'L×{n_long}+S×{n_short}' if (n_long + n_short) > 1 else entries[0]['text']
+        elif n_long:
+            label = f'LONG×{n_long}' if n_long > 1 else 'LONG'
+        elif n_short:
+            label = f'SHORT×{n_short}' if n_short > 1 else 'SHORT'
+        else:
+            label = entries[0]['text']
+        is_short = 'SHORT' in label
+        entry_markers.append({
+            'time': candle_time,
+            'position': 'aboveBar' if is_short else 'belowBar',
+            'color': '#ef5350' if is_short else '#26a69a',
+            'shape': 'arrowDown' if is_short else 'arrowUp',
+            'text': label,
+        })
 
-        # Build entry label
-        entry_label = ''
-        if entries:
-            n_long = sum(1 for e in entries if e['text'] == 'LONG')
-            n_short = sum(1 for e in entries if e['text'] == 'SHORT')
-            if n_long and n_short:
-                entry_label = f'L×{n_long}+S×{n_short}' if (n_long + n_short) > 1 else entries[0]['text']
-            elif n_long:
-                entry_label = f'LONG×{n_long}' if n_long > 1 else 'LONG'
-            elif n_short:
-                entry_label = f'SHORT×{n_short}' if n_short > 1 else 'SHORT'
-
-        # Build exit label
-        exit_label = ''
-        if exits:
-            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
-            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
-            n_plain = sum(1 for e in exits if e['text'] == 'EXIT')
-            total_exits = len(exits)
-            if total_exits == 1:
-                exit_label = exits[0]['text']
-            elif n_sl or n_tp:
-                parts = []
-                if n_sl:
-                    parts.append(f'SL×{n_sl}')
-                if n_tp:
-                    parts.append(f'TP×{n_tp}')
-                if n_plain:
-                    parts.append(f'×{n_plain}')
-                exit_label = 'EXIT(' + '+'.join(parts) + ')'
-            else:
-                exit_label = f'EXIT×{total_exits}'
-
-        # Combine into ONE marker per candle time
-        if entry_label and exit_label:
-            # Both entry and exit on same candle — combine text
-            combined = f'{entry_label} → {exit_label}'
-            # Use exit color (red for SL, green for TP, amber for unknown)
-            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
-            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
-            color = '#ff4444' if n_sl else ('#00e676' if n_tp else '#ffc107')
-            markers.append({
-                'time': candle_time,
-                'position': 'aboveBar',
-                'color': color,
-                'shape': 'square',
-                'text': combined,
-            })
-        elif entry_label:
-            # Entry only
-            is_short = 'SHORT' in entry_label
-            markers.append({
-                'time': candle_time,
-                'position': 'aboveBar' if is_short else 'belowBar',
-                'color': '#ef5350' if is_short else '#26a69a',
-                'shape': 'arrowDown' if is_short else 'arrowUp',
-                'text': entry_label,
-            })
-        elif exit_label:
-            # Exit only
-            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
-            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
-            color = '#ff4444' if n_sl else ('#00e676' if n_tp else '#ffc107')
-            markers.append({
-                'time': candle_time,
-                'position': 'aboveBar',
-                'color': color,
-                'shape': 'square',
-                'text': exit_label,
-            })
+    # Build exit markers (one per candle on separate exitSeries)
+    exit_markers: list[dict] = []
+    for candle_time in sorted(_exit_by_candle):
+        exits = _exit_by_candle[candle_time]
+        n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
+        n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
+        n_plain = sum(1 for e in exits if e['text'] == 'EXIT')
+        total = len(exits)
+        if total == 1:
+            label = exits[0]['text']
+        elif n_sl or n_tp:
+            parts = []
+            if n_sl:
+                parts.append(f'SL×{n_sl}')
+            if n_tp:
+                parts.append(f'TP×{n_tp}')
+            if n_plain:
+                parts.append(f'×{n_plain}')
+            label = 'EXIT(' + '+'.join(parts) + ')'
+        else:
+            label = f'EXIT×{total}'
+        color = '#ff4444' if n_sl else ('#00e676' if n_tp else '#ffc107')
+        exit_markers.append({
+            'time': candle_time,
+            'position': 'aboveBar',
+            'color': color,
+            'shape': 'square',
+            'text': label,
+        })
 
     # lightweight-charts requires markers sorted by time ascending;
     # unsorted markers cause ALL markers to be silently dropped.
-    markers.sort(key=lambda m: m['time'])
+    entry_markers.sort(key=lambda m: m['time'])
+    exit_markers.sort(key=lambda m: m['time'])
     
     # Get OHLC for display
     last_candle = df.iloc[-1]
@@ -751,14 +731,32 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             let candleData = {json.dumps(candlestick_data)};
             candlestickSeries.setData(candleData);
             
-            // Add markers for trades (entries + exits)
-            const markers = {json.dumps(markers)};
-            if (markers.length > 0) {{
-                // Defensive: ensure ascending time order (library silently
-                // drops ALL markers if they are not sorted)
-                markers.sort((a, b) => a.time - b.time);
-                console.log('[chart] Setting', markers.length, 'markers:', markers.map(m => m.text));
-                candlestickSeries.setMarkers(markers);
+            // Add ENTRY markers on candlestick series
+            const entryMarkers = {json.dumps(entry_markers)};
+            if (entryMarkers.length > 0) {{
+                entryMarkers.sort((a, b) => a.time - b.time);
+                console.log('[chart] Setting', entryMarkers.length, 'entry markers:', entryMarkers.map(m => m.text));
+                candlestickSeries.setMarkers(entryMarkers);
+            }}
+
+            // Add EXIT markers on a separate invisible LineSeries
+            // This avoids lightweight-charts' one-marker-per-time-per-series limit
+            const exitMarkers = {json.dumps(exit_markers)};
+            let exitSeries = null;
+            if (exitMarkers.length > 0) {{
+                exitSeries = chart.addLineSeries({{
+                    color: 'transparent',
+                    lineWidth: 0,
+                    lastValueVisible: false,
+                    priceLineVisible: false,
+                    crosshairMarkerVisible: false,
+                }});
+                // Feed the exit series the same candle close prices so markers
+                // attach at valid time points (series needs data at marker times)
+                exitSeries.setData(candleData.map(c => ({{ time: c.time, value: c.close }})));
+                exitMarkers.sort((a, b) => a.time - b.time);
+                console.log('[chart] Setting', exitMarkers.length, 'exit markers:', exitMarkers.map(m => m.text));
+                exitSeries.setMarkers(exitMarkers);
             }}
             
             // Volume series
@@ -867,6 +865,11 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     
                     // Update or add candle
                     candlestickSeries.update(candle);
+                    
+                    // Keep exit marker series in sync with candle data
+                    if (exitSeries) {{
+                        exitSeries.update({{ time: candle.time, value: candle.close }});
+                    }}
                     
                     // Update volume
                     const volColor = candle.close >= candle.open ? '#26a69a80' : '#ef535080';
