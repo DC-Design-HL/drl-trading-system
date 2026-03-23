@@ -41,6 +41,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from src.features.htf_features import HTFFeatureEngine, HTFDataAligner
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher
 from src.data.storage import get_storage
+from src.signals.bos_choch import MarketStructure
 
 logging.basicConfig(
     level=logging.INFO,
@@ -228,6 +229,10 @@ class HTFLiveBot:
         self.aligner = HTFDataAligner()
         self.feature_engine = HTFFeatureEngine()
         self.fetcher = MultiAssetDataFetcher()
+
+        # BOS/CHOCH market structure detector
+        self.market_structure = MarketStructure(swing_lookback=5)
+        self._last_structure_signals: Dict = {}
 
         # Storage (shared with main bot)
         self.storage = get_storage()
@@ -641,6 +646,67 @@ class HTFLiveBot:
             return 1.0 / 3.0
 
     # ------------------------------------------------------------------
+    # BOS/CHOCH market structure data
+    # ------------------------------------------------------------------
+
+    def _fetch_htf_candles(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """
+        Fetch 1H and 4H OHLCV candles for BOS/CHOCH multi-timeframe analysis.
+
+        Returns (df_1h, df_4h).  Either may be None on fetch failure.
+        """
+        df_1h = None
+        df_4h = None
+        try:
+            df_1h = self.fetcher.fetch_asset(self.symbol, "1h", days=FETCH_DAYS)
+            if df_1h is not None and not df_1h.empty:
+                if not isinstance(df_1h.index, pd.DatetimeIndex):
+                    if "timestamp" in df_1h.columns:
+                        df_1h["timestamp"] = pd.to_datetime(df_1h["timestamp"])
+                        df_1h = df_1h.set_index("timestamp")
+                    else:
+                        df_1h.index = pd.to_datetime(df_1h.index)
+                df_1h = df_1h.sort_index()
+                logger.debug("Fetched %d 1H bars for BOS/CHOCH", len(df_1h))
+        except Exception as exc:
+            logger.debug("Failed to fetch 1H candles: %s", exc)
+
+        try:
+            df_4h = self.fetcher.fetch_asset(self.symbol, "4h", days=FETCH_DAYS)
+            if df_4h is not None and not df_4h.empty:
+                if not isinstance(df_4h.index, pd.DatetimeIndex):
+                    if "timestamp" in df_4h.columns:
+                        df_4h["timestamp"] = pd.to_datetime(df_4h["timestamp"])
+                        df_4h = df_4h.set_index("timestamp")
+                    else:
+                        df_4h.index = pd.to_datetime(df_4h.index)
+                df_4h = df_4h.sort_index()
+                logger.debug("Fetched %d 4H bars for BOS/CHOCH", len(df_4h))
+        except Exception as exc:
+            logger.debug("Failed to fetch 4H candles: %s", exc)
+
+        return df_1h, df_4h
+
+    def _get_structure_signals(self, df_15m: Optional[pd.DataFrame] = None) -> Dict:
+        """
+        Get the latest BOS/CHOCH signals.  Caches the result so it is only
+        recomputed once per iteration (not on every WS tick).
+
+        If *df_15m* is provided, a fresh analysis is run and cached.
+        Otherwise the cached result from the last iteration is returned.
+        """
+        if df_15m is not None:
+            try:
+                df_1h, df_4h = self._fetch_htf_candles()
+                self._last_structure_signals = self.market_structure.get_signals(
+                    df_15m, df_1h=df_1h, df_4h=df_4h,
+                )
+            except Exception as exc:
+                logger.warning("BOS/CHOCH signal computation failed: %s", exc)
+                self._last_structure_signals = {}
+        return self._last_structure_signals
+
+    # ------------------------------------------------------------------
     # SL/TP check
     # ------------------------------------------------------------------
 
@@ -657,10 +723,29 @@ class HTFLiveBot:
 
     def _check_sl_tp(self, current_price: float) -> Optional[str]:
         """
-        Trailing stop logic with break-even and profit-lock levels.
+        Dynamic SL/TP logic enhanced with BOS/CHOCH market structure signals.
+
+        Layered approach:
+          1. Hard TP check (unchanged at configured TP level).
+          2. Basic trailing stop (break-even at +1%, lock 50% at +2%).
+          3. BOS/CHOCH overlay — **only when the position is currently
+             profitable** (unrealized PnL > 0).
+
+        BOS/CHOCH rules (profitable positions only):
+          LONG:
+            - BOS bullish  → trail SL to last swing low + buffer, extend TP
+            - CHOCH bearish → tighten SL to lock 75% of profit
+            - Fake BOS bearish / Fake CHOCH bullish → ignore
+          SHORT:
+            - BOS bearish  → trail SL to last swing high - buffer, extend TP
+            - CHOCH bullish → tighten SL to lock 75% of profit
+            - Fake BOS bullish / Fake CHOCH bearish → ignore
+
+        CRITICAL RULES:
+          - SL only moves *toward* profit (never to a worse position).
+          - BOS/CHOCH adjustments are ONLY applied when profitable.
 
         Returns 'SL' or 'TP' if the current position should be closed, else None.
-        Also adjusts self.sl_price upward (never downward) as price moves in favor.
         """
         if self.position == 0:
             return None
@@ -678,48 +763,155 @@ class HTFLiveBot:
         else:  # SHORT
             profit_pct = (entry - current_price) / entry
 
-        # --- Hard TP check (unchanged at +3%) ---
+        is_profitable = profit_pct > 0
+
+        # --- Hard TP check ---
         if self.position == 1 and self.tp_price > 0 and current_price >= self.tp_price:
             return "TP"
         if self.position == -1 and self.tp_price > 0 and current_price <= self.tp_price:
             return "TP"
 
-        # --- Trailing stop adjustments (SL only moves in favorable direction) ---
+        # --- Baseline trailing stop adjustments (always active) ---
         new_sl = self.sl_price
+        new_tp = self.tp_price
+        adjustment_reason = ""
 
         if profit_pct >= TRAILING_LOCK_PCT:
             # At +2% profit → lock 50% of profit from entry
             if self.position == 1:
                 locked_sl = entry + 0.5 * (self.peak_price - entry)
-                new_sl = max(new_sl, locked_sl)
+                if locked_sl > new_sl:
+                    new_sl = locked_sl
+                    adjustment_reason = "trailing_lock_50pct"
             else:
                 locked_sl = entry - 0.5 * (entry - self.peak_price)
-                new_sl = min(new_sl, locked_sl) if new_sl > 0 else locked_sl
+                if new_sl <= 0 or locked_sl < new_sl:
+                    new_sl = locked_sl
+                    adjustment_reason = "trailing_lock_50pct"
 
         elif profit_pct >= TRAILING_BREAKEVEN_PCT:
             # At +1% profit → move SL to break-even (entry price)
             if self.position == 1:
-                new_sl = max(new_sl, entry)
+                if entry > new_sl:
+                    new_sl = entry
+                    adjustment_reason = "trailing_breakeven"
             else:
-                new_sl = min(new_sl, entry) if new_sl > 0 else entry
+                if new_sl <= 0 or entry < new_sl:
+                    new_sl = entry
+                    adjustment_reason = "trailing_breakeven"
 
-        # Log SL adjustment
-        if new_sl != self.sl_price:
-            logger.info(
-                "🔄 Trailing SL adjusted: $%.2f → $%.2f (profit=%.2f%%, peak=$%.2f)",
-                self.sl_price, new_sl, profit_pct * 100, self.peak_price,
-            )
-            self.sl_price = new_sl
+        # --- BOS/CHOCH overlay (ONLY when profitable) ---
+        if is_profitable and self._last_structure_signals:
+            sig = self._last_structure_signals
+            swing_high = sig.get("last_swing_high", 0.0)
+            swing_low = sig.get("last_swing_low", 0.0)
+            confidence = sig.get("confidence", 0.0)
+
+            # Small buffer to avoid SL sitting exactly on the swing level
+            buffer_pct = 0.002  # 0.2%
+
+            if self.position == 1:  # ── LONG ──
+                # BOS bullish (trend continuation) → trail SL to swing low
+                if sig.get("bos_bullish") and not sig.get("fake_bos") and swing_low > 0:
+                    bos_sl = swing_low * (1.0 - buffer_pct)
+                    if bos_sl > new_sl:
+                        new_sl = bos_sl
+                        adjustment_reason = f"BOS_bullish(conf={confidence:.2f})"
+                    # Extend TP to next swing high if it's above current TP
+                    if swing_high > 0 and swing_high > new_tp:
+                        new_tp = swing_high
+                        logger.info(
+                            "📈 BOS bullish: TP extended → $%.2f (swing high)",
+                            new_tp,
+                        )
+
+                # CHOCH bearish (reversal warning) → lock 75% of profit
+                if sig.get("choch_bearish") and not sig.get("fake_choch"):
+                    choch_sl = entry + 0.75 * (current_price - entry)
+                    if choch_sl > new_sl:
+                        new_sl = choch_sl
+                        adjustment_reason = f"CHOCH_bearish(conf={confidence:.2f})"
+
+                # Fake BOS bearish → explicitly ignore (hold position)
+                if sig.get("fake_bos") and sig.get("bos_bearish"):
+                    logger.debug("Fake BOS bearish detected — ignoring, holding LONG")
+
+                # Fake CHOCH bullish → ignore (don't over-tighten)
+                if sig.get("fake_choch") and sig.get("choch_bullish"):
+                    logger.debug("Fake CHOCH bullish detected — ignoring")
+
+            elif self.position == -1:  # ── SHORT ──
+                # BOS bearish (continuation) → trail SL to swing high
+                if sig.get("bos_bearish") and not sig.get("fake_bos") and swing_high > 0:
+                    bos_sl = swing_high * (1.0 + buffer_pct)
+                    if new_sl <= 0 or bos_sl < new_sl:
+                        new_sl = bos_sl
+                        adjustment_reason = f"BOS_bearish(conf={confidence:.2f})"
+                    # Extend TP to next swing low
+                    if swing_low > 0 and (new_tp <= 0 or swing_low < new_tp):
+                        new_tp = swing_low
+                        logger.info(
+                            "📉 BOS bearish: TP extended → $%.2f (swing low)",
+                            new_tp,
+                        )
+
+                # CHOCH bullish (reversal warning) → lock 75% of profit
+                if sig.get("choch_bullish") and not sig.get("fake_choch"):
+                    choch_sl = entry - 0.75 * (entry - current_price)
+                    if new_sl <= 0 or choch_sl < new_sl:
+                        new_sl = choch_sl
+                        adjustment_reason = f"CHOCH_bullish(conf={confidence:.2f})"
+
+                # Fake BOS bullish → ignore
+                if sig.get("fake_bos") and sig.get("bos_bullish"):
+                    logger.debug("Fake BOS bullish detected — ignoring, holding SHORT")
+
+                # Fake CHOCH bearish → ignore
+                if sig.get("fake_choch") and sig.get("choch_bearish"):
+                    logger.debug("Fake CHOCH bearish detected — ignoring")
+
+        # --- Safety: SL must never move to a worse position ---
+        sl_changed = False
+        if self.position == 1:
+            if new_sl > self.sl_price:
+                sl_changed = True
+            else:
+                new_sl = self.sl_price  # revert
+        elif self.position == -1:
+            if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+                sl_changed = True
+            else:
+                new_sl = self.sl_price  # revert
+
+        tp_changed = (new_tp != self.tp_price)
+
+        # --- Apply and log SL/TP changes ---
+        if sl_changed or tp_changed:
+            if sl_changed:
+                logger.info(
+                    "🔄 SL adjusted: $%.2f → $%.2f (reason=%s, profit=%.2f%%, peak=$%.2f)",
+                    self.sl_price, new_sl, adjustment_reason or "trailing",
+                    profit_pct * 100, self.peak_price,
+                )
+                self.sl_price = new_sl
+
+            if tp_changed:
+                logger.info(
+                    "🔄 TP adjusted: $%.2f → $%.2f (reason=%s)",
+                    self.tp_price, new_tp, adjustment_reason or "structure",
+                )
+                self.tp_price = new_tp
+
             self._save_state()
 
-            # Sync updated SL to exchange-side OCO (LONG positions only)
-            if self.position == 1 and not self.dry_run and self.testnet_executor:
+            # Sync updated SL/TP to exchange (for testnet bots: both LONG and SHORT)
+            if not self.dry_run and self.testnet_executor:
                 try:
                     self.testnet_executor.update_sl_tp(
-                        self.symbol, new_sl, self.tp_price
+                        self.symbol, self.sl_price, self.tp_price
                     )
                 except Exception as _exc:
-                    logger.warning("Testnet OCO update failed: %s", _exc)
+                    logger.warning("Testnet SL/TP update failed: %s", _exc)
 
         # --- Check if current price hits the (possibly adjusted) SL ---
         if self.position == 1:
@@ -948,7 +1140,10 @@ class HTFLiveBot:
             # 1b. Update peak price for trailing stop tracking
             self._update_peak_price(current_price)
 
-            # 2. Check SL/TP before computing new action
+            # 1c. Compute BOS/CHOCH structure signals (cached for this iteration)
+            self._get_structure_signals(df_15m)
+
+            # 2. Check SL/TP before computing new action (uses cached BOS/CHOCH)
             exit_reason = self._check_sl_tp(current_price)
             if exit_reason and self.position != 0:
                 logger.info("SL/TP triggered (%s) @ $%.2f", exit_reason, current_price)

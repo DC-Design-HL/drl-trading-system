@@ -54,6 +54,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from src.features.htf_features import HTFFeatureEngine, HTFDataAligner
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher
 from src.data.storage import get_storage
+from src.signals.bos_choch import MarketStructure
 
 logging.basicConfig(
     level=logging.INFO,
@@ -217,6 +218,10 @@ class HTFHybridBot:
         self.aligner = HTFDataAligner()
         self.feature_engine = HTFFeatureEngine()
         self.fetcher = MultiAssetDataFetcher()
+
+        # BOS/CHOCH market structure detector
+        self.market_structure = MarketStructure(swing_lookback=5)
+        self._last_structure_signals: Dict = {}
 
         # Storage (shared with main bot)
         self.storage = get_storage()
@@ -546,6 +551,53 @@ class HTFHybridBot:
             return 1.0 / 3.0
 
     # ------------------------------------------------------------------
+    # BOS/CHOCH market structure data
+    # ------------------------------------------------------------------
+
+    def _fetch_htf_candles(self) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+        """Fetch 1H and 4H OHLCV candles for BOS/CHOCH multi-timeframe analysis."""
+        df_1h = None
+        df_4h = None
+        try:
+            df_1h = self.fetcher.fetch_asset(self.symbol, "1h", days=FETCH_DAYS)
+            if df_1h is not None and not df_1h.empty:
+                if not isinstance(df_1h.index, pd.DatetimeIndex):
+                    if "timestamp" in df_1h.columns:
+                        df_1h["timestamp"] = pd.to_datetime(df_1h["timestamp"])
+                        df_1h = df_1h.set_index("timestamp")
+                    else:
+                        df_1h.index = pd.to_datetime(df_1h.index)
+                df_1h = df_1h.sort_index()
+        except Exception as exc:
+            logger.debug("Failed to fetch 1H candles: %s", exc)
+        try:
+            df_4h = self.fetcher.fetch_asset(self.symbol, "4h", days=FETCH_DAYS)
+            if df_4h is not None and not df_4h.empty:
+                if not isinstance(df_4h.index, pd.DatetimeIndex):
+                    if "timestamp" in df_4h.columns:
+                        df_4h["timestamp"] = pd.to_datetime(df_4h["timestamp"])
+                        df_4h = df_4h.set_index("timestamp")
+                    else:
+                        df_4h.index = pd.to_datetime(df_4h.index)
+                df_4h = df_4h.sort_index()
+        except Exception as exc:
+            logger.debug("Failed to fetch 4H candles: %s", exc)
+        return df_1h, df_4h
+
+    def _get_structure_signals(self, df_15m: Optional[pd.DataFrame] = None) -> Dict:
+        """Get latest BOS/CHOCH signals (cached per iteration)."""
+        if df_15m is not None:
+            try:
+                df_1h, df_4h = self._fetch_htf_candles()
+                self._last_structure_signals = self.market_structure.get_signals(
+                    df_15m, df_1h=df_1h, df_4h=df_4h,
+                )
+            except Exception as exc:
+                logger.warning("BOS/CHOCH signal computation failed: %s", exc)
+                self._last_structure_signals = {}
+        return self._last_structure_signals
+
+    # ------------------------------------------------------------------
     # HYBRID EXIT LOGIC
     # ------------------------------------------------------------------
 
@@ -631,6 +683,50 @@ class HTFHybridBot:
                     return "TRAILING_SL"
 
             return None
+
+        # --- BOS/CHOCH dynamic SL adjustment (ONLY when profitable) ---
+        is_profitable = profit_pct > 0
+        if is_profitable and self._last_structure_signals:
+            sig = self._last_structure_signals
+            swing_high = sig.get("last_swing_high", 0.0)
+            swing_low = sig.get("last_swing_low", 0.0)
+            confidence = sig.get("confidence", 0.0)
+            buffer_pct = 0.002
+            new_sl = self.sl_price
+
+            if self.position == 1:  # LONG
+                if sig.get("bos_bullish") and not sig.get("fake_bos") and swing_low > 0:
+                    bos_sl = swing_low * (1.0 - buffer_pct)
+                    if bos_sl > new_sl:
+                        new_sl = bos_sl
+                if sig.get("choch_bearish") and not sig.get("fake_choch"):
+                    choch_sl = entry + 0.75 * (current_price - entry)
+                    if choch_sl > new_sl:
+                        new_sl = choch_sl
+                if new_sl > self.sl_price:
+                    logger.info(
+                        "🔄 [Hybrid] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
+                        self.sl_price, new_sl, confidence,
+                    )
+                    self.sl_price = new_sl
+                    self._save_state()
+
+            elif self.position == -1:  # SHORT
+                if sig.get("bos_bearish") and not sig.get("fake_bos") and swing_high > 0:
+                    bos_sl = swing_high * (1.0 + buffer_pct)
+                    if new_sl <= 0 or bos_sl < new_sl:
+                        new_sl = bos_sl
+                if sig.get("choch_bullish") and not sig.get("fake_choch"):
+                    choch_sl = entry - 0.75 * (entry - current_price)
+                    if new_sl <= 0 or choch_sl < new_sl:
+                        new_sl = choch_sl
+                if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+                    logger.info(
+                        "🔄 [Hybrid] BOS/CHOCH SL adjusted: $%.2f → $%.2f (conf=%.2f)",
+                        self.sl_price, new_sl, confidence,
+                    )
+                    self.sl_price = new_sl
+                    self._save_state()
 
         # --- Phase 1: Before partial close ---
 
@@ -912,7 +1008,10 @@ class HTFHybridBot:
             self.current_price = current_price
             status["price"] = current_price
 
-            # 2. Check hybrid exit logic before computing new action
+            # 1b. Compute BOS/CHOCH structure signals (cached for this iteration)
+            self._get_structure_signals(df_15m)
+
+            # 2. Check hybrid exit logic before computing new action (uses cached BOS/CHOCH)
             exit_reason = self._check_hybrid_exit(current_price)
             if exit_reason and self.position != 0:
                 logger.info("Exit triggered (%s) @ $%.2f", exit_reason, current_price)
