@@ -530,81 +530,85 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
         bucket = 'exits' if m['_kind'] == 'exit' else 'entries'
         _by_candle[m['time']][bucket].append(m)
 
+    # CRITICAL: lightweight-charts v4 only supports ONE marker per time value.
+    # If we emit two markers at the same time, only the last one renders.
+    # Solution: merge entry+exit into a single combined marker per candle.
     markers: list[dict] = []
     for candle_time in sorted(_by_candle):
         group = _by_candle[candle_time]
-
-        # ── entry marker (belowBar) ──
         entries = group['entries']
+        exits = group['exits']
+
+        # Build entry label
+        entry_label = ''
         if entries:
             n_long = sum(1 for e in entries if e['text'] == 'LONG')
             n_short = sum(1 for e in entries if e['text'] == 'SHORT')
             if n_long and n_short:
-                label = f'L×{n_long}+S×{n_short}' if (n_long + n_short) > 1 else entries[0]['text']
-                markers.append({
-                    'time': candle_time,
-                    'position': 'belowBar',
-                    'color': '#26a69a',
-                    'shape': 'arrowUp',
-                    'text': label,
-                })
+                entry_label = f'L×{n_long}+S×{n_short}' if (n_long + n_short) > 1 else entries[0]['text']
             elif n_long:
-                markers.append({
-                    'time': candle_time,
-                    'position': 'belowBar',
-                    'color': '#26a69a',
-                    'shape': 'arrowUp',
-                    'text': f'LONG×{n_long}' if n_long > 1 else 'LONG',
-                })
+                entry_label = f'LONG×{n_long}' if n_long > 1 else 'LONG'
             elif n_short:
-                markers.append({
-                    'time': candle_time,
-                    'position': 'aboveBar',
-                    'color': '#ef5350',
-                    'shape': 'arrowDown',
-                    'text': f'SHORT×{n_short}' if n_short > 1 else 'SHORT',
-                })
+                entry_label = f'SHORT×{n_short}' if n_short > 1 else 'SHORT'
 
-        # ── exit marker (aboveBar / belowBar for TP) ──
-        exits = group['exits']
+        # Build exit label
+        exit_label = ''
         if exits:
             n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
             n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
             n_plain = sum(1 for e in exits if e['text'] == 'EXIT')
             total_exits = len(exits)
-
             if total_exits == 1:
-                # Single exit: use its original styling
-                ex = exits[0]
-                markers.append({
-                    'time': candle_time,
-                    'position': ex['position'],
-                    'color': ex['color'],
-                    'shape': ex['shape'],
-                    'text': ex['text'],
-                })
+                exit_label = exits[0]['text']
+            elif n_sl or n_tp:
+                parts = []
+                if n_sl:
+                    parts.append(f'SL×{n_sl}')
+                if n_tp:
+                    parts.append(f'TP×{n_tp}')
+                if n_plain:
+                    parts.append(f'×{n_plain}')
+                exit_label = 'EXIT(' + '+'.join(parts) + ')'
             else:
-                # Multiple exits: aggregate into one marker
-                if n_sl or n_tp:
-                    parts = []
-                    if n_sl:
-                        parts.append(f'SL×{n_sl}')
-                    if n_tp:
-                        parts.append(f'TP×{n_tp}')
-                    if n_plain:
-                        parts.append(f'×{n_plain}')
-                    label = 'EXIT(' + '+'.join(parts) + ')'
-                else:
-                    label = f'EXIT×{total_exits}'
-                # Colour: red if any SL, green if all TP, amber otherwise
-                color = '#ff4444' if n_sl else ('#00e676' if n_tp and not n_plain else '#ffc107')
-                markers.append({
-                    'time': candle_time,
-                    'position': 'aboveBar',
-                    'color': color,
-                    'shape': 'square',
-                    'text': label,
-                })
+                exit_label = f'EXIT×{total_exits}'
+
+        # Combine into ONE marker per candle time
+        if entry_label and exit_label:
+            # Both entry and exit on same candle — combine text
+            combined = f'{entry_label} → {exit_label}'
+            # Use exit color (red for SL, green for TP, amber for unknown)
+            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
+            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
+            color = '#ff4444' if n_sl else ('#00e676' if n_tp else '#ffc107')
+            markers.append({
+                'time': candle_time,
+                'position': 'aboveBar',
+                'color': color,
+                'shape': 'square',
+                'text': combined,
+            })
+        elif entry_label:
+            # Entry only
+            is_short = 'SHORT' in entry_label
+            markers.append({
+                'time': candle_time,
+                'position': 'aboveBar' if is_short else 'belowBar',
+                'color': '#ef5350' if is_short else '#26a69a',
+                'shape': 'arrowDown' if is_short else 'arrowUp',
+                'text': entry_label,
+            })
+        elif exit_label:
+            # Exit only
+            n_sl = sum(1 for e in exits if e['text'] == 'EXIT(SL)')
+            n_tp = sum(1 for e in exits if e['text'] == 'EXIT(TP)')
+            color = '#ff4444' if n_sl else ('#00e676' if n_tp else '#ffc107')
+            markers.append({
+                'time': candle_time,
+                'position': 'aboveBar',
+                'color': color,
+                'shape': 'square',
+                'text': exit_label,
+            })
 
     # lightweight-charts requires markers sorted by time ascending;
     # unsorted markers cause ALL markers to be silently dropped.
