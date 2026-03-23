@@ -354,6 +354,44 @@ def format_sl_tp_update(alert: dict) -> str:
     return "\n".join(lines)
 
 
+def format_liquidation_risk(alert: dict) -> str:
+    """Format a LIQUIDATION_RISK alert."""
+    trade = alert.get("trade", {})
+    position = alert.get("position", {})
+    strategy = alert.get("strategy", "htf")
+
+    symbol = trade.get("symbol", "?")
+    direction = trade.get("direction", position.get("direction", "?"))
+    liq_price = trade.get("liquidation_price", 0)
+    sl_price = trade.get("sl_price", position.get("sl_price", 0))
+    entry_price = trade.get("entry_price", position.get("entry_price", 0))
+    buffer = trade.get("buffer", 0)
+    buffer_pct = trade.get("buffer_pct", 0)
+    simulated = trade.get("simulated", False)
+
+    sim_tag = " (Simulated)" if simulated else ""
+
+    lines = [
+        f"⚠️ *LIQUIDATION RISK{sim_tag}* — {symbol} {direction}",
+        "",
+        f"🔴 Liquidation: ${liq_price:,.2f}",
+        f"🛑 SL: ${sl_price:,.2f}",
+    ]
+
+    if entry_price > 0:
+        lines.append(f"💰 Entry: ${entry_price:,.2f}")
+
+    lines.append(f"📐 Buffer: ${abs(buffer):,.2f} ({abs(buffer_pct):.1f}%)")
+    lines.append(f"⚡ Recommended: Tighten SL or reduce position size")
+    lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
+
+    ts = _format_timestamp(alert.get("timestamp", ""))
+    if ts:
+        lines.append(f"🕐 {ts}")
+
+    return "\n".join(lines)
+
+
 def _format_signals(signals: dict) -> list:
     """Format market signals into message lines."""
     lines = []
@@ -409,6 +447,10 @@ def format_alert(alert: dict) -> str:
     """Route an alert to the appropriate formatter based on action type."""
     trade = alert.get("trade", {})
     action = trade.get("action", "")
+
+    # Liquidation risk alerts
+    if trade.get("type") == "LIQUIDATION_RISK":
+        return format_liquidation_risk(alert)
 
     # SL/TP update alerts
     if trade.get("type") == "SL_UPDATE" or trade.get("update_type") == "SL":

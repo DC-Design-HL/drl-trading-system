@@ -398,6 +398,9 @@ class HTFLiveBot:
                 "State restored: pos=%d price=%.2f balance=%.2f",
                 self.position, self.position_price, self.balance,
             )
+            # Check liquidation safety on state restore (if in a position)
+            if self.position != 0:
+                self._check_liquidation_safety()
         except Exception as exc:
             logger.warning("Could not restore state: %s", exc)
 
@@ -771,6 +774,117 @@ class HTFLiveBot:
         return self._last_structure_signals
 
     # ------------------------------------------------------------------
+    # Liquidation price safety check
+    # ------------------------------------------------------------------
+
+    def _get_liquidation_price(self) -> float:
+        """
+        Fetch the current liquidation price from the exchange via the
+        testnet executor. Returns 0.0 if unavailable, dry-run, or no
+        exchange connection.
+        """
+        if self.dry_run or not self.testnet_executor:
+            return 0.0
+        try:
+            futures_exec = getattr(self.testnet_executor, '_futures_executor', None)
+            if futures_exec and hasattr(futures_exec, 'get_liquidation_price'):
+                return futures_exec.get_liquidation_price(self.symbol)
+        except Exception as exc:
+            logger.debug("Failed to fetch liquidation price: %s", exc)
+        return 0.0
+
+    def _check_liquidation_safety(self) -> bool:
+        """
+        Validate that the SL price triggers BEFORE the liquidation price.
+
+        For LONG:  liquidation should be < (SL - delta)
+        For SHORT: liquidation should be > (SL + delta)
+        Delta = 1% of entry price (buffer for extreme slippage/flash crash).
+
+        Returns True if safe (or check not applicable), False if at risk.
+        Writes LIQUIDATION_RISK alert to the shared alerts file on risk.
+        """
+        if self.position == 0 or self.position_price <= 0 or self.sl_price <= 0:
+            return True
+
+        liq_price = self._get_liquidation_price()
+
+        # Skip if liquidation is 0 (1x leverage longs — impossible to liquidate)
+        if liq_price <= 0:
+            return True
+
+        delta = self.position_price * 0.01  # 1% buffer
+
+        if self.position == 1:  # LONG
+            if liq_price >= self.sl_price - delta:
+                buffer = self.sl_price - delta - liq_price
+                buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+                logger.critical(
+                    "⚠️ LIQUIDATION RISK: %s LONG liq=$%.2f >= SL-delta=$%.2f "
+                    "(SL=$%.2f, entry=$%.2f, buffer=$%.2f / %.2f%%)",
+                    self.symbol, liq_price, self.sl_price - delta,
+                    self.sl_price, self.position_price, buffer, buffer_pct,
+                )
+                self._write_liquidation_alert(liq_price, delta)
+                return False
+
+        elif self.position == -1:  # SHORT
+            if liq_price <= self.sl_price + delta:
+                buffer = liq_price - (self.sl_price + delta)
+                buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+                logger.critical(
+                    "⚠️ LIQUIDATION RISK: %s SHORT liq=$%.2f <= SL+delta=$%.2f "
+                    "(SL=$%.2f, entry=$%.2f, buffer=$%.2f / %.2f%%)",
+                    self.symbol, liq_price, self.sl_price + delta,
+                    self.sl_price, self.position_price, buffer, buffer_pct,
+                )
+                self._write_liquidation_alert(liq_price, delta)
+                return False
+
+        return True
+
+    def _write_liquidation_alert(self, liq_price: float, delta: float) -> None:
+        """Write a LIQUIDATION_RISK alert to the shared alerts file for Telegram."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
+
+            if self.position == 1:
+                buffer = self.sl_price - liq_price
+            else:
+                buffer = liq_price - self.sl_price
+            buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "strategy": "htf",
+                    "trade": {
+                        "type": "LIQUIDATION_RISK",
+                        "symbol": self.symbol,
+                        "direction": direction,
+                        "liquidation_price": liq_price,
+                        "sl_price": self.sl_price,
+                        "entry_price": self.position_price,
+                        "delta": delta,
+                        "buffer": buffer,
+                        "buffer_pct": buffer_pct,
+                    },
+                    "signals": {},
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "direction": direction,
+                    },
+                }) + "\n")
+            logger.info("Liquidation risk alert queued for %s %s", self.symbol, direction)
+        except Exception as exc:
+            logger.warning("Failed to queue liquidation risk alert: %s", exc)
+
+    # ------------------------------------------------------------------
     # SL/TP check
     # ------------------------------------------------------------------
 
@@ -987,6 +1101,9 @@ class HTFLiveBot:
                     )
                 except Exception as _exc:
                     logger.warning("Testnet SL/TP update failed: %s", _exc)
+
+        # --- Liquidation safety check (every iteration) ---
+        self._check_liquidation_safety()
 
         # --- Check if current price hits the (possibly adjusted) SL ---
         if self.position == 1:

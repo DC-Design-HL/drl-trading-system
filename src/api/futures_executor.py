@@ -422,6 +422,21 @@ class FuturesTestnetExecutor:
                 "SL=$%.2f TP=$%.2f lev=%dx",
                 sym, quantity, mark_price, sl, tp, leverage,
             )
+
+            # ── Validate SL vs liquidation price ─────────────────────
+            if sl > 0:
+                liq_check = self.validate_sl_vs_liquidation(
+                    sym, "LONG", mark_price, sl,
+                )
+                result["liquidation_check"] = liq_check
+                if not liq_check["safe"]:
+                    logger.critical(
+                        "⚠️ LONG %s opened with LIQUIDATION RISK! "
+                        "liq=$%.2f, SL=$%.2f, buffer=$%.2f (%.2f%%)",
+                        sym, liq_check["liquidation_price"], sl,
+                        liq_check["buffer"], liq_check["buffer_pct"],
+                    )
+
         except Exception as exc:
             logger.error("open_long failed for %s: %s", sym, exc, exc_info=True)
             result["error"] = str(exc)
@@ -557,6 +572,21 @@ class FuturesTestnetExecutor:
                 "SL=$%.2f TP=$%.2f lev=%dx",
                 sym, quantity, mark_price, sl, tp, leverage,
             )
+
+            # ── Validate SL vs liquidation price ─────────────────────
+            if sl > 0:
+                liq_check = self.validate_sl_vs_liquidation(
+                    sym, "SHORT", mark_price, sl,
+                )
+                result["liquidation_check"] = liq_check
+                if not liq_check["safe"]:
+                    logger.critical(
+                        "⚠️ SHORT %s opened with LIQUIDATION RISK! "
+                        "liq=$%.2f, SL=$%.2f, buffer=$%.2f (%.2f%%)",
+                        sym, liq_check["liquidation_price"], sl,
+                        liq_check["buffer"], liq_check["buffer_pct"],
+                    )
+
         except Exception as exc:
             logger.error("open_short failed for %s: %s", sym, exc, exc_info=True)
             result["error"] = str(exc)
@@ -683,6 +713,90 @@ class FuturesTestnetExecutor:
             else:
                 logger.error("Failed to place new TP for %s: %s", sym, exc)
             return False
+
+    # ── Liquidation price ─────────────────────────────────────────────────────
+
+    def get_liquidation_price(self, symbol: str) -> float:
+        """
+        Fetch the current liquidation price for an open position from
+        /fapi/v2/positionRisk.
+
+        Returns the liquidation price as a float, or 0.0 if no position exists
+        or the exchange returns 0 (e.g. at 1x leverage for longs).
+        """
+        sym = symbol.upper().replace("/", "")
+        try:
+            raw = self.connector.get_positions()
+            for p in raw:
+                if p.get("symbol") == sym:
+                    liq = float(p.get("liquidationPrice", 0))
+                    return liq
+        except Exception as exc:
+            logger.warning("get_liquidation_price failed for %s: %s", sym, exc)
+        return 0.0
+
+    def validate_sl_vs_liquidation(
+        self,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        sl_price: float,
+    ) -> Dict[str, Any]:
+        """
+        Validate that the SL price triggers BEFORE the liquidation price.
+
+        Returns a dict with:
+          - safe: bool — True if SL is safely before liquidation
+          - liquidation_price: float
+          - delta: float — 1% buffer of entry price
+          - buffer: float — distance between SL and liquidation
+          - buffer_pct: float — buffer as percentage of entry
+
+        For LONG:  liquidation should be < (SL - delta)
+        For SHORT: liquidation should be > (SL + delta)
+
+        Gracefully returns safe=True when liquidation is 0 (e.g. 1x leverage longs).
+        """
+        liq_price = self.get_liquidation_price(symbol)
+        delta = entry_price * 0.01  # 1% buffer
+
+        result: Dict[str, Any] = {
+            "safe": True,
+            "liquidation_price": liq_price,
+            "sl_price": sl_price,
+            "delta": delta,
+            "buffer": 0.0,
+            "buffer_pct": 0.0,
+        }
+
+        # Skip check if liquidation is 0 (1x leverage longs, or no position)
+        if liq_price <= 0:
+            return result
+
+        if side.upper() == "LONG":
+            result["buffer"] = sl_price - delta - liq_price
+            result["buffer_pct"] = result["buffer"] / entry_price * 100 if entry_price > 0 else 0
+            if liq_price >= sl_price - delta:
+                result["safe"] = False
+                logger.critical(
+                    "⚠️ LIQUIDATION RISK: %s LONG liq=$%.2f >= SL-delta=$%.2f "
+                    "(SL=$%.2f, delta=$%.2f, entry=$%.2f)",
+                    symbol, liq_price, sl_price - delta,
+                    sl_price, delta, entry_price,
+                )
+        elif side.upper() == "SHORT":
+            result["buffer"] = liq_price - (sl_price + delta)
+            result["buffer_pct"] = result["buffer"] / entry_price * 100 if entry_price > 0 else 0
+            if liq_price <= sl_price + delta:
+                result["safe"] = False
+                logger.critical(
+                    "⚠️ LIQUIDATION RISK: %s SHORT liq=$%.2f <= SL+delta=$%.2f "
+                    "(SL=$%.2f, delta=$%.2f, entry=$%.2f)",
+                    symbol, liq_price, sl_price + delta,
+                    sl_price, delta, entry_price,
+                )
+
+        return result
 
     # ── Portfolio / position data ─────────────────────────────────────────────
 

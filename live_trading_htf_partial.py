@@ -321,6 +321,9 @@ class HTFPartialBot:
                 "State restored: pos=%d price=%.2f balance=%.2f partial_exits=%d",
                 self.position, self.position_price, self.balance, self.partial_exits,
             )
+            # Check liquidation safety on state restore
+            if self.position != 0:
+                self._check_liquidation_safety()
         except Exception as exc:
             logger.warning("Could not restore state: %s", exc)
 
@@ -625,6 +628,119 @@ class HTFPartialBot:
         return self._last_structure_signals
 
     # ------------------------------------------------------------------
+    # Liquidation price safety check (simulated for paper trading)
+    # ------------------------------------------------------------------
+
+    def _get_simulated_liquidation_price(self, leverage: int = 1) -> float:
+        """
+        Compute a simulated liquidation price for paper trading.
+
+        At 1x leverage:
+          LONG  → liquidation = $0 (impossible to liquidate)
+          SHORT → liquidation = entry * 2 (impossible in practice)
+
+        At higher leverage:
+          LONG  → entry * (1 - 1/leverage)
+          SHORT → entry * (1 + 1/leverage)
+
+        Returns 0.0 when liquidation is not meaningful (1x longs).
+        """
+        if self.position == 0 or self.position_price <= 0:
+            return 0.0
+
+        if leverage <= 1:
+            # At 1x, longs can't be liquidated; shorts liquidate at 2x entry
+            if self.position == 1:
+                return 0.0
+            else:
+                return self.position_price * 2.0
+
+        if self.position == 1:  # LONG
+            return self.position_price * (1.0 - 1.0 / leverage)
+        else:  # SHORT
+            return self.position_price * (1.0 + 1.0 / leverage)
+
+    def _check_liquidation_safety(self, leverage: int = 1) -> bool:
+        """
+        Validate SL fires before simulated liquidation price.
+
+        For paper trading bots this is a concept check — no real exchange
+        liquidation exists. But it validates the safety margin so the logic
+        is ready if leverage is ever increased.
+
+        Returns True if safe, False if at risk.
+        """
+        if self.position == 0 or self.position_price <= 0 or self.sl_price <= 0:
+            return True
+
+        liq_price = self._get_simulated_liquidation_price(leverage)
+        if liq_price <= 0:
+            return True
+
+        delta = self.position_price * 0.01  # 1% buffer
+
+        if self.position == 1:  # LONG
+            if liq_price >= self.sl_price - delta:
+                logger.critical(
+                    "⚠️ [Partial/Simulated] LIQUIDATION RISK: %s LONG liq=$%.2f >= SL-delta=$%.2f",
+                    self.symbol, liq_price, self.sl_price - delta,
+                )
+                self._write_liquidation_alert(liq_price, delta)
+                return False
+        elif self.position == -1:  # SHORT
+            if liq_price <= self.sl_price + delta:
+                logger.critical(
+                    "⚠️ [Partial/Simulated] LIQUIDATION RISK: %s SHORT liq=$%.2f <= SL+delta=$%.2f",
+                    self.symbol, liq_price, self.sl_price + delta,
+                )
+                self._write_liquidation_alert(liq_price, delta)
+                return False
+
+        return True
+
+    def _write_liquidation_alert(self, liq_price: float, delta: float) -> None:
+        """Write a LIQUIDATION_RISK alert to the shared alerts file."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            direction = "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT"
+
+            if self.position == 1:
+                buffer = self.sl_price - liq_price
+            else:
+                buffer = liq_price - self.sl_price
+            buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "strategy": "partial",
+                    "trade": {
+                        "type": "LIQUIDATION_RISK",
+                        "symbol": self.symbol,
+                        "direction": direction,
+                        "liquidation_price": liq_price,
+                        "sl_price": self.sl_price,
+                        "entry_price": self.position_price,
+                        "delta": delta,
+                        "buffer": buffer,
+                        "buffer_pct": buffer_pct,
+                        "simulated": True,
+                    },
+                    "signals": {},
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "direction": direction,
+                    },
+                }, default=_json_safe) + "\n")
+            logger.info("Liquidation risk alert queued for %s %s [simulated]", self.symbol, direction)
+        except Exception as exc:
+            logger.warning("Failed to queue liquidation risk alert: %s", exc)
+
+    # ------------------------------------------------------------------
     # PARTIAL TAKE-PROFIT EXIT LOGIC (replaces _check_sl_tp)
     # ------------------------------------------------------------------
 
@@ -712,6 +828,9 @@ class HTFPartialBot:
                     self.sl_price = new_sl
                     self._save_state()
                     self._write_sltp_update_alert(old_sl, new_sl, f"BOS/CHOCH(conf={confidence:.2f})")
+
+        # --- Liquidation safety check (simulated for paper trading) ---
+        self._check_liquidation_safety()
 
         # --- Stop loss: -1.5% on remaining position ---
         if self.position == 1:
