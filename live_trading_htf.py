@@ -1245,19 +1245,24 @@ class HTFLiveBot:
                     logger.info("⚠️ Fake CHOCH bearish detected — ignoring")
 
         # --- Safety: SL must never move to a worse position ---
+        # Minimum change threshold: 0.01% of price (e.g. BTC=$7, ETH=$0.22)
+        # Prevents spam from sub-cent trailing recalculations on every tick.
+        MIN_SLTP_CHANGE_PCT = 0.0001
+        _min_change = current_price * MIN_SLTP_CHANGE_PCT
+
         sl_changed = False
         if self.position == 1:
-            if new_sl > self.sl_price:
+            if new_sl > self.sl_price and (new_sl - self.sl_price) >= _min_change:
                 sl_changed = True
             else:
                 new_sl = self.sl_price  # revert
         elif self.position == -1:
-            if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+            if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price and (self.sl_price - new_sl) >= _min_change):
                 sl_changed = True
             else:
                 new_sl = self.sl_price  # revert
 
-        tp_changed = (new_tp != self.tp_price)
+        tp_changed = new_tp != self.tp_price and abs(new_tp - self.tp_price) >= _min_change
 
         # --- Apply and log SL/TP changes ---
         if sl_changed or tp_changed:
