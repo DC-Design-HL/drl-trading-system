@@ -207,6 +207,17 @@ class AdaptiveRiskManager:
                 tp_price = min(recent_low, current_price - (atr * 4))
                 tp_pct = (current_price - tp_price) / current_price
                 
+            # ATR floor: SL/TP must be outside normal noise (1.5x and 3.0x of ATR_14)
+            # This prevents SLs being set inside the typical candle range
+            atr_14_pct = atr / current_price
+            sl_pct = max(sl_pct, 1.5 * atr_14_pct)
+            tp_pct = max(tp_pct, 3.0 * atr_14_pct)
+            logger.info(
+                f"📏 ATR floor applied: ATR_14={atr_14_pct:.3%} → "
+                f"SL≥{1.5 * atr_14_pct:.3%}, TP≥{3.0 * atr_14_pct:.3%} "
+                f"→ final SL={sl_pct:.3%}, TP={tp_pct:.3%}"
+            )
+
             # Asset-specific soft clamping (allow some flexibility around base params)
             # Use base params as anchor, but allow 50% flexibility
             if symbol:

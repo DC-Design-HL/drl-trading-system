@@ -714,6 +714,56 @@ class FuturesTestnetExecutor:
                 logger.error("Failed to place new TP for %s: %s", sym, exc)
             return False
 
+    # ── Partial Take Profit ───────────────────────────────────────────────────
+
+    def place_partial_tp_order(
+        self,
+        symbol: str,
+        side: str,
+        tp_price: float,
+        quantity: float,
+    ) -> Optional[int]:
+        """
+        Place a quantity-specific TAKE_PROFIT_MARKET order for a partial position close.
+
+        Unlike open_long/open_short which use closePosition=True (full close), this
+        places an order for a specific quantity so partial exits are possible.
+
+        Used for Phase 1 §3.3 partial TP levels:
+          - Level 1 (1R): 40% of original position
+          - Level 2 (2R): 35% of original position
+
+        Args:
+            symbol: Trading pair (e.g. "BTCUSDT")
+            side:   "LONG" or "SHORT" (determines order side — sell for long, buy for short)
+            tp_price: Take-profit trigger price
+            quantity: Quantity of contracts/coins to close
+
+        Returns:
+            Order ID on success, None on failure.
+        """
+        sym = symbol.upper().replace("/", "")
+        order_side = "SELL" if side.upper() == "LONG" else "BUY"
+
+        try:
+            tp_order = self.connector.place_take_profit_order(
+                sym,
+                order_side,
+                tp_price,
+                quantity=quantity,
+                close_position=False,
+            )
+            tp_oid = tp_order.get("orderId")
+            if tp_oid is not None:
+                logger.info(
+                    "Partial TP order placed for %s: orderId=%s @ $%.4f qty=%.6f (algo=%s)",
+                    sym, tp_oid, tp_price, quantity, tp_order.get("_algo_order", False),
+                )
+            return tp_oid
+        except Exception as exc:
+            logger.error("place_partial_tp_order failed for %s @ %.4f qty=%.6f: %s", sym, tp_price, quantity, exc)
+            return None
+
     # ── Liquidation price ─────────────────────────────────────────────────────
 
     def get_liquidation_price(self, symbol: str) -> float:

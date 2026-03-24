@@ -88,6 +88,9 @@ ACTION_LABELS = {ACTION_HOLD: "HOLD", ACTION_LONG: "LONG", ACTION_SHORT: "SHORT"
 # Minimum confidence to act on a signal
 MIN_CONFIDENCE = 0.45
 
+# Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
+FIXED_MAX_NOTIONAL = 3000.0  # USDT
+
 # How many 15M bars to fetch (10 days = ~960 bars)
 FETCH_DAYS = 12
 
@@ -216,6 +219,26 @@ class HTFLiveBot:
         self.current_price = 0.0
         self.realized_pnl = 0.0
 
+        # Phase 1 §3.5: Session balance — captured once at startup for stable position sizing
+        self.session_balance = initial_balance
+
+        # Phase 1 §3.9: MFE/MAE tracking per trade
+        self.mfe_pct = 0.0   # Max Favorable Excursion (best unrealized %) since open
+        self.mae_pct = 0.0   # Max Adverse Excursion (worst unrealized %, negative) since open
+
+        # Phase 1 §3.3: Partial take-profit state
+        self.sl_pct = 0.0               # SL % at open for R-multiple calculations
+        self.initial_position_units = 0.0  # Total units at open (for partial size math)
+        self.partial_tp_level = 0       # 0=none, 1=Level1 filled (40%), 2=Level2 filled (35%)
+        self.partial_tp1_price = 0.0    # Level 1 TP price: entry ± 1.0 × sl_pct
+        self.partial_tp2_price = 0.0    # Level 2 TP price: entry ± 2.0 × sl_pct
+
+        # Phase 1 §3.4: Entry time tracking for time-based stagnant exit
+        self.position_entry_time = 0.0
+
+        # Cache of last fetched 15m DataFrame (used by _open_position for regime detection)
+        self._last_df = None
+
         # Anti-overtrading
         self.last_loss_time = 0.0
         self.last_entry_time = 0.0
@@ -234,6 +257,14 @@ class HTFLiveBot:
         # swing_lookback=8 for 5m candles (noisier than 15m, needs wider window)
         self.market_structure = MarketStructure(swing_lookback=8)
         self._last_structure_signals: Dict = {}
+
+        # Phase 1 §3.2: Regime detector for adaptive SL/TP multipliers
+        try:
+            from src.features.regime_detector import MarketRegimeDetector
+            self.regime_detector = MarketRegimeDetector()
+        except Exception as _exc:
+            logger.warning("Regime detector unavailable: %s — using fixed SL/TP", _exc)
+            self.regime_detector = None
 
         # Storage (shared with main bot)
         self.storage = get_storage()
@@ -344,6 +375,15 @@ class HTFLiveBot:
             "last_entry_time": self.last_entry_time,
             "start_time": self.start_time,
             "model_path": str(self._model_path) if self._model_path else None,
+            "session_balance": self.session_balance,
+            "mfe_pct": self.mfe_pct,
+            "mae_pct": self.mae_pct,
+            "sl_pct": self.sl_pct,
+            "initial_position_units": self.initial_position_units,
+            "partial_tp_level": self.partial_tp_level,
+            "partial_tp1_price": self.partial_tp1_price,
+            "partial_tp2_price": self.partial_tp2_price,
+            "position_entry_time": self.position_entry_time,
             "updated_at": datetime.now().isoformat(),
         }
         # Save to local HTF state file
@@ -400,6 +440,16 @@ class HTFLiveBot:
             self.last_loss_time = float(state.get("last_loss_time", 0.0))
             self.last_entry_time = float(state.get("last_entry_time", 0.0))
             self.start_time = state.get("start_time", self.start_time)
+            # Phase 1 new fields — defaults keep existing state files loading correctly
+            self.session_balance = float(state.get("session_balance", self.balance))
+            self.mfe_pct = float(state.get("mfe_pct", 0.0))
+            self.mae_pct = float(state.get("mae_pct", 0.0))
+            self.sl_pct = float(state.get("sl_pct", 0.0))
+            self.initial_position_units = float(state.get("initial_position_units", self.position_units))
+            self.partial_tp_level = int(state.get("partial_tp_level", 0))
+            self.partial_tp1_price = float(state.get("partial_tp1_price", 0.0))
+            self.partial_tp2_price = float(state.get("partial_tp2_price", 0.0))
+            self.position_entry_time = float(state.get("position_entry_time", 0.0))
             logger.info(
                 "State restored: pos=%d price=%.2f balance=%.2f",
                 self.position, self.position_price, self.balance,
@@ -450,6 +500,7 @@ class HTFLiveBot:
 
             self.balance = real_balance
             self.initial_balance = real_balance  # Reset baseline for PnL calculations
+            self.session_balance = real_balance  # Update session balance for position sizing cap
             self._save_state()
         except Exception as exc:
             logger.warning("Balance sync failed: %s — keeping state balance $%.2f", exc, self.balance)
@@ -1311,7 +1362,14 @@ class HTFLiveBot:
         return trade
 
     def _open_position(self, price: float, direction: int, confidence: float) -> Dict:
-        trade_value = self.balance * POSITION_SIZE
+        # Phase 1 §3.5: Cap position size using session_balance and hard notional cap
+        trade_value = min(self.session_balance * POSITION_SIZE, FIXED_MAX_NOTIONAL)
+        logger.info(
+            "📐 %s size: session_bal=$%.0f × %.0f%% = $%.0f → capped at $%.0f (max=%.0f)",
+            "LONG" if direction == 1 else "SHORT",
+            self.session_balance, POSITION_SIZE * 100,
+            self.session_balance * POSITION_SIZE, trade_value, FIXED_MAX_NOTIONAL,
+        )
         fee = trade_value * TRADING_FEE
         self.balance -= fee
         self.position = direction
@@ -1319,15 +1377,62 @@ class HTFLiveBot:
         self.position_units = (trade_value - fee) / (price + 1e-10)
         self.peak_price = price  # Reset peak price for trailing stop tracking
         self.last_entry_time = time.time()
+        self.position_entry_time = time.time()  # Phase 1 §3.4: for time-based exit
+
+        # Phase 1 §3.2: Regime-adaptive SL/TP multipliers
+        sl_pct = STOP_LOSS_PCT
+        tp_pct = TAKE_PROFIT_PCT
+        try:
+            if self.regime_detector is not None and self._last_df is not None:
+                regime_info = self.regime_detector.detect_regime(self._last_df)
+                regime_name = regime_info.regime.value
+                if regime_name == 'high_volatility':
+                    sl_pct *= 1.5   # Was 2.0× — reduced to limit loss per trade
+                    tp_pct *= 1.3   # Was 1.5× — scaled proportionally
+                    logger.info("📊 HIGH VOL regime: SL ×1.5, TP ×1.3")
+                elif regime_name == 'trending_up' and direction == 1:
+                    tp_pct *= 1.8   # With-trend LONG: let runners run
+                    logger.info("📊 TRENDING_UP regime (LONG): TP ×1.8, SL tight")
+                elif regime_name == 'trending_down' and direction == -1:
+                    tp_pct *= 1.8   # With-trend SHORT: let runners run
+                    logger.info("📊 TRENDING_DOWN regime (SHORT): TP ×1.8, SL tight")
+                elif regime_name == 'trending_down' and direction == 1:
+                    sl_pct *= 1.3   # Counter-trend LONG: wider SL
+                    logger.info("📊 TRENDING_DOWN regime (counter-trend LONG): SL ×1.3")
+                elif regime_name == 'trending_up' and direction == -1:
+                    sl_pct *= 1.3   # Counter-trend SHORT: wider SL
+                    logger.info("📊 TRENDING_UP regime (counter-trend SHORT): SL ×1.3")
+                elif regime_name == 'ranging':
+                    sl_pct *= 1.2   # Tighter to limit chop loss
+                    tp_pct *= 0.8   # Mean-reversion moves are smaller
+                    logger.info("📊 RANGING regime: SL ×1.2, TP ×0.8")
+        except Exception as exc:
+            logger.warning("Regime-adaptive SL/TP failed: %s — using base values", exc)
+
+        self.sl_pct = sl_pct  # Phase 1 §3.3: store for partial TP R-multiple calculations
 
         if direction == 1:
-            self.sl_price = price * (1.0 - STOP_LOSS_PCT)
-            self.tp_price = price * (1.0 + TAKE_PROFIT_PCT)
+            self.sl_price = price * (1.0 - sl_pct)
+            self.tp_price = price * (1.0 + tp_pct)
             action_str = "OPEN_LONG"
+            # Phase 1 §3.3: Partial TP prices (1R and 2R targets)
+            self.partial_tp1_price = price * (1.0 + 1.0 * sl_pct)
+            self.partial_tp2_price = price * (1.0 + 2.0 * sl_pct)
         else:
-            self.sl_price = price * (1.0 + STOP_LOSS_PCT)
-            self.tp_price = price * (1.0 - TAKE_PROFIT_PCT)
+            self.sl_price = price * (1.0 + sl_pct)
+            self.tp_price = price * (1.0 - tp_pct)
             action_str = "OPEN_SHORT"
+            # Phase 1 §3.3: Partial TP prices (1R and 2R targets)
+            self.partial_tp1_price = price * (1.0 - 1.0 * sl_pct)
+            self.partial_tp2_price = price * (1.0 - 2.0 * sl_pct)
+
+        # Phase 1 §3.3: Reset partial TP tracking for new trade
+        self.initial_position_units = self.position_units
+        self.partial_tp_level = 0
+
+        # Phase 1 §3.9: Reset MFE/MAE for new trade
+        self.mfe_pct = 0.0
+        self.mae_pct = 0.0
 
         trade = {
             "action": action_str,
@@ -1338,14 +1443,20 @@ class HTFLiveBot:
             "confidence": confidence,
             "sl": self.sl_price,
             "tp": self.tp_price,
+            "partial_tp1": self.partial_tp1_price,
+            "partial_tp2": self.partial_tp2_price,
             "pnl": 0.0,
             "timestamp": datetime.now().isoformat(),
             "agent": "htf",
         }
 
         logger.info(
-            "📈 %s @ $%.2f | units=%.5f | SL=$%.2f | TP=$%.2f | conf=%.2f",
-            action_str, price, self.position_units, self.sl_price, self.tp_price, confidence,
+            "📈 %s @ $%.2f | units=%.5f | SL=$%.2f (%.2f%%) | TP=$%.2f (%.2f%%) | "
+            "TP1=$%.2f | TP2=$%.2f | conf=%.2f",
+            action_str, price, self.position_units,
+            self.sl_price, sl_pct * 100,
+            self.tp_price, tp_pct * 100,
+            self.partial_tp1_price, self.partial_tp2_price, confidence,
         )
 
         if not self.dry_run:
@@ -1401,6 +1512,14 @@ class HTFLiveBot:
             action_str, price, net_pnl, reason, self.balance,
         )
 
+        # Phase 1 §3.9: Log MFE/MAE on close
+        logger.info(
+            "📊 Trade MFE/MAE: MFE=%+.3f%% MAE=%+.3f%% (entry=$%.2f exit=$%.2f)",
+            self.mfe_pct * 100, self.mae_pct * 100, self.position_price, price,
+        )
+        trade["mfe_pct"] = self.mfe_pct
+        trade["mae_pct"] = self.mae_pct
+
         # Reset position
         self.position = 0
         self.position_price = 0.0
@@ -1408,6 +1527,15 @@ class HTFLiveBot:
         self.sl_price = 0.0
         self.tp_price = 0.0
         self.peak_price = 0.0
+        # Phase 1: Reset partial TP and MFE/MAE state
+        self.mfe_pct = 0.0
+        self.mae_pct = 0.0
+        self.partial_tp_level = 0
+        self.partial_tp1_price = 0.0
+        self.partial_tp2_price = 0.0
+        self.sl_pct = 0.0
+        self.initial_position_units = 0.0
+        self.position_entry_time = 0.0
 
         if not self.dry_run:
             self._log_trade(trade)
@@ -1481,6 +1609,149 @@ class HTFLiveBot:
             self.current_price = current_price
             status["price"] = current_price
 
+            # Cache data for regime detection in _open_position
+            self._last_df = df_15m
+
+            # Phase 1 §3.9: Update MFE/MAE every iteration while in position
+            if self.position != 0 and self.position_price > 0:
+                if self.position == 1:
+                    _unrealized_pct = (current_price - self.position_price) / self.position_price
+                else:
+                    _unrealized_pct = (self.position_price - current_price) / self.position_price
+                self.mfe_pct = max(self.mfe_pct, _unrealized_pct)
+                self.mae_pct = min(self.mae_pct, _unrealized_pct)
+
+            # Phase 1 §3.3: Partial Take Profit check (40% at 1R, 35% at 2R)
+            if self.position != 0 and self.position_price > 0 and self.initial_position_units > 0:
+                if self.position == 1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
+                    if current_price >= self.partial_tp1_price:
+                        partial_units = self.initial_position_units * 0.40
+                        partial_units = min(partial_units, self.position_units)
+                        if partial_units > 0:
+                            partial_pnl = (self.partial_tp1_price - self.position_price) * partial_units
+                            self.realized_pnl += partial_pnl
+                            self.position_units -= partial_units
+                            self.partial_tp_level = 1
+                            old_sl = self.sl_price
+                            self.sl_price = self.position_price  # Move SL to break-even
+                            logger.info(
+                                "✅ PARTIAL TP1 (LONG): closed %.5f units @ $%.2f | "
+                                "PnL=$%+.2f | SL → break-even $%.2f (was $%.2f) | "
+                                "remaining=%.5f",
+                                partial_units, self.partial_tp1_price, partial_pnl,
+                                self.sl_price, old_sl, self.position_units,
+                            )
+                            self._save_state()
+                            # Sync updated SL to exchange
+                            if not self.dry_run and self.testnet_executor:
+                                try:
+                                    self.testnet_executor.update_sl_tp(
+                                        self.symbol, self.sl_price, self.tp_price
+                                    )
+                                except Exception as _exc:
+                                    logger.warning("Testnet SL update after TP1 failed: %s", _exc)
+
+                elif self.position == 1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
+                    if current_price >= self.partial_tp2_price:
+                        partial_units = self.initial_position_units * 0.35
+                        partial_units = min(partial_units, self.position_units)
+                        if partial_units > 0:
+                            partial_pnl = (self.partial_tp2_price - self.position_price) * partial_units
+                            self.realized_pnl += partial_pnl
+                            self.position_units -= partial_units
+                            self.partial_tp_level = 2
+                            level2_gain = self.partial_tp2_price - self.position_price
+                            new_trailing_sl = self.position_price + level2_gain * 0.50
+                            if new_trailing_sl > self.sl_price:
+                                old_sl = self.sl_price
+                                self.sl_price = new_trailing_sl
+                                logger.info(
+                                    "✅ PARTIAL TP2 (LONG): closed %.5f units @ $%.2f | "
+                                    "PnL=$%+.2f | trailing SL locked → $%.2f (was $%.2f) | "
+                                    "remaining=%.5f",
+                                    partial_units, self.partial_tp2_price, partial_pnl,
+                                    self.sl_price, old_sl, self.position_units,
+                                )
+                            else:
+                                logger.info(
+                                    "✅ PARTIAL TP2 (LONG): closed %.5f units @ $%.2f | "
+                                    "PnL=$%+.2f | remaining=%.5f (SL already ahead)",
+                                    partial_units, self.partial_tp2_price, partial_pnl,
+                                    self.position_units,
+                                )
+                            self._save_state()
+                            if not self.dry_run and self.testnet_executor:
+                                try:
+                                    self.testnet_executor.update_sl_tp(
+                                        self.symbol, self.sl_price, self.tp_price
+                                    )
+                                except Exception as _exc:
+                                    logger.warning("Testnet SL update after TP2 failed: %s", _exc)
+
+                elif self.position == -1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
+                    if current_price <= self.partial_tp1_price:
+                        partial_units = self.initial_position_units * 0.40
+                        partial_units = min(partial_units, self.position_units)
+                        if partial_units > 0:
+                            partial_pnl = (self.position_price - self.partial_tp1_price) * partial_units
+                            self.realized_pnl += partial_pnl
+                            self.position_units -= partial_units
+                            self.partial_tp_level = 1
+                            old_sl = self.sl_price
+                            self.sl_price = self.position_price  # Move SL to break-even
+                            logger.info(
+                                "✅ PARTIAL TP1 (SHORT): closed %.5f units @ $%.2f | "
+                                "PnL=$%+.2f | SL → break-even $%.2f (was $%.2f) | "
+                                "remaining=%.5f",
+                                partial_units, self.partial_tp1_price, partial_pnl,
+                                self.sl_price, old_sl, self.position_units,
+                            )
+                            self._save_state()
+                            if not self.dry_run and self.testnet_executor:
+                                try:
+                                    self.testnet_executor.update_sl_tp(
+                                        self.symbol, self.sl_price, self.tp_price
+                                    )
+                                except Exception as _exc:
+                                    logger.warning("Testnet SL update after TP1 failed: %s", _exc)
+
+                elif self.position == -1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
+                    if current_price <= self.partial_tp2_price:
+                        partial_units = self.initial_position_units * 0.35
+                        partial_units = min(partial_units, self.position_units)
+                        if partial_units > 0:
+                            partial_pnl = (self.position_price - self.partial_tp2_price) * partial_units
+                            self.realized_pnl += partial_pnl
+                            self.position_units -= partial_units
+                            self.partial_tp_level = 2
+                            level2_gain = self.position_price - self.partial_tp2_price
+                            new_trailing_sl = self.position_price - level2_gain * 0.50
+                            if new_trailing_sl < self.sl_price:
+                                old_sl = self.sl_price
+                                self.sl_price = new_trailing_sl
+                                logger.info(
+                                    "✅ PARTIAL TP2 (SHORT): closed %.5f units @ $%.2f | "
+                                    "PnL=$%+.2f | trailing SL locked → $%.2f (was $%.2f) | "
+                                    "remaining=%.5f",
+                                    partial_units, self.partial_tp2_price, partial_pnl,
+                                    self.sl_price, old_sl, self.position_units,
+                                )
+                            else:
+                                logger.info(
+                                    "✅ PARTIAL TP2 (SHORT): closed %.5f units @ $%.2f | "
+                                    "PnL=$%+.2f | remaining=%.5f (SL already ahead)",
+                                    partial_units, self.partial_tp2_price, partial_pnl,
+                                    self.position_units,
+                                )
+                            self._save_state()
+                            if not self.dry_run and self.testnet_executor:
+                                try:
+                                    self.testnet_executor.update_sl_tp(
+                                        self.symbol, self.sl_price, self.tp_price
+                                    )
+                                except Exception as _exc:
+                                    logger.warning("Testnet SL update after TP2 failed: %s", _exc)
+
             # 1b. Update peak price for trailing stop tracking
             self._update_peak_price(current_price)
 
@@ -1497,6 +1768,27 @@ class HTFLiveBot:
                 status["balance"] = self.balance
                 status["realized_pnl"] = self.realized_pnl
                 return status
+
+            # Phase 1 §3.4: Time-based stagnant exit (>6h, PnL between -0.3% and +0.5%)
+            if self.position != 0 and self.position_price > 0 and self.position_entry_time > 0:
+                _time_in_pos = time.time() - self.position_entry_time
+                if _time_in_pos > 21600:  # 6 hours
+                    if self.position == 1:
+                        _stagnant_pct = (current_price - self.position_price) / self.position_price
+                    else:
+                        _stagnant_pct = (self.position_price - current_price) / self.position_price
+                    if -0.003 <= _stagnant_pct <= 0.005:
+                        logger.info(
+                            "⏱️ TIME-BASED STAGNANT EXIT: %s in position %.1fh, "
+                            "PnL=%+.3f%% (within stagnant band [-0.3%%, +0.5%%]) → closing",
+                            self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
+                        )
+                        stagnant_trade = self._close_position(current_price, "STAGNANT_EXIT", 1.0)
+                        status["action"] = stagnant_trade.get("action", "CLOSE")
+                        status["position"] = self.position
+                        status["balance"] = self.balance
+                        status["realized_pnl"] = self.realized_pnl
+                        return status
 
             # 3. Compute observation
             obs = self.compute_observation(df_15m)
@@ -1562,6 +1854,17 @@ class HTFLiveBot:
                     return
 
                 self.current_price = price
+
+                # Phase 1 §3.9: Update MFE/MAE from real-time price ticks
+                if self.position != 0 and self.position_price > 0:
+                    if self.position == 1:
+                        _tick_unrealized = (price - self.position_price) / self.position_price
+                    else:
+                        _tick_unrealized = (self.position_price - price) / self.position_price
+                    if _tick_unrealized > self.mfe_pct:
+                        self.mfe_pct = _tick_unrealized
+                    if _tick_unrealized < self.mae_pct:
+                        self.mae_pct = _tick_unrealized
 
                 if not first_price_logged[0]:
                     logger.info("WS first price tick: $%.2f — stream is live", price)

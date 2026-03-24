@@ -50,6 +50,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Phase 1 — Section 3.5: hard cap on notional per trade to prevent martingale compounding
+FIXED_MAX_NOTIONAL = 3000.0  # USDT
+
 
 class MultiAssetTradingBot:
     """
@@ -76,6 +79,10 @@ class MultiAssetTradingBot:
         self.position_size = position_size
         self.portfolio_manager = portfolio_manager
 
+        # Phase 1 §3.5: Session balance — captured once at startup, used for position sizing.
+        # Using running balance would allow martingale-like compounding on gains.
+        self.session_balance = initial_balance
+
         self.position = 0  # 1 = long, -1 = short, 0 = flat
         self.position_price = 0.0
         self.current_price = 0.0  # Store latest price
@@ -86,9 +93,20 @@ class MultiAssetTradingBot:
         self.lowest_price = 0.0
         self.base_trailing_pct = 0.0
         self.position_entry_time = 0  # Track when position was opened (for time-based SL relaxation)
-        
+
+        # Phase 1 §3.9: MFE/MAE tracking per trade
+        self.mfe_pct = 0.0   # Max Favorable Excursion (best unrealized %) since open
+        self.mae_pct = 0.0   # Max Adverse Excursion (worst unrealized %, negative) since open
+
+        # Phase 1 §3.3: Partial take-profit state
+        self.sl_pct = 0.0               # SL % stored at open for R-multiple calculations
+        self.initial_position_units = 0.0  # Total units at open (for partial size math)
+        self.partial_tp_level = 0       # 0=none, 1=Level1 filled (40%), 2=Level2 filled (35%)
+        self.partial_tp1_price = 0.0    # Level 1 TP price: entry ± 1.0 × sl_pct
+        self.partial_tp2_price = 0.0    # Level 2 TP price: entry ± 2.0 × sl_pct
+
         self.pending_orders: List[Dict] = []
-        
+
         self.trades: List[Dict] = []
         self.realized_pnl = 0.0
         
@@ -289,13 +307,24 @@ class MultiAssetTradingBot:
             self.position_units = state.get('units', 0.0)
             self.position_entry_time = state.get('entry_time', time.time())  # For time-based SL relaxation
 
+            # Phase 1 partial TP state restoration
+            self.sl_pct = state.get('sl_pct', 0.0)
+            self.initial_position_units = state.get('initial_position_units', self.position_units)
+            self.partial_tp_level = state.get('partial_tp_level', 0)
+            self.partial_tp1_price = state.get('partial_tp1_price', 0.0)
+            self.partial_tp2_price = state.get('partial_tp2_price', 0.0)
+
+            # Phase 1 MFE/MAE restoration
+            self.mfe_pct = state.get('mfe_pct', 0.0)
+            self.mae_pct = state.get('mae_pct', 0.0)
+
             # Fallback for legacy state without units
             if self.position != 0 and self.position_units == 0 and self.position_price > 0:
                 logger.warning(f"⚠️ 'units' missing for {self.symbol}, estimating based on balance...")
                 # Assuming 50% position size meant trade_value ~= current_balance
                 self.position_units = self.balance / self.position_price
 
-            logger.info(f"♻️ Restored state for {self.symbol}: Pos={self.position}, Entry=${self.position_price:.2f}, SL=${self.sl_price:.2f}")
+            logger.info(f"♻️ Restored state for {self.symbol}: Pos={self.position}, Entry=${self.position_price:.2f}, SL=${self.sl_price:.2f}, PartialTP_lvl={self.partial_tp_level}")
         except Exception as e:
             logger.error(f"Failed to restore state for {self.symbol}: {e}")
 
@@ -711,60 +740,73 @@ class MultiAssetTradingBot:
                 if self.portfolio_manager and not self.portfolio_manager.can_open_position(self.symbol, 1):
                     logger.info(f"🚫 LONG blocked for {self.symbol} by Global Portfolio Manager (Correlation Limit).")
                     return None
-                    
-                base_trade_value = self.balance * self.position_size
+
+                # Phase 1 §3.5: Cap position size using session_balance (not running balance)
+                # and hard notional cap to prevent martingale compounding
+                base_trade_value = min(
+                    self.session_balance * self.position_size,
+                    FIXED_MAX_NOTIONAL
+                )
+                logger.info(
+                    f"📐 LONG position size: session_bal=${self.session_balance:.0f} "
+                    f"× {self.position_size:.0%} = ${self.session_balance * self.position_size:.0f} "
+                    f"→ capped at ${base_trade_value:.0f} (max={FIXED_MAX_NOTIONAL:.0f})"
+                )
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
-                
+
                 if scaled_trade_value < 10.0:
                     logger.info(f"🚫 LONG blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
                     return None
-                
+
                 # Split-Entry Execution (Scale-In)
                 market_trade_value = scaled_trade_value * 0.50
                 limit_trade_value = scaled_trade_value * 0.50
                 limit_price = current_price * 0.995 # 0.5% dip
-                
+
                 self.position_units = market_trade_value / current_price
                 self.position_price = current_price
                 self.position = 1
                 self.balance -= market_trade_value
-                
+
                 self.pending_orders.append({
                     "type": "LIMIT_LONG",
                     "target_price": limit_price,
                     "value": limit_trade_value
                 })
-                
+
                 trade["action"] = "OPEN_LONG_SPLIT"
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
-                
+
                 if self.portfolio_manager:
                     self.portfolio_manager.register_position(self.symbol, 1)
-                
+
                 # Calculate SL/TP for LONG position (structural)
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "long", self.symbol)
 
-                    # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
+                    # Phase 1 Regime multiplier recalibration (Section 3.2)
                     try:
                         regime_info = self.regime_detector.detect_regime(df)
                         regime_name = regime_info.regime.value
                         if regime_name == 'high_volatility':
-                            sl_pct *= 2.0  # UPDATED: Wider stops in high vol (was 1.5x)
-                            tp_pct *= 1.5
-                            logger.info(f"📊 HIGH VOL regime: widened SL by 2.0x, TP by 1.5x")
+                            sl_pct *= 1.5  # Was 2.0x — reduced to limit loss per trade
+                            tp_pct *= 1.3  # Was 1.5x — scaled back proportionally
+                            logger.info(f"📊 HIGH VOL regime: SL x1.5, TP x1.3")
                         elif regime_name == 'trending_up':
-                            tp_pct *= 1.5  # Let winners run in trend
-                            # Keep SL tight in trends (1.0x)
-                            logger.info(f"📊 TRENDING_UP regime: widened TP by 1.5x, tight SL for trend-following")
+                            # With-trend LONG: let runners run
+                            tp_pct *= 1.8  # Was 1.5x — let winners run in trend
+                            # SL stays at 1.0x (tight, in-trend)
+                            logger.info(f"📊 TRENDING_UP regime: TP x1.8, SL tight (1.0x)")
                         elif regime_name == 'trending_down':
-                            sl_pct *= 1.3  # Slightly wider for counter-trend
-                            logger.info(f"📊 TRENDING_DOWN regime: widened SL by 1.3x (counter-trend)")
+                            # Counter-trend LONG: wider SL
+                            sl_pct *= 1.3  # Unchanged — counter-trend needs buffer
+                            logger.info(f"📊 TRENDING_DOWN regime: SL x1.3 (counter-trend LONG)")
                         elif regime_name == 'ranging':
-                            sl_pct *= 1.8  # UPDATED: Wider stops to avoid chop (was 1.5x)
-                            logger.info(f"📊 RANGING regime: widened SL by 1.8x to avoid chop")
+                            sl_pct *= 1.2  # Was 1.8x — tighter to limit chop loss
+                            tp_pct *= 0.8  # New: mean-reversion moves are smaller
+                            logger.info(f"📊 RANGING regime: SL x1.2, TP x0.8 (mean-reversion)")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
 
@@ -775,12 +817,31 @@ class MultiAssetTradingBot:
                     self.position_entry_time = time.time()  # Track entry time for time-based SL relaxation
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
-                    logger.info(f"🛡️ LONG SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
+
+                    # Phase 1 §3.3: Store SL% and set partial TP prices
+                    self.sl_pct = sl_pct
+                    self.initial_position_units = self.position_units
+                    self.partial_tp_level = 0
+                    self.partial_tp1_price = current_price * (1 + 1.0 * sl_pct)  # 1R target
+                    self.partial_tp2_price = current_price * (1 + 2.0 * sl_pct)  # 2R target
+
+                    # Phase 1 §3.9: Reset MFE/MAE for new trade
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+
+                    logger.info(
+                        f"🛡️ LONG SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%}) | "
+                        f"Partial TP1: ${self.partial_tp1_price:.2f} (+{sl_pct:.2%}) | "
+                        f"Partial TP2: ${self.partial_tp2_price:.2f} (+{2*sl_pct:.2%})"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to calc SL/TP: {e}")
                     self.sl_price = current_price * 0.95   # 5% below entry
                     self.tp_price = current_price * 1.10   # 10% above entry
                     self.position_entry_time = time.time()
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+                    self.partial_tp_level = 0
             else:
                 # Already LONG - redundant
                 return None
@@ -804,60 +865,73 @@ class MultiAssetTradingBot:
                 if self.portfolio_manager and not self.portfolio_manager.can_open_position(self.symbol, -1):
                     logger.info(f"🚫 SHORT blocked for {self.symbol} by Global Portfolio Manager (Correlation Limit).")
                     return None
-                    
-                base_trade_value = self.balance * self.position_size
+
+                # Phase 1 §3.5: Cap position size using session_balance (not running balance)
+                # and hard notional cap to prevent martingale compounding
+                base_trade_value = min(
+                    self.session_balance * self.position_size,
+                    FIXED_MAX_NOTIONAL
+                )
+                logger.info(
+                    f"📐 SHORT position size: session_bal=${self.session_balance:.0f} "
+                    f"× {self.position_size:.0%} = ${self.session_balance * self.position_size:.0f} "
+                    f"→ capped at ${base_trade_value:.0f} (max={FIXED_MAX_NOTIONAL:.0f})"
+                )
                 scaled_trade_value = self.confidence_engine.apply_confidence(base_trade_value, self.last_confidence)
-                
+
                 if scaled_trade_value < 10.0:
                     logger.info(f"🚫 SHORT blocked: Scaled position size (${scaled_trade_value:.2f}) too small due to low confidence ({self.last_confidence:.2f}).")
                     return None
-                
+
                 # Split-Entry Execution (Scale-In)
                 market_trade_value = scaled_trade_value * 0.50
                 limit_trade_value = scaled_trade_value * 0.50
                 limit_price = current_price * 1.005 # Catch 0.5% wick up
-                
+
                 self.position_units = market_trade_value / current_price
                 self.position_price = current_price
                 self.position = -1
                 self.balance -= market_trade_value
-                
+
                 self.pending_orders.append({
                     "type": "LIMIT_SHORT",
                     "target_price": limit_price,
                     "value": limit_trade_value
                 })
-                
+
                 trade["action"] = "OPEN_SHORT_SPLIT"
                 trade["units"] = self.position_units
                 trade["confidence"] = self.last_confidence
-                
+
                 if self.portfolio_manager:
                     self.portfolio_manager.register_position(self.symbol, -1)
-                
+
                 # Calculate SL/TP for SHORT position (structural)
                 try:
                     df = self.fetch_data(days=3)
                     sl_pct, tp_pct = self.risk_manager.get_structural_sl_tp(df, "short", self.symbol)
 
-                    # Enhanced Regime-adaptive adjustments (Fix #1: +$223.85 projected)
+                    # Phase 1 Regime multiplier recalibration (Section 3.2)
                     try:
                         regime_info = self.regime_detector.detect_regime(df)
                         regime_name = regime_info.regime.value
                         if regime_name == 'high_volatility':
-                            sl_pct *= 2.0  # UPDATED: Wider stops in high vol (was 1.5x)
-                            tp_pct *= 1.5
-                            logger.info(f"📊 HIGH VOL regime: widened SL by 2.0x, TP by 1.5x")
+                            sl_pct *= 1.5  # Was 2.0x — reduced to limit loss per trade
+                            tp_pct *= 1.3  # Was 1.5x — scaled back proportionally
+                            logger.info(f"📊 HIGH VOL regime: SL x1.5, TP x1.3")
                         elif regime_name == 'trending_down':
-                            tp_pct *= 1.5  # Let winners run in downtrend
-                            # Keep SL tight in trends (1.0x)
-                            logger.info(f"📊 TRENDING_DOWN regime: widened TP by 1.5x, tight SL for trend-following")
+                            # With-trend SHORT: let runners run
+                            tp_pct *= 1.8  # Was 1.5x — let winners run in downtrend
+                            # SL stays at 1.0x (tight, in-trend)
+                            logger.info(f"📊 TRENDING_DOWN regime: TP x1.8, SL tight (1.0x)")
                         elif regime_name == 'trending_up':
-                            sl_pct *= 1.3  # Slightly wider for counter-trend
-                            logger.info(f"📊 TRENDING_UP regime: widened SL by 1.3x (counter-trend)")
+                            # Counter-trend SHORT: wider SL
+                            sl_pct *= 1.3  # Unchanged — counter-trend needs buffer
+                            logger.info(f"📊 TRENDING_UP regime: SL x1.3 (counter-trend SHORT)")
                         elif regime_name == 'ranging':
-                            sl_pct *= 1.8  # UPDATED: Wider stops to avoid chop (was 1.5x)
-                            logger.info(f"📊 RANGING regime: widened SL by 1.8x to avoid chop")
+                            sl_pct *= 1.2  # Was 1.8x — tighter to limit chop loss
+                            tp_pct *= 0.8  # New: mean-reversion moves are smaller
+                            logger.info(f"📊 RANGING regime: SL x1.2, TP x0.8 (mean-reversion)")
                     except Exception as e:
                         logger.warning(f"Regime-adaptive SL/TP failed: {e}")
 
@@ -868,12 +942,31 @@ class MultiAssetTradingBot:
                     self.position_entry_time = time.time()  # Track entry time for time-based SL relaxation
                     trade["sl"] = self.sl_price
                     trade["tp"] = self.tp_price
-                    logger.info(f"🛡️ SHORT SL: ${self.sl_price:.2f} (-{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (+{tp_pct:.2%})")
+
+                    # Phase 1 §3.3: Store SL% and set partial TP prices
+                    self.sl_pct = sl_pct
+                    self.initial_position_units = self.position_units
+                    self.partial_tp_level = 0
+                    self.partial_tp1_price = current_price * (1 - 1.0 * sl_pct)  # 1R target for SHORT
+                    self.partial_tp2_price = current_price * (1 - 2.0 * sl_pct)  # 2R target for SHORT
+
+                    # Phase 1 §3.9: Reset MFE/MAE for new trade
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+
+                    logger.info(
+                        f"🛡️ SHORT SL: ${self.sl_price:.2f} (+{sl_pct:.2%}) | TP: ${self.tp_price:.2f} (-{tp_pct:.2%}) | "
+                        f"Partial TP1: ${self.partial_tp1_price:.2f} (-{sl_pct:.2%}) | "
+                        f"Partial TP2: ${self.partial_tp2_price:.2f} (-{2*sl_pct:.2%})"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to calc SL/TP: {e}")
                     self.sl_price = current_price * 1.05  # 5% above entry
                     self.tp_price = current_price * 0.90  # 10% below entry
                     self.position_entry_time = time.time()
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+                    self.partial_tp_level = 0
             else:
                 # Already SHORT - redundant
                 return None
@@ -923,6 +1016,164 @@ class MultiAssetTradingBot:
             for f_order in filled_orders:
                 self.pending_orders.remove(f_order)
         
+        # Phase 1 §3.9: Update MFE/MAE every tick while in position
+        if self.position != 0 and self.position_price > 0:
+            if self.position == 1:  # LONG
+                unrealized_pct = (current_price - self.position_price) / self.position_price
+            else:  # SHORT
+                unrealized_pct = (self.position_price - current_price) / self.position_price
+            self.mfe_pct = max(self.mfe_pct, unrealized_pct)
+            self.mae_pct = min(self.mae_pct, unrealized_pct)
+
+        # Phase 1 §3.3: Partial Take Profit logic (simulation-side)
+        # Check if Level 1 or Level 2 TP has been hit; execute partial close
+        if self.position != 0 and self.position_price > 0:
+            if self.position == 1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
+                if current_price >= self.partial_tp1_price:
+                    # Level 1: close 40% at 1R
+                    partial_units = self.initial_position_units * 0.40
+                    partial_units = min(partial_units, self.position_units)
+                    if partial_units > 0:
+                        partial_pnl = (self.partial_tp1_price - self.position_price) * partial_units
+                        self.balance += self.position_price * partial_units + partial_pnl
+                        self.realized_pnl += partial_pnl
+                        self.position_units -= partial_units
+                        self.partial_tp_level = 1
+                        # Move SL to break-even
+                        old_sl = self.sl_price
+                        self.sl_price = self.position_price
+                        logger.info(
+                            f"✅ PARTIAL TP1 (LONG) for {self.symbol}: Closed {partial_units:.4f} units "
+                            f"@ ${self.partial_tp1_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                            f"SL moved to break-even ${self.sl_price:.2f} (was ${old_sl:.2f}) | "
+                            f"Remaining: {self.position_units:.4f} units"
+                        )
+
+            elif self.position == 1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
+                if current_price >= self.partial_tp2_price:
+                    # Level 2: close 35% of original at 2R
+                    partial_units = self.initial_position_units * 0.35
+                    partial_units = min(partial_units, self.position_units)
+                    if partial_units > 0:
+                        partial_pnl = (self.partial_tp2_price - self.position_price) * partial_units
+                        self.balance += self.position_price * partial_units + partial_pnl
+                        self.realized_pnl += partial_pnl
+                        self.position_units -= partial_units
+                        self.partial_tp_level = 2
+                        # Lock trailing stop at 50% of Level 2 profit
+                        level2_gain = self.partial_tp2_price - self.position_price
+                        new_trailing_sl = self.position_price + level2_gain * 0.50
+                        if new_trailing_sl > self.sl_price:
+                            old_sl = self.sl_price
+                            self.sl_price = new_trailing_sl
+                            logger.info(
+                                f"✅ PARTIAL TP2 (LONG) for {self.symbol}: Closed {partial_units:.4f} units "
+                                f"@ ${self.partial_tp2_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                                f"Trailing SL locked at 50%% of L2 gain → ${self.sl_price:.2f} (was ${old_sl:.2f}) | "
+                                f"Remaining: {self.position_units:.4f} units"
+                            )
+                        else:
+                            logger.info(
+                                f"✅ PARTIAL TP2 (LONG) for {self.symbol}: Closed {partial_units:.4f} units "
+                                f"@ ${self.partial_tp2_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                                f"Remaining: {self.position_units:.4f} units (SL already ahead)"
+                            )
+
+            elif self.position == -1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
+                if current_price <= self.partial_tp1_price:
+                    # Level 1: close 40% at 1R (for SHORT, price moves down)
+                    partial_units = self.initial_position_units * 0.40
+                    partial_units = min(partial_units, self.position_units)
+                    if partial_units > 0:
+                        partial_pnl = (self.position_price - self.partial_tp1_price) * partial_units
+                        self.balance += self.position_price * partial_units + partial_pnl
+                        self.realized_pnl += partial_pnl
+                        self.position_units -= partial_units
+                        self.partial_tp_level = 1
+                        # Move SL to break-even
+                        old_sl = self.sl_price
+                        self.sl_price = self.position_price
+                        logger.info(
+                            f"✅ PARTIAL TP1 (SHORT) for {self.symbol}: Closed {partial_units:.4f} units "
+                            f"@ ${self.partial_tp1_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                            f"SL moved to break-even ${self.sl_price:.2f} (was ${old_sl:.2f}) | "
+                            f"Remaining: {self.position_units:.4f} units"
+                        )
+
+            elif self.position == -1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
+                if current_price <= self.partial_tp2_price:
+                    # Level 2: close 35% of original at 2R (for SHORT)
+                    partial_units = self.initial_position_units * 0.35
+                    partial_units = min(partial_units, self.position_units)
+                    if partial_units > 0:
+                        partial_pnl = (self.position_price - self.partial_tp2_price) * partial_units
+                        self.balance += self.position_price * partial_units + partial_pnl
+                        self.realized_pnl += partial_pnl
+                        self.position_units -= partial_units
+                        self.partial_tp_level = 2
+                        # Lock trailing stop at 50% of Level 2 profit
+                        level2_gain = self.position_price - self.partial_tp2_price
+                        new_trailing_sl = self.position_price - level2_gain * 0.50
+                        if new_trailing_sl < self.sl_price:
+                            old_sl = self.sl_price
+                            self.sl_price = new_trailing_sl
+                            logger.info(
+                                f"✅ PARTIAL TP2 (SHORT) for {self.symbol}: Closed {partial_units:.4f} units "
+                                f"@ ${self.partial_tp2_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                                f"Trailing SL locked at 50%% of L2 gain → ${self.sl_price:.2f} (was ${old_sl:.2f}) | "
+                                f"Remaining: {self.position_units:.4f} units"
+                            )
+                        else:
+                            logger.info(
+                                f"✅ PARTIAL TP2 (SHORT) for {self.symbol}: Closed {partial_units:.4f} units "
+                                f"@ ${self.partial_tp2_price:.2f} | PnL=${partial_pnl:+.2f} | "
+                                f"Remaining: {self.position_units:.4f} units (SL already ahead)"
+                            )
+
+        # Phase 1 §3.4: Time-based exit for stagnant trades (6h with PnL between -0.3% and +0.5%)
+        if self.position != 0 and self.position_price > 0 and self.position_entry_time > 0:
+            time_in_position = time.time() - self.position_entry_time
+            if time_in_position > 21600:  # 6 hours = 21600 seconds
+                if self.position == 1:
+                    unrealized_pct = (current_price - self.position_price) / self.position_price
+                else:
+                    unrealized_pct = (self.position_price - current_price) / self.position_price
+                if -0.003 <= unrealized_pct <= 0.005:
+                    # Stagnant trade — close at market
+                    close_action = 2 if self.position == 1 else 1
+                    logger.info(
+                        f"⏱️ TIME-BASED STAGNANT EXIT for {self.symbol}: "
+                        f"In position {time_in_position/3600:.1f}h, PnL={unrealized_pct:+.3%} "
+                        f"(within [-0.3%, +0.5%] stagnant range) → closing"
+                    )
+                    trade = self.execute_trade(close_action, current_price)
+                    # Log MFE/MAE with the trade
+                    if trade:
+                        trade['mfe_pct'] = self.mfe_pct
+                        trade['mae_pct'] = self.mae_pct
+                        trade['exit_reason'] = 'time_based_stagnant'
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+                    self.partial_tp_level = 0
+                    total_equity = self.balance
+                    self.last_equity = total_equity
+                    return {
+                        "symbol": self.symbol,
+                        "timestamp": datetime.now().isoformat(),
+                        "price": current_price,
+                        "raw_action": "HOLD",
+                        "filtered_action": "CLOSE_LONG" if self.position == 0 else "CLOSE_SHORT",
+                        "reason": "time_based_stagnant",
+                        "position": 0,
+                        "balance": self.balance,
+                        "equity": total_equity,
+                        "realized_pnl": self.realized_pnl,
+                        "unrealized_pnl": 0,
+                        "trade": trade,
+                        "sl": 0,
+                        "tp": 0
+                    }
+
         # Check SL/TP Hits first
         if self.position != 0:
             hit_sl = False
@@ -1003,16 +1254,31 @@ class MultiAssetTradingBot:
                         reason = "TRAILING_STOP"
 
                 if hit_sl or hit_tp or hit_trailing:
+                    # Capture MFE/MAE before closing
+                    mfe_at_close = self.mfe_pct
+                    mae_at_close = self.mae_pct
                     trade = self.execute_trade(2, current_price) # Sell to close
                     if hit_sl:
                         self.last_loss_time = time.time()
-                    logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
-                    
+                    logger.info(
+                        f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f} | "
+                        f"MFE={mfe_at_close:+.3%} MAE={mae_at_close:+.3%}"
+                    )
+                    # Attach MFE/MAE to trade record
+                    if trade:
+                        trade['mfe_pct'] = mfe_at_close
+                        trade['mae_pct'] = mae_at_close
+                        trade['exit_reason'] = reason
+                    # Reset MFE/MAE and partial TP state
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+                    self.partial_tp_level = 0
+
                     # Return result immediately
                     # Calculate unrealized (now 0)
                     total_equity = self.balance
                     self.last_equity = total_equity
-                    
+
                     return {
                         "symbol": self.symbol,
                         "timestamp": datetime.now().isoformat(),
@@ -1080,15 +1346,30 @@ class MultiAssetTradingBot:
                         reason = "TRAILING_STOP"
                     
                 if hit_sl or hit_tp or hit_trailing:
+                    # Capture MFE/MAE before closing
+                    mfe_at_close = self.mfe_pct
+                    mae_at_close = self.mae_pct
                     trade = self.execute_trade(1, current_price) # Buy to close
                     if hit_sl:
                         self.last_loss_time = time.time()
-                    logger.info(f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f}")
-                    
+                    logger.info(
+                        f"🛑 {reason} triggered for {self.symbol} @ ${current_price:.2f} | "
+                        f"MFE={mfe_at_close:+.3%} MAE={mae_at_close:+.3%}"
+                    )
+                    # Attach MFE/MAE to trade record
+                    if trade:
+                        trade['mfe_pct'] = mfe_at_close
+                        trade['mae_pct'] = mae_at_close
+                        trade['exit_reason'] = reason
+                    # Reset MFE/MAE and partial TP state
+                    self.mfe_pct = 0.0
+                    self.mae_pct = 0.0
+                    self.partial_tp_level = 0
+
                     # Return result immediately
                     total_equity = self.balance
                     self.last_equity = total_equity
-                    
+
                     return {
                         "symbol": self.symbol,
                         "timestamp": datetime.now().isoformat(),
@@ -1153,13 +1434,21 @@ class MultiAssetTradingBot:
             # LONG but market is now deeply bearish — emergency exit
             logger.warning(
                 f"💀 CONVICTION COLLAPSE for {self.symbol}: LONG but composite={composite:+.3f} "
-                f"(threshold=-{COLLAPSE_THRESHOLD}). Emergency exit!"
+                f"(threshold=-{COLLAPSE_THRESHOLD}). Emergency exit! MFE={self.mfe_pct:+.3%} MAE={self.mae_pct:+.3%}"
             )
+            mfe_at_close, mae_at_close = self.mfe_pct, self.mae_pct
             trade = self.execute_trade(2, current_price)  # Sell to close
-            
+            if trade:
+                trade['mfe_pct'] = mfe_at_close
+                trade['mae_pct'] = mae_at_close
+                trade['exit_reason'] = 'conviction_collapse'
+            self.mfe_pct = 0.0
+            self.mae_pct = 0.0
+            self.partial_tp_level = 0
+
             total_equity = self.balance
             self.last_equity = total_equity
-            
+
             return {
                 "symbol": self.symbol,
                 "timestamp": datetime.now().isoformat(),
@@ -1176,18 +1465,26 @@ class MultiAssetTradingBot:
                 "sl": 0,
                 "tp": 0
             }
-        
+
         if self.position == -1 and composite > COLLAPSE_THRESHOLD:
             # SHORT but market is now deeply bullish — emergency exit
             logger.warning(
                 f"💀 CONVICTION COLLAPSE for {self.symbol}: SHORT but composite={composite:+.3f} "
-                f"(threshold=+{COLLAPSE_THRESHOLD}). Emergency exit!"
+                f"(threshold=+{COLLAPSE_THRESHOLD}). Emergency exit! MFE={self.mfe_pct:+.3%} MAE={self.mae_pct:+.3%}"
             )
+            mfe_at_close, mae_at_close = self.mfe_pct, self.mae_pct
             trade = self.execute_trade(1, current_price)  # Buy to close
-            
+            if trade:
+                trade['mfe_pct'] = mfe_at_close
+                trade['mae_pct'] = mae_at_close
+                trade['exit_reason'] = 'conviction_collapse'
+            self.mfe_pct = 0.0
+            self.mae_pct = 0.0
+            self.partial_tp_level = 0
+
             total_equity = self.balance
             self.last_equity = total_equity
-            
+
             return {
                 "symbol": self.symbol,
                 "timestamp": datetime.now().isoformat(),
@@ -1554,19 +1851,24 @@ class MultiAssetOrchestrator:
     def log_trade_to_file(self, symbol: str, trade_data: dict):
         """Log trade to storage."""
         try:
+            trade_obj = trade_data.get('trade', {}) or {}
             # Prepare trade record
             record = {
                 "timestamp": datetime.now().isoformat(),
                 "symbol": symbol,
                 "asset": symbol,
-                "action": trade_data.get('trade', {}).get('action', trade_data.get('filtered_action', 'HOLD')),
-                "price": trade_data.get('trade', {}).get('price', trade_data.get('price', 0)),
-                "pnl": trade_data.get('trade', {}).get('pnl', 0),
+                "action": trade_obj.get('action', trade_data.get('filtered_action', 'HOLD')),
+                "price": trade_obj.get('price', trade_data.get('price', 0)),
+                "pnl": trade_obj.get('pnl', 0),
                 "balance": trade_data.get('balance', 0),
                 "position": trade_data.get('position', 0),
-                "reason": trade_data.get('reason', 'model')
+                "reason": trade_data.get('reason', 'model'),
+                # Phase 1 §3.9: MFE/MAE data
+                "mfe_pct": trade_obj.get('mfe_pct', None),
+                "mae_pct": trade_obj.get('mae_pct', None),
+                "exit_reason": trade_obj.get('exit_reason', trade_data.get('reason', 'model')),
             }
-            
+
             self.storage.log_trade(record)
         except Exception as e:
             logger.error(f"Failed to log trade: {e}")
@@ -1595,6 +1897,15 @@ class MultiAssetOrchestrator:
                 'units': bot.position_units,
                 'equity': bot.last_equity,
                 'entry_time': bot.position_entry_time,  # For time-based SL relaxation
+                # Phase 1 §3.3: Partial TP state
+                'sl_pct': bot.sl_pct,
+                'initial_position_units': bot.initial_position_units,
+                'partial_tp_level': bot.partial_tp_level,
+                'partial_tp1_price': bot.partial_tp1_price,
+                'partial_tp2_price': bot.partial_tp2_price,
+                # Phase 1 §3.9: MFE/MAE tracking
+                'mfe_pct': bot.mfe_pct,
+                'mae_pct': bot.mae_pct,
                 'analysis': bot.get_market_analysis() # Add analysis data
             }
 
