@@ -24,7 +24,8 @@ ALERTS_FILE = Path("logs/htf_pending_alerts.jsonl")
 OFFSET_FILE = Path("logs/.alerter_offset")
 CHECK_INTERVAL = 5  # seconds between file checks
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+# Use dedicated alert bot token (separate from AI bot), fallback to main token
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 MAX_RETRIES = 3
