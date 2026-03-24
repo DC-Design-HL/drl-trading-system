@@ -454,6 +454,34 @@ class HTFLiveBot:
         except Exception as exc:
             logger.warning("Balance sync failed: %s — keeping state balance $%.2f", exc, self.balance)
 
+    def _sync_position_from_exchange(self) -> None:
+        """
+        Sync position_units with the actual exchange position.
+        The bot calculates its own units from balance*pct/price, but the
+        exchange may fill a different quantity. Exchange is source of truth.
+        """
+        if self.dry_run or self.position == 0:
+            return
+        try:
+            from src.api.futures_executor import get_futures_executor
+            executor = get_futures_executor()
+            if executor is None:
+                return
+            positions = executor.connector.get_positions()
+            for p in positions:
+                if p.get("symbol") == self.symbol:
+                    real_amt = abs(float(p.get("positionAmt", 0)))
+                    if real_amt > 0 and abs(real_amt - self.position_units) > 0.0001:
+                        logger.info(
+                            "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
+                            self.position_units, real_amt,
+                        )
+                        self.position_units = real_amt
+                        self._save_state()
+                    return
+        except Exception as exc:
+            logger.warning("Position sync failed: %s", exc)
+
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
         self.trades.append(trade)
@@ -1321,11 +1349,16 @@ class HTFLiveBot:
         )
 
         if not self.dry_run:
-            self._log_trade(trade)
             self._mirror_testnet(trade)
-            # Sync balance from exchange after opening position
+            # Sync balance AND position size from exchange after opening
             self._sync_balance_from_exchange()
+            self._sync_position_from_exchange()
+            # Update trade dict with real exchange units BEFORE logging/alerting
+            trade["units"] = self.position_units
+            trade["trade_value"] = self.position_units * price
+            self._log_trade(trade)
         else:
+            self._log_trade(trade)
             logger.info("[DRY RUN] Trade not executed")
 
         return trade
