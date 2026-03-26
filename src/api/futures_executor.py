@@ -1123,17 +1123,13 @@ class FuturesTestnetExecutor:
 
         # Total balance and PnL % from account
         total_balance = 0.0
-        initial_balance = 0.0
+        initial_balance = 5000.0  # Binance testnet starting balance
         balance_pnl_pct = 0.0
         try:
             if not account:
                 account = self.connector.get_account()
             total_balance = float(account.get("totalWalletBalance", 0))
-            # Initial balance = total balance - total realized PnL
-            # (approximation: assumes all PnL is from trading)
-            initial_balance = total_balance - realized_pnl
-            if initial_balance > 0:
-                balance_pnl_pct = (realized_pnl / initial_balance) * 100
+            balance_pnl_pct = ((total_balance - initial_balance) / initial_balance) * 100
         except Exception:
             pass
 

@@ -207,7 +207,7 @@ class HTFLiveBot:
     def __init__(
         self,
         dry_run: bool = True,
-        initial_balance: float = 10_000.0,
+        initial_balance: float = 5_000.0,
         interval_minutes: int = 15,
     ):
         self.symbol = SYMBOL
@@ -519,7 +519,9 @@ class HTFLiveBot:
                 )
 
             self.balance = real_balance
-            self.initial_balance = real_balance  # Reset baseline for PnL calculations
+            # Keep initial_balance as the original testnet starting balance ($5,000)
+            # so that PnL % in alerts reflects total performance, not per-session.
+            # session_balance is used for position sizing only.
             self.session_balance = real_balance  # Update session balance for position sizing cap
             self._save_state()
         except Exception as exc:
