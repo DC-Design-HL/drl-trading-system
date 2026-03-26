@@ -1744,12 +1744,37 @@ class HTFLiveBot:
         Mirror a bot decision to futures testnet.
 
         OPEN_LONG / OPEN_SHORT → places real futures order + SL/TP exchange orders.
-        CLOSE_LONG / CLOSE_SHORT → skipped (exchange exits autonomously via SL/TP).
+        CLOSE (non-reverse) → skipped (exchange exits autonomously via SL/TP).
+        REVERSE_CLOSE → close exchange position first (so the subsequent OPEN
+        doesn't just partially reduce the existing position).
         """
         if not self.testnet_executor:
             return
         action = trade.get("action", "")
-        # Exchange handles exits via SL/TP orders — do NOT send a close
+        symbol = trade.get("symbol", self.symbol)
+        # Reverse close: must close exchange position before opening opposite direction
+        if "REVERSE_CLOSE" in action:
+            try:
+                from src.api.futures_executor import get_futures_executor
+                executor = get_futures_executor()
+                if executor:
+                    positions = executor.connector.get_positions()
+                    for p in positions:
+                        if p.get("symbol") == symbol:
+                            amt = float(p.get("positionAmt", 0))
+                            if amt != 0:
+                                side = "SELL" if amt > 0 else "BUY"
+                                qty = abs(amt)
+                                executor.connector.place_market_order(symbol, side, qty)
+                                logger.info(
+                                    "Testnet mirror: REVERSE CLOSE %s %s qty=%.6f",
+                                    symbol, side, qty,
+                                )
+                            break
+            except Exception as exc:
+                logger.warning("Testnet mirror reverse close failed: %s", exc)
+            return
+        # Normal close (SL/TP hit) — exchange handles exits autonomously
         if "CLOSE" in action:
             logger.debug("Testnet mirror: skipping %s — exchange exits autonomously", action)
             return
