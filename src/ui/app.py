@@ -405,7 +405,7 @@ def _classify_exit_reason(close_trade: dict, all_trades: list) -> str:
     return 'EXIT'
 
 
-def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, timeframe: str = '1h', symbol: str = 'BTC/USDT') -> str:
+def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, timeframe: str = '1h', symbol: str = 'BTC/USDT', market_structure: dict = None) -> str:
     """Create TradingView Lightweight Charts HTML with WebSocket live updates."""
     if df.empty:
         return "<div style='color: #888; text-align: center; padding: 50px;'>No market data available</div>"
@@ -916,7 +916,179 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             }}
             
             connectWebSocket();
-            
+
+            // ── Market Structure Overlay (BOS/CHOCH/Swing Points) ──
+            const msData = {json.dumps(market_structure) if market_structure else 'null'};
+            if (msData) {{
+                // --- Swing High markers (green triangles above bars) ---
+                const swingHighMarkers = (msData.swing_highs || []).map(sh => ({{
+                    time: sh.time,
+                    position: 'aboveBar',
+                    color: '#00e676',
+                    shape: 'arrowDown',
+                    text: '▲',
+                }}));
+
+                // --- Swing Low markers (red triangles below bars) ---
+                const swingLowMarkers = (msData.swing_lows || []).map(sl => ({{
+                    time: sl.time,
+                    position: 'belowBar',
+                    color: '#ff5252',
+                    shape: 'arrowUp',
+                    text: '▼',
+                }}));
+
+                // Merge swing markers onto a dedicated invisible series
+                const allSwingMarkers = [...swingHighMarkers, ...swingLowMarkers]
+                    .sort((a, b) => a.time - b.time);
+
+                if (allSwingMarkers.length > 0) {{
+                    const swingSeries = chart.addLineSeries({{
+                        color: 'transparent',
+                        lineWidth: 0,
+                        lastValueVisible: false,
+                        priceLineVisible: false,
+                        crosshairMarkerVisible: false,
+                    }});
+                    swingSeries.setData(candleData.map(c => ({{ time: c.time, value: c.close }})));
+                    swingSeries.setMarkers(allSwingMarkers);
+                }}
+
+                // --- Swing High structure line (connect highs) ---
+                const swingHighLine = (msData.swing_highs || [])
+                    .map(sh => ({{ time: sh.time, value: sh.price }}))
+                    .sort((a, b) => a.time - b.time);
+
+                if (swingHighLine.length >= 2) {{
+                    const shLineSeries = chart.addLineSeries({{
+                        color: 'rgba(0, 230, 118, 0.35)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        lastValueVisible: false,
+                        priceLineVisible: false,
+                        crosshairMarkerVisible: false,
+                    }});
+                    shLineSeries.setData(swingHighLine);
+                }}
+
+                // --- Swing Low structure line (connect lows) ---
+                const swingLowLine = (msData.swing_lows || [])
+                    .map(sl => ({{ time: sl.time, value: sl.price }}))
+                    .sort((a, b) => a.time - b.time);
+
+                if (swingLowLine.length >= 2) {{
+                    const slLineSeries = chart.addLineSeries({{
+                        color: 'rgba(255, 82, 82, 0.35)',
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        lastValueVisible: false,
+                        priceLineVisible: false,
+                        crosshairMarkerVisible: false,
+                    }});
+                    slLineSeries.setData(swingLowLine);
+                }}
+
+                // --- BOS signals as horizontal lines with markers ---
+                const bosSignals = msData.bos_signals || [];
+                bosSignals.forEach((bos, idx) => {{
+                    const isFake = bos.is_fake;
+                    const isBullish = bos.direction === 'bullish';
+                    const lineColor = isBullish
+                        ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
+                        : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
+                    const lineStyle = isFake
+                        ? LightweightCharts.LineStyle.SparseDotted
+                        : LightweightCharts.LineStyle.Dashed;
+                    const label = isBullish
+                        ? (isFake ? 'BOS↑(fake)' : 'BOS↑')
+                        : (isFake ? 'BOS↓(fake)' : 'BOS↓');
+
+                    // Draw a short horizontal line at the BOS level
+                    // spanning from the signal time back a few candles
+                    const sigTime = bos.time;
+                    const candleTimes = candleData.map(c => c.time);
+                    const sigIdx = candleTimes.indexOf(sigTime);
+                    const startIdx = Math.max(0, sigIdx - 8);
+                    const endIdx = Math.min(candleTimes.length - 1, sigIdx + 2);
+
+                    if (sigIdx >= 0 && startIdx < endIdx) {{
+                        const bosLine = chart.addLineSeries({{
+                            color: lineColor,
+                            lineWidth: 2,
+                            lineStyle: lineStyle,
+                            lastValueVisible: false,
+                            priceLineVisible: false,
+                            crosshairMarkerVisible: false,
+                        }});
+                        bosLine.setData([
+                            {{ time: candleTimes[startIdx], value: bos.level }},
+                            {{ time: candleTimes[endIdx], value: bos.level }},
+                        ]);
+                        // Add label as marker on this line
+                        bosLine.setMarkers([{{
+                            time: candleTimes[Math.min(sigIdx, endIdx)],
+                            position: isBullish ? 'aboveBar' : 'belowBar',
+                            color: lineColor,
+                            shape: 'square',
+                            text: label,
+                        }}]);
+                    }}
+                }});
+
+                // --- CHOCH signals as horizontal lines with markers ---
+                const chochSignals = msData.choch_signals || [];
+                chochSignals.forEach((choch, idx) => {{
+                    const isFake = choch.is_fake;
+                    const isBullish = choch.direction === 'bullish';
+                    const lineColor = isBullish
+                        ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
+                        : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
+                    const lineStyle = isFake
+                        ? LightweightCharts.LineStyle.SparseDotted
+                        : LightweightCharts.LineStyle.Dashed;
+                    const label = isBullish
+                        ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑')
+                        : (isFake ? 'CHOCH↓(fake)' : 'CHOCH↓');
+
+                    const sigTime = choch.time;
+                    const candleTimes = candleData.map(c => c.time);
+                    const sigIdx = candleTimes.indexOf(sigTime);
+                    const startIdx = Math.max(0, sigIdx - 8);
+                    const endIdx = Math.min(candleTimes.length - 1, sigIdx + 2);
+
+                    if (sigIdx >= 0 && startIdx < endIdx) {{
+                        const chochLine = chart.addLineSeries({{
+                            color: lineColor,
+                            lineWidth: 2,
+                            lineStyle: lineStyle,
+                            lastValueVisible: false,
+                            priceLineVisible: false,
+                            crosshairMarkerVisible: false,
+                        }});
+                        chochLine.setData([
+                            {{ time: candleTimes[startIdx], value: choch.level }},
+                            {{ time: candleTimes[endIdx], value: choch.level }},
+                        ]);
+                        chochLine.setMarkers([{{
+                            time: candleTimes[Math.min(sigIdx, endIdx)],
+                            position: isBullish ? 'aboveBar' : 'belowBar',
+                            color: lineColor,
+                            shape: 'square',
+                            text: label,
+                        }}]);
+                    }}
+                }});
+
+                // Log summary
+                console.log('[chart] Market structure loaded:',
+                    'swingH=' + (msData.swing_highs || []).length,
+                    'swingL=' + (msData.swing_lows || []).length,
+                    'BOS=' + bosSignals.length,
+                    'CHOCH=' + chochSignals.length,
+                    'trend=' + msData.trend,
+                    'conf=' + msData.confidence);
+            }}
+
             // Cleanup on page unload
             window.addEventListener('beforeunload', function() {{
                 if (ws) ws.close();
@@ -1874,7 +2046,24 @@ def main():
                         trades = _trades_resp.json().get('trades', [])
                 except Exception:
                     trades = []
-            chart_html = create_tradingview_chart_with_websocket(df, trades, st.session_state.timeframe, st.session_state.selected_asset)
+            # Fetch market structure (BOS/CHOCH) signals for chart overlay
+            _ms_data = None
+            try:
+                _api_ms = get_api_url()
+                _sym_ms = st.session_state.selected_asset.replace('/', '').upper()
+                _tf_ms = st.session_state.timeframe
+                _ms_resp = requests.get(
+                    f'{_api_ms}/api/market-structure?symbol={_sym_ms}&timeframe={_tf_ms}&limit=500',
+                    timeout=10
+                )
+                if _ms_resp.ok:
+                    _ms_data = _ms_resp.json()
+                    if _ms_data.get('error'):
+                        _ms_data = None
+            except Exception:
+                _ms_data = None
+
+            chart_html = create_tradingview_chart_with_websocket(df, trades, st.session_state.timeframe, st.session_state.selected_asset, market_structure=_ms_data)
             # Append timestamp comment to force re-render since components.html doesn't support key
             # Create a placeholder for the chart to force re-rendering
             chart_placeholder = st.empty()
@@ -1891,7 +2080,15 @@ def main():
             # Info about trade markers
             num_opens = len([t for t in trades if 'OPEN' in t.get('action', '')])
             num_closes = len([t for t in trades if 'CLOSE' in t.get('action', '')])
-            st.caption(f"📍 {num_opens} entries + {num_closes} exits on chart • 🟢 LONG ▲ • 🔴 SHORT ▼ • EXIT(SL) ■ • EXIT(TP) ■ • EXIT ●")
+            _ms_info = ""
+            if _ms_data:
+                _n_sh = len(_ms_data.get('swing_highs', []))
+                _n_sl = len(_ms_data.get('swing_lows', []))
+                _n_bos = len(_ms_data.get('bos_signals', []))
+                _n_choch = len(_ms_data.get('choch_signals', []))
+                _ms_trend = _ms_data.get('trend', 'ranging')
+                _ms_info = f" | 🏗 Structure: {_n_sh}H/{_n_sl}L swings, {_n_bos} BOS, {_n_choch} CHOCH, trend={_ms_trend}"
+            st.caption(f"📍 {num_opens} entries + {num_closes} exits on chart • 🟢 LONG ▲ • 🔴 SHORT ▼ • EXIT(SL) ■ • EXIT(TP) ■ • EXIT ●{_ms_info}")
             
             # Trading Controls Section
             st.markdown("---")

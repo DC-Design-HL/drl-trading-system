@@ -646,6 +646,113 @@ def get_market_analysis():
     return jsonify(response)
 
 
+@app.route('/api/market-structure')
+def get_market_structure():
+    """Get BOS/CHOCH market structure signals for chart overlay."""
+    import requests as _req
+    import os as _os
+    import pandas as pd
+    from flask import request as flask_req
+
+    symbol = flask_req.args.get('symbol', 'BTCUSDT').upper().replace('/', '')
+    timeframe = flask_req.args.get('timeframe', '5m')
+    limit = min(int(flask_req.args.get('limit', 500)), 1000)
+
+    try:
+        # Fetch OHLCV data
+        base_url = _os.environ.get("BINANCE_FUTURES_URL", "https://data-api.binance.vision")
+        url = base_url + "/api/v3/klines"
+        resp = _req.get(url, params={"symbol": symbol, "interval": timeframe, "limit": limit}, timeout=15)
+        data = resp.json()
+
+        if isinstance(data, dict) and data.get('code'):
+            logger.error(f"Binance klines error for market-structure {symbol}: {data}")
+            return jsonify({"error": "Failed to fetch OHLCV data"}), 500
+
+        # Build DataFrame
+        df = pd.DataFrame(data, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_volume', 'trades', 'taker_buy_base',
+            'taker_buy_quote', 'ignore'
+        ])
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = df[col].astype(float)
+        # Convert timestamps to seconds
+        df['time_s'] = df['timestamp'].astype(int) // 1000
+        df.index = pd.to_datetime(df['timestamp'].astype(int), unit='ms')
+
+        if len(df) < 15:
+            return jsonify({
+                "swing_highs": [], "swing_lows": [],
+                "bos_signals": [], "choch_signals": [],
+                "trend": "ranging", "confidence": 0.0,
+                "error": "Insufficient data"
+            })
+
+        # Run market structure analysis
+        from src.signals.bos_choch import MarketStructure
+        ms = MarketStructure()
+
+        # Detect swing points
+        swings = ms.detect_swing_points(df)
+        trend = ms.determine_trend(swings)
+
+        # Detect BOS and CHOCH
+        bos_signals = ms.detect_bos(df, swings, trend)
+        choch_signals = ms.detect_choch(df, swings, trend)
+
+        # Check for fakes
+        for sig in bos_signals:
+            sig.is_fake = ms.is_fake_bos(df, sig)
+        for sig in choch_signals:
+            sig.is_fake = ms.is_fake_choch(df, sig)
+
+        # Also run the full get_signals for confidence
+        full_result = ms.get_signals(df)
+
+        # Build response
+        time_values = df['time_s'].values
+
+        swing_highs = []
+        swing_lows = []
+        for sp in swings:
+            entry = {"time": int(time_values[sp.index]), "price": sp.price}
+            if sp.kind == "high":
+                swing_highs.append(entry)
+            else:
+                swing_lows.append(entry)
+
+        bos_list = []
+        for sig in bos_signals:
+            bos_list.append({
+                "time": int(time_values[sig.bar_index]) if sig.bar_index < len(time_values) else int(time_values[-1]),
+                "level": sig.level,
+                "direction": sig.direction,
+                "is_fake": sig.is_fake,
+            })
+
+        choch_list = []
+        for sig in choch_signals:
+            choch_list.append({
+                "time": int(time_values[sig.bar_index]) if sig.bar_index < len(time_values) else int(time_values[-1]),
+                "level": sig.level,
+                "direction": sig.direction,
+                "is_fake": sig.is_fake,
+            })
+
+        return jsonify({
+            "swing_highs": swing_highs,
+            "swing_lows": swing_lows,
+            "bos_signals": bos_list,
+            "choch_signals": choch_list,
+            "trend": full_result.get("trend", trend),
+            "confidence": full_result.get("confidence", 0.0),
+        })
+    except Exception as e:
+        logger.error(f"Market structure error for {symbol}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/ohlcv')
 def get_ohlcv():
     """Get OHLCV candlestick data from Binance for the dashboard chart."""
