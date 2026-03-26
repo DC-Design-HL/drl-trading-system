@@ -919,7 +919,8 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
 
             // ── Market Structure Overlay (BOS/CHOCH/Swing Points) ──
             const msData = {json.dumps(market_structure) if market_structure else 'null'};
-            if (msData) {{
+            if (msData) {{ try {{
+                console.log('[BOS/CHOCH] Market structure data:', msData.swing_highs?.length, 'highs,', msData.swing_lows?.length, 'lows,', msData.bos_signals?.length, 'BOS,', msData.choch_signals?.length, 'CHOCH');
                 // --- Swing High markers (green triangles above bars) ---
                 const swingHighMarkers = (msData.swing_highs || []).map(sh => ({{
                     time: sh.time,
@@ -997,7 +998,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                         ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
                         : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
                     const lineStyle = isFake
-                        ? LightweightCharts.LineStyle.SparseDotted
+                        ? LightweightCharts.LineStyle.Dotted
                         : LightweightCharts.LineStyle.Dashed;
                     const label = isBullish
                         ? (isFake ? 'BOS↑(fake)' : 'BOS↑')
@@ -1044,7 +1045,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                         ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
                         : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
                     const lineStyle = isFake
-                        ? LightweightCharts.LineStyle.SparseDotted
+                        ? LightweightCharts.LineStyle.Dotted
                         : LightweightCharts.LineStyle.Dashed;
                     const label = isBullish
                         ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑')
@@ -1087,6 +1088,9 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     'CHOCH=' + chochSignals.length,
                     'trend=' + msData.trend,
                     'conf=' + msData.confidence);
+            }} catch(msErr) {{
+                console.error('[BOS/CHOCH] Error rendering market structure:', msErr);
+            }}
             }}
 
             // Cleanup on page unload
