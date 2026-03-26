@@ -398,11 +398,13 @@ class FuturesTestnetExecutor:
                 else:
                     # TP placement failed — check if it's a testnet limitation
                     # Error -4509 ("TIF GTE can only be used with open positions")
-                    # and -2021 ("Order would immediately trigger") are testnet
+                    # -2021 ("Order would immediately trigger"), and
+                    # -2022 ("ReduceOnly Order is rejected") are testnet
                     # quirks, not real failures. Bot-side WS monitoring handles TP.
                     _is_testnet_limitation = tp_error and (
                         "-4509" in str(tp_error) or
                         "-2021" in str(tp_error) or
+                        "-2022" in str(tp_error) or
                         "not supported" in str(tp_error).lower()
                     )
                     if _is_testnet_limitation:
@@ -567,6 +569,7 @@ class FuturesTestnetExecutor:
                     _is_testnet_limitation = tp_error and (
                         "-4509" in str(tp_error) or
                         "-2021" in str(tp_error) or
+                        "-2022" in str(tp_error) or
                         "not supported" in str(tp_error).lower()
                     )
                     if _is_testnet_limitation:
