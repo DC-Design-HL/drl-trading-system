@@ -277,22 +277,15 @@ class MarketStructure:
         closes = df["close"].values
         length = len(df)
 
-        # Track the current trend based on swing sequence
+        # Walk through swings and detect breaks
+        # Trend is determined progressively from the swing sequence
         trend = "ranging"
-        last_swing_high: Optional[SwingPoint] = None
-        last_swing_low: Optional[SwingPoint] = None
 
         for i, sp in enumerate(swings):
-            if sp.kind == "high":
-                last_swing_high = sp
-            else:
-                last_swing_low = sp
-
-            # Need at least a few swings to determine trend
             if i < 3:
                 continue
 
-            # Determine local trend from recent swings up to this point
+            # Determine trend from recent swings up to this point
             recent = swings[:i + 1]
             recent_highs = [p for p in recent if p.kind == "high"][-2:]
             recent_lows = [p for p in recent if p.kind == "low"][-2:]
@@ -307,63 +300,61 @@ class MarketStructure:
                     new_trend = "bullish"
                 elif is_lh and is_ll:
                     new_trend = "bearish"
+                elif is_hh or is_hl:
+                    new_trend = "bullish"   # lean bullish on partial signal
+                elif is_lh or is_ll:
+                    new_trend = "bearish"   # lean bearish on partial signal
                 else:
-                    new_trend = trend  # keep previous
+                    new_trend = trend
 
-                # Look for structure break BETWEEN this swing and the next one
-                if i + 1 < len(swings):
-                    next_swing = swings[i + 1]
-                    scan_end = next_swing.index
-                else:
-                    scan_end = length
+                # Find scan limit: next swing of SAME type (the level becomes
+                # irrelevant once a new swing of same type forms)
+                scan_limit = length
+                for j in range(i + 1, len(swings)):
+                    if swings[j].kind == sp.kind:
+                        scan_limit = swings[j].index + 1
+                        break
 
-                # Scan from this swing point forward to find the FIRST close that breaks the level
-                # Use scan_end to avoid attributing a break to the wrong swing
-                scan_limit = min(scan_end + 5, length)  # small buffer past next swing
+                if trend != "ranging":
+                    if sp.kind == "high" and trend == "bullish":
+                        for bar in range(sp.index + 1, scan_limit):
+                            if closes[bar] > sp.price:
+                                ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                bos_signals.append(StructureSignal(
+                                    kind="bos", direction="bullish",
+                                    bar_index=bar, level=sp.price, timestamp=ts,
+                                ))
+                                break
 
-                if sp.kind == "high" and trend == "bullish":
-                    # In uptrend, close above swing high → BOS (continuation)
-                    for bar in range(sp.index + 1, scan_limit):
-                        if closes[bar] > sp.price:
-                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
-                            bos_signals.append(StructureSignal(
-                                kind="bos", direction="bullish",
-                                bar_index=bar, level=sp.price, timestamp=ts,
-                            ))
-                            break
+                    elif sp.kind == "low" and trend == "bearish":
+                        for bar in range(sp.index + 1, scan_limit):
+                            if closes[bar] < sp.price:
+                                ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                bos_signals.append(StructureSignal(
+                                    kind="bos", direction="bearish",
+                                    bar_index=bar, level=sp.price, timestamp=ts,
+                                ))
+                                break
 
-                elif sp.kind == "low" and trend == "bearish":
-                    # In downtrend, close below swing low → BOS (continuation)
-                    for bar in range(sp.index + 1, scan_limit):
-                        if closes[bar] < sp.price:
-                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
-                            bos_signals.append(StructureSignal(
-                                kind="bos", direction="bearish",
-                                bar_index=bar, level=sp.price, timestamp=ts,
-                            ))
-                            break
+                    elif sp.kind == "high" and trend == "bearish":
+                        for bar in range(sp.index + 1, scan_limit):
+                            if closes[bar] > sp.price:
+                                ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                choch_signals.append(StructureSignal(
+                                    kind="choch", direction="bullish",
+                                    bar_index=bar, level=sp.price, timestamp=ts,
+                                ))
+                                break
 
-                elif sp.kind == "high" and trend == "bearish":
-                    # In downtrend, close above swing high → CHOCH (bullish reversal)
-                    for bar in range(sp.index + 1, scan_limit):
-                        if closes[bar] > sp.price:
-                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
-                            choch_signals.append(StructureSignal(
-                                kind="choch", direction="bullish",
-                                bar_index=bar, level=sp.price, timestamp=ts,
-                            ))
-                            break
-
-                elif sp.kind == "low" and trend == "bullish":
-                    # In uptrend, close below swing low → CHOCH (bearish reversal)
-                    for bar in range(sp.index + 1, scan_limit):
-                        if closes[bar] < sp.price:
-                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
-                            choch_signals.append(StructureSignal(
-                                kind="choch", direction="bearish",
-                                bar_index=bar, level=sp.price, timestamp=ts,
-                            ))
-                            break
+                    elif sp.kind == "low" and trend == "bullish":
+                        for bar in range(sp.index + 1, scan_limit):
+                            if closes[bar] < sp.price:
+                                ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                choch_signals.append(StructureSignal(
+                                    kind="choch", direction="bearish",
+                                    bar_index=bar, level=sp.price, timestamp=ts,
+                                ))
+                                break
 
                 trend = new_trend
 
