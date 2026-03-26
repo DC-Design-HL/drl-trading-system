@@ -1394,10 +1394,23 @@ class HTFLiveBot:
             return None
 
         # ── Guard: minimum hold time ──
+        # Exception: if the model wants to REVERSE direction (e.g. SHORT→LONG)
+        # with high confidence (≥0.75), let it flip — the model should decide.
+        is_reversal = (
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)
+        )
         if self.position != 0 and (now - self.last_entry_time) < MIN_HOLD_SECONDS:
-            remaining = MIN_HOLD_SECONDS - (now - self.last_entry_time)
-            logger.info("Min hold: %.0fs remaining — HOLD", remaining)
-            return None
+            if is_reversal and confidence >= 0.70:
+                logger.info(
+                    "Min hold override: reversal %s→%s with conf=%.2f ≥ 0.70 — allowing flip",
+                    "LONG" if self.position == 1 else "SHORT",
+                    ACTION_LABELS.get(action, "?"), confidence,
+                )
+            else:
+                remaining = MIN_HOLD_SECONDS - (now - self.last_entry_time)
+                logger.info("Min hold: %.0fs remaining — HOLD", remaining)
+                return None
 
         # ── Guard: confidence threshold ──
         if action != ACTION_HOLD and confidence < MIN_CONFIDENCE:
