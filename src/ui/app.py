@@ -920,68 +920,47 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
             // ── Market Structure Overlay (BOS/CHOCH/Swing Points) ──
             const msData = {json.dumps(market_structure) if market_structure else 'null'};
             if (msData) {{ try {{
-                console.log('[BOS/CHOCH] Market structure data:', msData.swing_highs?.length, 'highs,', msData.swing_lows?.length, 'lows,', msData.bos_signals?.length, 'BOS,', msData.choch_signals?.length, 'CHOCH');
-                // --- Swing High markers (green triangles above bars) ---
-                const swingHighMarkers = (msData.swing_highs || []).map(sh => ({{
-                    time: sh.time,
-                    position: 'aboveBar',
-                    color: '#00e676',
-                    shape: 'arrowDown',
-                    text: '▲',
+                console.log('[BOS/CHOCH] msData received:', JSON.stringify({{
+                    highs: (msData.swing_highs || []).length,
+                    lows: (msData.swing_lows || []).length,
+                    bos: (msData.bos_signals || []).length,
+                    choch: (msData.choch_signals || []).length,
                 }}));
 
-                // --- Swing Low markers (red triangles below bars) ---
-                const swingLowMarkers = (msData.swing_lows || []).map(sl => ({{
-                    time: sl.time,
-                    position: 'belowBar',
-                    color: '#ff5252',
-                    shape: 'arrowUp',
-                    text: '▼',
-                }}));
-
-                // Add swing markers to candlestick series (merge with trade entry markers)
-                const allSwingMarkers = [...swingHighMarkers, ...swingLowMarkers];
-
-                if (allSwingMarkers.length > 0) {{
-                    const existingEntryMarkers = {json.dumps(entry_markers)};
-                    const mergedMarkers = [...existingEntryMarkers, ...allSwingMarkers]
-                        .sort((a, b) => a.time - b.time);
-                    candlestickSeries.setMarkers(mergedMarkers);
-                    console.log('[BOS/CHOCH] Added', allSwingMarkers.length, 'swing markers (merged with', existingEntryMarkers.length, 'trade markers)');
-                }}
-
-                // --- Swing High structure line (connect highs) ---
+                // --- Swing High structure line (green, connecting highs) ---
                 const swingHighLine = (msData.swing_highs || [])
                     .map(sh => ({{ time: sh.time, value: sh.price }}))
                     .sort((a, b) => a.time - b.time);
 
                 if (swingHighLine.length >= 2) {{
-                    const shLineSeries = chart.addLineSeries({{
-                        color: 'rgba(0, 230, 118, 0.35)',
-                        lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                    const shSeries = chart.addLineSeries({{
+                        color: '#00e676',
+                        lineWidth: 2,
+                        lineStyle: 2,  // Dotted (numeric enum: 0=Solid, 1=Dotted, 2=Dashed, 3=LargeDashed, 4=SparseDotted)
                         lastValueVisible: false,
                         priceLineVisible: false,
                         crosshairMarkerVisible: false,
                     }});
-                    shLineSeries.setData(swingHighLine);
+                    shSeries.setData(swingHighLine);
+                    console.log('[BOS/CHOCH] Swing high line drawn:', swingHighLine.length, 'points');
                 }}
 
-                // --- Swing Low structure line (connect lows) ---
+                // --- Swing Low structure line (red, connecting lows) ---
                 const swingLowLine = (msData.swing_lows || [])
                     .map(sl => ({{ time: sl.time, value: sl.price }}))
                     .sort((a, b) => a.time - b.time);
 
                 if (swingLowLine.length >= 2) {{
-                    const slLineSeries = chart.addLineSeries({{
-                        color: 'rgba(255, 82, 82, 0.35)',
-                        lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                    const slSeries = chart.addLineSeries({{
+                        color: '#ff5252',
+                        lineWidth: 2,
+                        lineStyle: 2,  // Dashed
                         lastValueVisible: false,
                         priceLineVisible: false,
                         crosshairMarkerVisible: false,
                     }});
-                    slLineSeries.setData(swingLowLine);
+                    slSeries.setData(swingLowLine);
+                    console.log('[BOS/CHOCH] Swing low line drawn:', swingLowLine.length, 'points');
                 }}
 
                 // --- BOS signals as horizontal lines with markers ---
@@ -992,9 +971,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     const lineColor = isBullish
                         ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
                         : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
-                    const lineStyle = isFake
-                        ? LightweightCharts.LineStyle.Dotted
-                        : LightweightCharts.LineStyle.Dashed;
+                    const lineStyle = isFake ? 1 : 2;  // Dotted for fake, Dashed for real
                     const label = isBullish
                         ? (isFake ? 'BOS↑(fake)' : 'BOS↑')
                         : (isFake ? 'BOS↓(fake)' : 'BOS↓');
@@ -1039,9 +1016,7 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     const lineColor = isBullish
                         ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
                         : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
-                    const lineStyle = isFake
-                        ? LightweightCharts.LineStyle.Dotted
-                        : LightweightCharts.LineStyle.Dashed;
+                    const lineStyle = isFake ? 1 : 2;  // 1=Dotted, 2=Dashed
                     const label = isBullish
                         ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑')
                         : (isFake ? 'CHOCH↓(fake)' : 'CHOCH↓');
