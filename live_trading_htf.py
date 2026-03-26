@@ -477,6 +477,29 @@ class HTFLiveBot:
             # Sync balance from exchange for testnet bots (not dry_run)
             if not self.dry_run:
                 self._sync_balance_from_exchange()
+            # If in a position but SL/TP are missing, recalculate from entry price
+            if self.position != 0 and self.position_price > 0:
+                if self.sl_price <= 0:
+                    if self.position == 1:  # LONG: SL below entry
+                        self.sl_price = round(self.position_price * (1 - STOP_LOSS_PCT), 2)
+                    else:  # SHORT: SL above entry
+                        self.sl_price = round(self.position_price * (1 + STOP_LOSS_PCT), 2)
+                    logger.warning(
+                        "⚠️ SL was $0 for %s position — recalculated from entry: SL=$%.2f",
+                        "LONG" if self.position == 1 else "SHORT", self.sl_price,
+                    )
+                if self.tp_price <= 0:
+                    if self.position == 1:  # LONG: TP above entry
+                        self.tp_price = round(self.position_price * (1 + TAKE_PROFIT_PCT), 2)
+                    else:  # SHORT: TP below entry
+                        self.tp_price = round(self.position_price * (1 - TAKE_PROFIT_PCT), 2)
+                    logger.warning(
+                        "⚠️ TP was $0 for %s position — recalculated from entry: TP=$%.2f",
+                        "LONG" if self.position == 1 else "SHORT", self.tp_price,
+                    )
+                if self.peak_price <= 0:
+                    self.peak_price = self.position_price
+                self._save_state()
             # Check liquidation safety on state restore (if in a position)
             if self.position != 0:
                 self._check_liquidation_safety()
