@@ -2023,10 +2023,11 @@ def main():
             # Fetch market structure (BOS/CHOCH) signals for chart overlay
             _ms_data = None
             try:
+                import requests as _ms_requests
                 _api_ms = get_api_url()
                 _sym_ms = st.session_state.selected_asset.replace('/', '').upper()
                 _tf_ms = st.session_state.timeframe
-                _ms_resp = requests.get(
+                _ms_resp = _ms_requests.get(
                     f'{_api_ms}/api/market-structure?symbol={_sym_ms}&timeframe={_tf_ms}&limit=500',
                     timeout=10
                 )
