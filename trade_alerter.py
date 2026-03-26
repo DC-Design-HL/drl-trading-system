@@ -474,13 +474,24 @@ def _format_timestamp(ts_str: str) -> str:
 # Alert routing
 # ---------------------------------------------------------------------------
 
+_last_liq_alert_time: dict = {}  # {symbol: timestamp} — cooldown tracker
+_LIQ_ALERT_COOLDOWN = 600  # 10 minutes between liquidation alerts per symbol
+
+
 def format_alert(alert: dict) -> str:
     """Route an alert to the appropriate formatter based on action type."""
     trade = alert.get("trade", {})
     action = trade.get("action", "")
 
-    # Liquidation risk alerts
+    # Liquidation risk alerts (with 10-min cooldown per symbol to prevent spam)
     if trade.get("type") == "LIQUIDATION_RISK":
+        symbol = trade.get("symbol", "?")
+        now = time.time()
+        last_sent = _last_liq_alert_time.get(symbol, 0)
+        if now - last_sent < _LIQ_ALERT_COOLDOWN:
+            print(f"[alerter] Skipping duplicate LIQUIDATION_RISK for {symbol} (cooldown)", flush=True)
+            return ""  # Empty string = skip sending
+        _last_liq_alert_time[symbol] = now
         return format_liquidation_risk(alert)
 
     # SL/TP update alerts
@@ -567,6 +578,8 @@ def main():
                         continue
 
                     message = format_alert(alert)
+                    if not message:
+                        continue  # Skipped by cooldown or filter
                     if send_telegram(message):
                         sent_count += 1
                         action = alert.get("trade", {}).get("action", "?")
