@@ -223,7 +223,28 @@ def format_close_trade(alert: dict) -> str:
     ]
 
     pnl_emoji = "📈" if pnl >= 0 else "📉"
-    lines.append(f"{pnl_emoji} PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
+    lines.append(f"{pnl_emoji} Trade PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
+
+    # Total balance PnL
+    balance_after = trade.get("balance_after", 0)
+    initial_balance = trade.get("initial_balance", 0)
+    realized_pnl_total = trade.get("realized_pnl_total", None)
+    balance_pnl_pct = trade.get("balance_pnl_pct", None)
+
+    if balance_after and initial_balance:
+        total_pnl = balance_after - initial_balance
+        pct = balance_pnl_pct if balance_pnl_pct is not None else (
+            (total_pnl / initial_balance * 100) if initial_balance > 0 else 0
+        )
+        bal_emoji = "🟢" if total_pnl >= 0 else "🔴"
+        lines.append(
+            f"{bal_emoji} Total Balance: ${balance_after:,.2f} "
+            f"({'+'if total_pnl >= 0 else ''}${total_pnl:,.2f} / "
+            f"{'+'if pct >= 0 else ''}{pct:.2f}%)"
+        )
+    elif realized_pnl_total is not None:
+        rpnl_emoji = "🟢" if realized_pnl_total >= 0 else "🔴"
+        lines.append(f"{rpnl_emoji} Total Realized PnL: {'+'if realized_pnl_total >= 0 else ''}${realized_pnl_total:,.2f}")
 
     # Position size in USDT
     units = trade.get("units", 0)

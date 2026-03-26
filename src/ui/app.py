@@ -2909,12 +2909,17 @@ def main():
                 closed_trades = int(tn_pnl_data.get('closed_trades', 0) or 0)
                 win_rate = float(tn_pnl_data.get('win_rate', 0) or 0)
                 winning_trades = int(tn_pnl_data.get('winning_trades', 0) or 0)
+                total_balance = float(tn_pnl_data.get('total_balance', 0) or 0)
+                initial_balance = float(tn_pnl_data.get('initial_balance', 0) or 0)
+                balance_pnl_pct = float(tn_pnl_data.get('balance_pnl_pct', 0) or 0)
 
-                m1, m2, m3, m4 = st.columns(4)
+                m1, m2, m3, m4, m5 = st.columns(5)
                 with m1:
                     st.metric(
-                        "💰 Portfolio Value",
-                        f"${portfolio_value:,.2f}" if portfolio_value is not None else "—",
+                        "💰 Total Balance",
+                        f"${total_balance:,.2f}" if total_balance else (f"${portfolio_value:,.2f}" if portfolio_value else "—"),
+                        delta=f"{balance_pnl_pct:+.2f}%" if balance_pnl_pct else None,
+                        delta_color="normal",
                     )
                 with m2:
                     st.metric(
@@ -2928,6 +2933,13 @@ def main():
                         delta=f"${unrealized_pnl:+,.2f} unrealized" if unrealized_pnl else None,
                     )
                 with m4:
+                    st.metric(
+                        "📊 Total PNL",
+                        f"${total_pnl:+,.2f}" if total_pnl is not None else "—",
+                        delta=f"{balance_pnl_pct:+.2f}% of initial" if initial_balance > 0 else None,
+                        delta_color="normal",
+                    )
+                with m5:
                     wr_str = f"{win_rate * 100:.1f}%" if win_rate is not None else "—"
                     st.metric(
                         "🎯 Win Rate",

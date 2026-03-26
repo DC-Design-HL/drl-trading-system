@@ -1121,10 +1121,29 @@ class FuturesTestnetExecutor:
                     }
                 )
 
+        # Total balance and PnL % from account
+        total_balance = 0.0
+        initial_balance = 0.0
+        balance_pnl_pct = 0.0
+        try:
+            if not account:
+                account = self.connector.get_account()
+            total_balance = float(account.get("totalWalletBalance", 0))
+            # Initial balance = total balance - total realized PnL
+            # (approximation: assumes all PnL is from trading)
+            initial_balance = total_balance - realized_pnl
+            if initial_balance > 0:
+                balance_pnl_pct = (realized_pnl / initial_balance) * 100
+        except Exception:
+            pass
+
         return {
             "realized_pnl": round(realized_pnl, 4),
             "unrealized_pnl": round(unrealized_pnl, 4),
             "total_pnl": round(realized_pnl + unrealized_pnl, 4),
+            "total_balance": round(total_balance, 4),
+            "initial_balance": round(initial_balance, 4),
+            "balance_pnl_pct": round(balance_pnl_pct, 2),
             "total_trades": len(trades),
             "closed_trades": len(closing),
             "winning_trades": len(winning),

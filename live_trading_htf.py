@@ -1611,6 +1611,11 @@ class HTFLiveBot:
             "confidence": confidence,
             "timestamp": datetime.now().isoformat(),
             "agent": "htf",
+            "balance_after": self.balance,
+            "realized_pnl_total": self.realized_pnl,
+            "initial_balance": self.initial_balance,
+            "balance_pnl_pct": ((self.balance - self.initial_balance) / self.initial_balance * 100)
+                if self.initial_balance > 0 else 0.0,
         }
 
         logger.info(
