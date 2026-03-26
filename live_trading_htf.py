@@ -88,6 +88,13 @@ ACTION_LABELS = {ACTION_HOLD: "HOLD", ACTION_LONG: "LONG", ACTION_SHORT: "SHORT"
 # Minimum confidence to act on a signal
 MIN_CONFIDENCE = 0.45
 
+# Ranging regime filter: raise confidence threshold when ADX is low
+RANGING_MIN_CONFIDENCE = 0.80  # Need higher conviction in ranging markets
+RANGING_ADX_THRESHOLD = 20.0   # ADX below this = ranging
+
+# Momentum exhaustion: skip entries when price is extended
+EXHAUSTION_ATR_THRESHOLD = 3.0  # Skip if price > 3 ATR from 20-bar VWAP
+
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
@@ -320,11 +327,24 @@ class HTFLiveBot:
         if vecnorm_path and vecnorm_path.exists():
             try:
                 import gymnasium as gym
-                dummy_venv = DummyVecEnv([lambda: gym.make("CartPole-v1")])
+                from gymnasium import spaces as gym_spaces
+                # Create a dummy env whose observation space matches the model's
+                # (117 dims for HTF features). Using CartPole (4 dims) caused a
+                # shape mismatch that silently broke normalization.
+                n_features = 117  # HTF feature count
+                dummy_env = gym.Env()
+                dummy_env.observation_space = gym_spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(n_features,), dtype=np.float32,
+                )
+                dummy_env.action_space = gym_spaces.Discrete(3)  # HOLD/LONG/SHORT
+                dummy_env.reset = lambda **kw: (np.zeros(n_features, dtype=np.float32), {})
+                dummy_env.step = lambda a: (np.zeros(n_features, dtype=np.float32), 0.0, True, False, {})
+                dummy_venv = DummyVecEnv([lambda: dummy_env])
                 self.vec_normalize = VecNormalize.load(str(vecnorm_path), dummy_venv)
                 self.vec_normalize.training = False
                 self.vec_normalize.norm_reward = False
-                logger.info("VecNormalize stats loaded from %s", vecnorm_path)
+                logger.info("✅ VecNormalize stats loaded from %s (obs_shape=%s)",
+                            vecnorm_path, self.vec_normalize.observation_space.shape)
             except Exception as exc:
                 logger.warning("Could not load VecNormalize: %s — raw obs used", exc)
                 self.vec_normalize = None
@@ -1378,6 +1398,53 @@ class HTFLiveBot:
         if action != ACTION_HOLD and confidence < MIN_CONFIDENCE:
             logger.info("Low confidence %.2f < %.2f — HOLD", confidence, MIN_CONFIDENCE)
             return None
+
+        # ── Guard: ranging regime filter ──
+        # In ranging markets (low ADX), require higher confidence to enter
+        if action != ACTION_HOLD and self.position == 0 and self.regime_detector is not None and self._last_df is not None:
+            try:
+                regime_info = self.regime_detector.detect_regime(self._last_df)
+                regime_name = regime_info.regime.value
+                adx_val = getattr(regime_info, 'trend_strength', None) or 0.0
+                if adx_val < RANGING_ADX_THRESHOLD and confidence < RANGING_MIN_CONFIDENCE:
+                    logger.info(
+                        "🚫 Ranging regime filter: ADX=%.1f < %.1f, conf=%.2f < %.2f — SKIP entry",
+                        adx_val, RANGING_ADX_THRESHOLD, confidence, RANGING_MIN_CONFIDENCE,
+                    )
+                    return None
+            except Exception as exc:
+                logger.debug("Regime filter check failed: %s", exc)
+
+        # ── Guard: momentum exhaustion filter ──
+        # Don't enter when price is extended far from VWAP (likely to revert)
+        if action != ACTION_HOLD and self.position == 0 and self._last_df is not None:
+            try:
+                df = self._last_df
+                if len(df) >= 20:
+                    closes = df["close"].values[-20:]
+                    volumes = df["volume"].values[-20:]
+                    # Compute VWAP over last 20 bars
+                    typical_price = (df["high"].values[-20:] + df["low"].values[-20:] + closes) / 3.0
+                    vwap_20 = float(np.sum(typical_price * volumes) / (np.sum(volumes) + 1e-10))
+                    # Compute ATR (14-period) from last 20 bars
+                    highs = df["high"].values[-20:]
+                    lows = df["low"].values[-20:]
+                    tr = np.maximum(highs - lows, np.maximum(
+                        np.abs(highs - np.roll(closes, 1)),
+                        np.abs(lows - np.roll(closes, 1))
+                    ))
+                    atr_14 = float(np.mean(tr[-14:]))
+                    if atr_14 > 0:
+                        extension = abs(current_price - vwap_20) / atr_14
+                        if extension > EXHAUSTION_ATR_THRESHOLD:
+                            direction_str = "LONG" if action == ACTION_LONG else "SHORT"
+                            logger.info(
+                                "🚫 Exhaustion filter: price $%.2f is %.1f ATR from VWAP $%.2f — SKIP %s entry",
+                                current_price, extension, vwap_20, direction_str,
+                            )
+                            return None
+            except Exception as exc:
+                logger.debug("Exhaustion filter check failed: %s", exc)
 
         trade: Optional[Dict] = None
 
