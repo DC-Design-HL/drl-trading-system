@@ -1744,16 +1744,15 @@ class HTFLiveBot:
         Mirror a bot decision to futures testnet.
 
         OPEN_LONG / OPEN_SHORT → places real futures order + SL/TP exchange orders.
-        CLOSE (non-reverse) → skipped (exchange exits autonomously via SL/TP).
-        REVERSE_CLOSE → close exchange position first (so the subsequent OPEN
-        doesn't just partially reduce the existing position).
+        ALL CLOSE actions → close the position on the exchange.
         """
         if not self.testnet_executor:
             return
         action = trade.get("action", "")
         symbol = trade.get("symbol", self.symbol)
-        # Reverse close: must close exchange position before opening opposite direction
-        if "REVERSE_CLOSE" in action:
+
+        # ALL close actions: close the exchange position
+        if "CLOSE" in action:
             try:
                 from src.api.futures_executor import get_futures_executor
                 executor = get_futures_executor()
@@ -1767,16 +1766,19 @@ class HTFLiveBot:
                                 qty = abs(amt)
                                 executor.connector.place_market_order(symbol, side, qty)
                                 logger.info(
-                                    "Testnet mirror: REVERSE CLOSE %s %s qty=%.6f",
-                                    symbol, side, qty,
+                                    "✅ Testnet mirror: %s %s %s qty=%.6f",
+                                    action, symbol, side, qty,
+                                )
+                            else:
+                                logger.info(
+                                    "Testnet mirror: %s %s — already flat on exchange",
+                                    action, symbol,
                                 )
                             break
+                    else:
+                        logger.warning("Testnet mirror: %s not found in exchange positions", symbol)
             except Exception as exc:
-                logger.warning("Testnet mirror reverse close failed: %s", exc)
-            return
-        # Normal close (SL/TP hit) — exchange handles exits autonomously
-        if "CLOSE" in action:
-            logger.debug("Testnet mirror: skipping %s — exchange exits autonomously", action)
+                logger.warning("Testnet mirror close failed for %s: %s", symbol, exc)
             return
         try:
             result = self.testnet_executor.mirror_trade(trade, {})
