@@ -1086,25 +1086,31 @@ class HTFLiveBot:
         """
         Validate that the SL price triggers BEFORE the liquidation price.
 
-        For LONG:  liquidation should be < (SL - delta)
-        For SHORT: liquidation should be > (SL + delta)
-        Delta = 1% of entry price (buffer for extreme slippage/flash crash).
+        For LONG:  liq price is BELOW entry → danger if liq >= SL - delta
+        For SHORT: liq price is ABOVE entry → danger if liq <= SL + delta
 
-        Returns True if safe (or check not applicable), False if at risk.
-        Writes LIQUIDATION_RISK alert to the shared alerts file on risk.
+        Uses the liquidation price from the exchange to infer actual direction
+        (avoids false alerts from bot/exchange direction desyncs).
+
+        Returns True if safe, False if at risk.
         """
         if self.position == 0 or self.position_price <= 0 or self.sl_price <= 0:
             return True
 
         liq_price = self._get_liquidation_price()
 
-        # Skip if liquidation is 0 (1x leverage longs — impossible to liquidate)
+        # Skip if liquidation is 0 (1x leverage — impossible to liquidate)
         if liq_price <= 0:
             return True
 
         delta = self.position_price * 0.01  # 1% buffer
 
-        if self.position == 1:  # LONG
+        # Determine actual direction from liquidation price vs entry price.
+        # LONG: liquidation is below entry (you get liquidated if price drops)
+        # SHORT: liquidation is above entry (you get liquidated if price rises)
+        # This avoids false alerts when bot direction is desynced from exchange.
+        if liq_price < self.position_price:
+            # Liq below entry → this is a LONG position
             if liq_price >= self.sl_price - delta:
                 buffer = self.sl_price - delta - liq_price
                 buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
@@ -1116,8 +1122,8 @@ class HTFLiveBot:
                 )
                 self._write_liquidation_alert(liq_price, delta)
                 return False
-
-        elif self.position == -1:  # SHORT
+        else:
+            # Liq above entry → this is a SHORT position
             if liq_price <= self.sl_price + delta:
                 buffer = liq_price - (self.sl_price + delta)
                 buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
