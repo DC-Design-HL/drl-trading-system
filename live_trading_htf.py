@@ -1091,13 +1091,13 @@ class HTFLiveBot:
 
     def _check_liquidation_safety(self) -> bool:
         """
-        Validate that the SL price triggers BEFORE the liquidation price.
+        Validate that liquidation price is safely beyond the SL.
 
-        For LONG:  liq price is BELOW entry → danger if liq >= SL - delta
-        For SHORT: liq price is ABOVE entry → danger if liq <= SL + delta
+        Only alerts if liquidation is CLOSER to entry than SL (i.e., SL won't
+        trigger before liquidation). With our 1% buffer design (LIQ_BUFFER_PCT),
+        liquidation is intentionally close to SL — that's expected and safe.
 
-        Uses the liquidation price from the exchange to infer actual direction
-        (avoids false alerts from bot/exchange direction desyncs).
+        TRUE danger: liq is between entry and SL (would get liquidated before SL fires).
 
         Returns True if safe, False if at risk.
         """
@@ -1110,37 +1110,32 @@ class HTFLiveBot:
         if liq_price <= 0:
             return True
 
-        delta = self.position_price * 0.01  # 1% buffer
-
         # Determine actual direction from liquidation price vs entry price.
-        # LONG: liquidation is below entry (you get liquidated if price drops)
-        # SHORT: liquidation is above entry (you get liquidated if price rises)
-        # This avoids false alerts when bot direction is desynced from exchange.
         if liq_price < self.position_price:
-            # Liq below entry → this is a LONG position
-            if liq_price >= self.sl_price - delta:
-                buffer = self.sl_price - delta - liq_price
-                buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+            # Liq below entry → LONG position
+            # Danger: liq is ABOVE SL (would be liquidated before SL fires)
+            if liq_price > self.sl_price:
+                buffer_pct = (self.sl_price - liq_price) / self.position_price * 100
                 logger.critical(
-                    "⚠️ LIQUIDATION RISK: %s LONG liq=$%.2f >= SL-delta=$%.2f "
-                    "(SL=$%.2f, entry=$%.2f, buffer=$%.2f / %.2f%%)",
-                    self.symbol, liq_price, self.sl_price - delta,
-                    self.sl_price, self.position_price, buffer, buffer_pct,
+                    "⚠️ LIQUIDATION RISK: %s LONG liq=$%.2f is ABOVE SL=$%.2f! "
+                    "Will be liquidated BEFORE SL fires! (entry=$%.2f, gap=%.2f%%)",
+                    self.symbol, liq_price, self.sl_price,
+                    self.position_price, buffer_pct,
                 )
-                self._write_liquidation_alert(liq_price, delta)
+                self._write_liquidation_alert(liq_price, 0)
                 return False
         else:
-            # Liq above entry → this is a SHORT position
-            if liq_price <= self.sl_price + delta:
-                buffer = liq_price - (self.sl_price + delta)
-                buffer_pct = buffer / self.position_price * 100 if self.position_price > 0 else 0
+            # Liq above entry → SHORT position
+            # Danger: liq is BELOW SL (would be liquidated before SL fires)
+            if liq_price < self.sl_price:
+                buffer_pct = (liq_price - self.sl_price) / self.position_price * 100
                 logger.critical(
-                    "⚠️ LIQUIDATION RISK: %s SHORT liq=$%.2f <= SL+delta=$%.2f "
-                    "(SL=$%.2f, entry=$%.2f, buffer=$%.2f / %.2f%%)",
-                    self.symbol, liq_price, self.sl_price + delta,
-                    self.sl_price, self.position_price, buffer, buffer_pct,
+                    "⚠️ LIQUIDATION RISK: %s SHORT liq=$%.2f is BELOW SL=$%.2f! "
+                    "Will be liquidated BEFORE SL fires! (entry=$%.2f, gap=%.2f%%)",
+                    self.symbol, liq_price, self.sl_price,
+                    self.position_price, buffer_pct,
                 )
-                self._write_liquidation_alert(liq_price, delta)
+                self._write_liquidation_alert(liq_price, 0)
                 return False
 
         return True
