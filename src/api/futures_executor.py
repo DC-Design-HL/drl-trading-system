@@ -1122,14 +1122,25 @@ class FuturesTestnetExecutor:
                 )
 
         # Total balance and PnL % from account
+        # PnL = current USDT wallet balance - initial $5,000 deposit
         total_balance = 0.0
-        initial_balance = 5000.0  # Binance testnet starting balance
+        initial_balance = 5000.0  # Binance testnet starting USDT balance
+        balance_pnl_usdt = 0.0
         balance_pnl_pct = 0.0
         try:
             if not account:
                 account = self.connector.get_account()
-            total_balance = float(account.get("totalWalletBalance", 0))
-            balance_pnl_pct = ((total_balance - initial_balance) / initial_balance) * 100
+            # Use USDT wallet balance specifically (not total which includes USDC, BTC, etc.)
+            assets = account.get("assets", [])
+            for asset in assets:
+                if asset.get("asset") == "USDT":
+                    total_balance = float(asset.get("walletBalance", 0))
+                    break
+            if total_balance == 0:
+                # Fallback to totalWalletBalance if USDT not found separately
+                total_balance = float(account.get("totalWalletBalance", 0))
+            balance_pnl_usdt = total_balance - initial_balance
+            balance_pnl_pct = (balance_pnl_usdt / initial_balance) * 100
         except Exception:
             pass
 
@@ -1139,6 +1150,7 @@ class FuturesTestnetExecutor:
             "total_pnl": round(realized_pnl + unrealized_pnl, 4),
             "total_balance": round(total_balance, 4),
             "initial_balance": round(initial_balance, 4),
+            "balance_pnl_usdt": round(balance_pnl_usdt, 2),
             "balance_pnl_pct": round(balance_pnl_pct, 2),
             "total_trades": len(trades),
             "closed_trades": len(closing),
