@@ -1530,48 +1530,6 @@ class HTFLiveBot:
             except Exception as exc:
                 logger.debug("Exhaustion filter check failed: %s", exc)
 
-        # ── Guard: trend alignment filter (counter-trend veto) ──
-        # If regime is TRENDING_DOWN → block LONG unless bullish CHOCH confirms reversal
-        # If regime is TRENDING_UP → block SHORT unless bearish CHOCH confirms reversal
-        if action != ACTION_HOLD and self.position == 0 and self.regime_detector is not None and self._last_df is not None:
-            try:
-                regime_info = self.regime_detector.detect_regime(self._last_df)
-                regime_name = regime_info.regime.value
-                adx_val = getattr(regime_info, 'trend_strength', None) or 0.0
-
-                is_counter_trend = (
-                    (regime_name == 'trending_down' and action == ACTION_LONG) or
-                    (regime_name == 'trending_up' and action == ACTION_SHORT)
-                )
-
-                if is_counter_trend and adx_val >= 25.0:
-                    # Check for CHOCH confirmation from BOS/CHOCH signals
-                    choch_confirms = False
-                    if hasattr(self, '_last_structure_signals') and self._last_structure_signals:
-                        ms = self._last_structure_signals
-                        if action == ACTION_LONG and ms.get('choch_bullish', False):
-                            choch_confirms = True
-                        elif action == ACTION_SHORT and ms.get('choch_bearish', False):
-                            choch_confirms = True
-
-                    if not choch_confirms:
-                        direction_str = "LONG" if action == ACTION_LONG else "SHORT"
-                        logger.info(
-                            "🚫 Trend alignment filter: %s is counter-trend "
-                            "(regime=%s ADX=%.1f) and no CHOCH confirmation — SKIP entry",
-                            direction_str, regime_name, adx_val,
-                        )
-                        return None
-                    else:
-                        direction_str = "LONG" if action == ACTION_LONG else "SHORT"
-                        logger.info(
-                            "✅ Counter-trend %s ALLOWED: CHOCH confirms structural shift "
-                            "(regime=%s ADX=%.1f)",
-                            direction_str, regime_name, adx_val,
-                        )
-            except Exception as exc:
-                logger.debug("Trend alignment filter check failed: %s", exc)
-
         trade: Optional[Dict] = None
 
         # ── CLOSE existing position if direction reverses ──
