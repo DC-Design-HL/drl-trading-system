@@ -170,6 +170,13 @@ def format_open_trade(alert: dict) -> str:
     if position_usdt > 0:
         lines.append(f"📐 Size: ${position_usdt:,.2f} USDT ({units:.4f} units)")
 
+    # Risk management info
+    leverage = trade.get("leverage", 0)
+    dollar_risk = trade.get("dollar_risk", 0)
+    margin = trade.get("margin", 0)
+    if leverage and leverage > 1:
+        lines.append(f"⚡ Leverage: {leverage}x | Risk: ${dollar_risk:,.2f} | Margin: ${margin:,.2f}")
+
     lines.append(f"📊 Confidence: {confidence * 100:.0f}%")
     lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
 

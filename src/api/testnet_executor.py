@@ -244,15 +244,18 @@ class TestnetExecutor:
                 # ── Futures path ──────────────────────────────────────────
                 # OPEN actions → real futures order + SL/TP exchange orders
                 # CLOSE actions → no-op (exchange exits autonomously via SL/TP)
+                leverage = int(bot_trade.get('leverage', 1))
+                trade_value = float(bot_trade.get('trade_value', 0) or 0)
+
                 if 'OPEN_LONG' in action:
                     record = self._execute_futures_open(
                         record, symbol, 'LONG', current_price, confidence,
-                        sl, tp, units,
+                        sl, tp, units, leverage=leverage, trade_value=trade_value,
                     )
                 elif 'OPEN_SHORT' in action:
                     record = self._execute_futures_open(
                         record, symbol, 'SHORT', current_price, confidence,
-                        sl, tp, units,
+                        sl, tp, units, leverage=leverage, trade_value=trade_value,
                     )
                 elif 'CLOSE_LONG' in action or 'CLOSE_SHORT' in action:
                     # Exchange handles exit autonomously via SL/TP orders.
@@ -439,30 +442,24 @@ class TestnetExecutor:
     def _execute_futures_open(
         self, record: Dict, symbol: str, side: str, price: float,
         confidence: float, sl: float, tp: float, units: float,
+        leverage: int = 1, trade_value: float = 0.0,
     ) -> Dict:
         """Delegate open to FuturesTestnetExecutor. Records result in audit log."""
-        # Compute USDT amount from units × price, or from bot balance fraction
-        usdt_amount = units * price if units > 0 else price * POSITION_SIZE
-
-        try:
-            account = self._futures_executor.get_portfolio()
-            avail = account.get('available_balance', 0.0)
-            if avail > 0:
-                usdt_amount = avail * POSITION_SIZE
-        except Exception:
-            pass  # fall back to units × price
-
-        conf_scale = max(0.5, min(1.0, confidence)) if confidence > 0 else 0.75
-        usdt_amount *= conf_scale
+        # Use the bot's calculated trade_value (notional) directly
+        # This ensures the exchange position matches the bot's risk calculation
+        usdt_amount = trade_value if trade_value > 0 else (units * price if units > 0 else 0)
 
         if usdt_amount < MIN_TRADE_VALUE_USDT:
             record['error'] = f"Trade value ${usdt_amount:.2f} below minimum ${MIN_TRADE_VALUE_USDT}"
             return record
 
+        record['leverage'] = leverage
+        record['trade_value'] = usdt_amount
+
         if side == 'LONG':
-            result = self._futures_executor.open_long(symbol, usdt_amount, sl=sl, tp=tp)
+            result = self._futures_executor.open_long(symbol, usdt_amount, sl=sl, tp=tp, leverage=leverage)
         else:
-            result = self._futures_executor.open_short(symbol, usdt_amount, sl=sl, tp=tp)
+            result = self._futures_executor.open_short(symbol, usdt_amount, sl=sl, tp=tp, leverage=leverage)
 
         record['executed'] = result.get('executed', False)
         record['order_id'] = str(result.get('order_id') or '')

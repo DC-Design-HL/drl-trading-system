@@ -322,6 +322,10 @@ class FuturesTestnetExecutor:
             "tp_order_id": None,
         }
         try:
+            try:
+                self.connector.set_margin_type(sym, "ISOLATED")
+            except Exception as mt_exc:
+                logger.warning("set_margin_type(%s, ISOLATED) failed: %s", sym, mt_exc)
             self.connector.set_leverage(sym, leverage)
 
             mark_price = self.connector.get_mark_price(sym)
@@ -491,6 +495,10 @@ class FuturesTestnetExecutor:
             "tp_order_id": None,
         }
         try:
+            try:
+                self.connector.set_margin_type(sym, "ISOLATED")
+            except Exception as mt_exc:
+                logger.warning("set_margin_type(%s, ISOLATED) failed: %s", sym, mt_exc)
             self.connector.set_leverage(sym, leverage)
 
             mark_price = self.connector.get_mark_price(sym)

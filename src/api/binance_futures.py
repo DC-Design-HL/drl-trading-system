@@ -467,8 +467,22 @@ class BinanceFuturesConnector:
             signed=True,
         )
 
+    def set_margin_type(self, symbol: str, margin_type: str = "ISOLATED") -> Dict:
+        """Set margin type for symbol. margin_type: 'ISOLATED' or 'CROSSED'.
+        Returns {} on success, or error if already set (which is fine)."""
+        try:
+            return self._post(
+                "/fapi/v1/marginType",
+                {"symbol": symbol.upper(), "marginType": margin_type.upper()},
+            )
+        except Exception as exc:
+            # -4046: "No need to change margin type" — already set, ignore
+            if "-4046" in str(exc):
+                return {"msg": f"Already {margin_type}"}
+            raise
+
     def set_leverage(self, symbol: str, leverage: int) -> Dict:
-        """Set cross-margin leverage for symbol. Returns {symbol, leverage, maxNotionalValue}."""
+        """Set leverage for symbol. Returns {symbol, leverage, maxNotionalValue}."""
         return self._post(
             "/fapi/v1/leverage",
             {"symbol": symbol.upper(), "leverage": int(leverage)},
