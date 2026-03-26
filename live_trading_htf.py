@@ -67,10 +67,10 @@ def _get_state_file(symbol: str = None) -> Path:
 # ── Risk Management (Fixed-Dollar-Risk Model) ──
 # Risk pool = RISK_POOL_PCT of balance, divided into RISK_BUDGET_PARTS
 # Each trade risks exactly (risk_pool / budget_parts) dollars.
+# Margin is derived from liquidation buffer: liq must be SL + LIQ_BUFFER_PCT from entry.
 RISK_POOL_PCT = 0.10       # 10% of balance is the risk pool
 RISK_BUDGET_PARTS = 20     # Pool divided into 20 equal risk slots
-MARGIN_MULTIPLIER = 3.0    # Margin per trade = 3× dollar risk (Dvir's rule)
-LIQ_SL_BUFFER = 1.5        # Liquidation must be ≥1.5× further than SL from entry
+LIQ_BUFFER_PCT = 0.01      # Liquidation must be 1% beyond SL from entry
 MAX_LEVERAGE = 50          # Hard cap on leverage (Binance testnet limit)
 
 STOP_LOSS_PCT = 0.015  # 1.5% stop loss
@@ -1565,14 +1565,13 @@ class HTFLiveBot:
         # Step 3: Cap notional to hard max
         notional = min(notional, FIXED_MAX_NOTIONAL)
 
-        # Step 4: Calculate margin = 3× dollar risk (Dvir's rule)
-        margin = MARGIN_MULTIPLIER * dollar_risk
-
-        # Step 5: Derive leverage from notional / margin, cap it
-        raw_leverage = notional / margin if margin > 0 else 1
+        # Step 4: Derive leverage from liquidation buffer
+        # Liq distance = SL% + buffer% → leverage = 1 / liq_distance
+        liq_distance = sl_pct_for_sizing + LIQ_BUFFER_PCT
+        raw_leverage = 1.0 / liq_distance if liq_distance > 0 else 1
         leverage = max(1, min(int(raw_leverage), MAX_LEVERAGE))
 
-        # Step 6: Recalculate actual margin with integer leverage
+        # Step 5: Calculate margin from leverage
         actual_margin = notional / leverage
 
         # Step 7: Validate we have enough balance for the margin
@@ -1588,10 +1587,10 @@ class HTFLiveBot:
         trade_value = notional
         logger.info(
             "📐 %s risk sizing: bal=$%.0f | risk_pool=$%.0f | risk/trade=$%.2f | "
-            "notional=$%.0f | margin=$%.2f (%.1f×risk) | leverage=%dx",
+            "notional=$%.0f | margin=$%.2f | leverage=%dx | liq_buffer=%.1f%%",
             "LONG" if direction == 1 else "SHORT",
             self.session_balance, risk_pool, dollar_risk,
-            notional, actual_margin, MARGIN_MULTIPLIER, leverage,
+            notional, actual_margin, leverage, LIQ_BUFFER_PCT * 100,
         )
 
         fee = trade_value * TRADING_FEE
@@ -1659,20 +1658,19 @@ class HTFLiveBot:
         self.mae_pct = 0.0
 
         # ── Liquidation vs SL validation ──
-        # Estimate liquidation distance: liq ≈ entry × (1 - direction/leverage)
-        # SL must be closer to entry than liquidation
-        liq_distance_pct = 1.0 / leverage if leverage > 0 else 1.0
-        sl_distance_pct = sl_pct
-        if sl_distance_pct > 0 and liq_distance_pct / sl_distance_pct < LIQ_SL_BUFFER:
+        # Verify: liq distance (1/leverage) ≥ SL% + buffer%
+        actual_liq_dist = 1.0 / leverage if leverage > 0 else 1.0
+        required_liq_dist = sl_pct + LIQ_BUFFER_PCT
+        if actual_liq_dist < required_liq_dist:
             logger.warning(
-                "⚠️ Liquidation too close to SL! liq_dist=%.2f%% sl_dist=%.2f%% "
-                "ratio=%.2f (need ≥%.1f) — reducing leverage",
-                liq_distance_pct * 100, sl_distance_pct * 100,
-                liq_distance_pct / sl_distance_pct, LIQ_SL_BUFFER,
+                "⚠️ Liquidation too close to SL! liq_dist=%.2f%% need=%.2f%% "
+                "(SL=%.2f%% + buffer=%.2f%%) — reducing leverage",
+                actual_liq_dist * 100, required_liq_dist * 100,
+                sl_pct * 100, LIQ_BUFFER_PCT * 100,
             )
-            # Recalculate leverage to ensure buffer
-            safe_leverage = int(1.0 / (sl_distance_pct * LIQ_SL_BUFFER))
+            safe_leverage = int(1.0 / required_liq_dist)
             leverage = max(1, min(safe_leverage, MAX_LEVERAGE))
+            actual_margin = notional / leverage
             logger.info("📐 Adjusted leverage to %dx for safety", leverage)
 
         trade = {
