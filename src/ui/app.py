@@ -939,20 +939,15 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     text: '▼',
                 }}));
 
-                // Merge swing markers onto a dedicated invisible series
-                const allSwingMarkers = [...swingHighMarkers, ...swingLowMarkers]
-                    .sort((a, b) => a.time - b.time);
+                // Add swing markers to candlestick series (merge with trade entry markers)
+                const allSwingMarkers = [...swingHighMarkers, ...swingLowMarkers];
 
                 if (allSwingMarkers.length > 0) {{
-                    const swingSeries = chart.addLineSeries({{
-                        color: 'transparent',
-                        lineWidth: 0,
-                        lastValueVisible: false,
-                        priceLineVisible: false,
-                        crosshairMarkerVisible: false,
-                    }});
-                    swingSeries.setData(candleData.map(c => ({{ time: c.time, value: c.close }})));
-                    swingSeries.setMarkers(allSwingMarkers);
+                    const existingEntryMarkers = {json.dumps(entry_markers)};
+                    const mergedMarkers = [...existingEntryMarkers, ...allSwingMarkers]
+                        .sort((a, b) => a.time - b.time);
+                    candlestickSeries.setMarkers(mergedMarkers);
+                    console.log('[BOS/CHOCH] Added', allSwingMarkers.length, 'swing markers (merged with', existingEntryMarkers.length, 'trade markers)');
                 }}
 
                 // --- Swing High structure line (connect highs) ---
