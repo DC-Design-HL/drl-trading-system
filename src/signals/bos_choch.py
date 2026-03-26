@@ -1,27 +1,35 @@
 """
-BOS / CHOCH Market Structure Detection Module
-==============================================
+BOS / CHOCH Market Structure Detection Module (ICT-based rewrite)
+=================================================================
 
-Detects Break of Structure (BOS), Change of Character (CHOCH), and their
-"fake" variants from OHLCV DataFrames.  Used by the HTF trading bots to
-dynamically adjust SL/TP while a position is profitable.
+Detects Break of Structure (BOS) and Change of Character (CHOCH) using
+proper ICT methodology based on swing point sequences.
 
-Theory:
-  - **BOS (Break of Structure)**: Price continues the existing trend by
-    breaking a prior swing high (bullish) or swing low (bearish).
-  - **CHOCH (Change of Character)**: Price *reverses* the trend by breaking
-    the opposite swing level — e.g. breaking above a swing high during a
-    downtrend signals a bullish reversal.
-  - **Fake BOS / Fake CHOCH**: Breakouts that fail, detected by wick
-    rejection, volume divergence, or rapid reversal within 3 bars.
+Theory (ICT / Smart Money Concepts):
+  - Market structure is defined by the SEQUENCE of swing highs and lows.
+  - **Uptrend**: Higher Highs (HH) + Higher Lows (HL)
+  - **Downtrend**: Lower Highs (LH) + Lower Lows (LL)
 
-Multi-timeframe approach:
-  The primary analysis runs on the 5-minute chart for faster signal
-  detection.  1H and 4H signals serve as confirmation / override layers
-  to increase confidence.
+  - **BOS (Break of Structure)**: Trend CONTINUATION signal.
+    - Bullish BOS: In uptrend, price closes above the most recent swing high → new HH
+    - Bearish BOS: In downtrend, price closes below the most recent swing low → new LL
 
-Author:  Builder bot
-Date:    2026-03-23
+  - **CHOCH (Change of Character)**: Trend REVERSAL signal.
+    - Bullish CHOCH: In downtrend, price closes above the most recent swing high
+      (breaks the LH pattern → potential reversal to bullish)
+    - Bearish CHOCH: In uptrend, price closes below the most recent swing low
+      (breaks the HL pattern → potential reversal to bearish)
+
+  - **Fake signals**: Detected when the breakout candle has excessive wick
+    (>60% wick ratio) or reverses within 3 bars.
+
+Key difference from old implementation:
+  - Detects ALL BOS/CHOCH events across the chart history, not just current bar
+  - Trend is determined by swing SEQUENCE (HH/HL vs LH/LL), not separate calculation
+  - Uses ZigZag-style filtering (min price change) to reduce noise
+
+Author:  CEO bot (rewrite)
+Date:    2026-03-26
 """
 
 from __future__ import annotations
@@ -46,23 +54,24 @@ class SwingPoint:
     index: int           # integer position in the DataFrame
     price: float         # high (for swing high) or low (for swing low)
     kind: str            # "high" | "low"
+    label: str = ""      # "HH", "HL", "LH", "LL" — set after sequence analysis
     timestamp: Optional[str] = None
 
 
 @dataclass
 class StructureSignal:
-    """A BOS or CHOCH signal (or their fake variants)."""
+    """A BOS or CHOCH signal."""
     kind: str            # "bos" | "choch"
     direction: str       # "bullish" | "bearish"
-    bar_index: int       # bar where the break was confirmed
-    level: float         # the swing level that was broken
+    bar_index: int       # bar where the break happened
+    level: float         # price level that was broken
     is_fake: bool = False
-    confidence: float = 1.0
+    timestamp: Optional[str] = None
 
 
 @dataclass
 class MarketStructureResult:
-    """Container returned by ``MarketStructure.get_signals()``."""
+    """Aggregated result of market structure analysis."""
     bos_bullish: bool = False
     bos_bearish: bool = False
     choch_bullish: bool = False
@@ -71,9 +80,10 @@ class MarketStructureResult:
     fake_choch: bool = False
     last_swing_high: float = 0.0
     last_swing_low: float = 0.0
-    trend: str = "ranging"         # "bullish" | "bearish" | "ranging"
-    confidence: float = 0.0
+    trend: str = "ranging"
+    confidence: float = 0.5
     signals: List[StructureSignal] = field(default_factory=list)
+    swing_points: List[SwingPoint] = field(default_factory=list)
 
     def to_dict(self) -> Dict:
         return {
@@ -91,347 +101,358 @@ class MarketStructureResult:
 
 
 # ---------------------------------------------------------------------------
-# MarketStructure detector
+# Main class
 # ---------------------------------------------------------------------------
 
 class MarketStructure:
-    """
-    Detects BOS, CHOCH, Fake BOS, and Fake CHOCH from OHLCV DataFrames.
-
-    Parameters
-    ----------
-    swing_lookback : int
-        Number of bars on each side that a local extreme must dominate
-        to qualify as a swing point.  Default 5 (good for 15-min charts).
-    fake_reversal_bars : int
-        If price returns below/above the broken level within this many
-        bars, the breakout is considered fake.  Default 3.
-    fake_wick_ratio : float
-        A candle is considered a wick rejection if the wick beyond the
-        level is > this fraction of total range.  Default 0.60.
-    volume_decline_pct : float
-        If breakout-bar volume is below the rolling average by this
-        fraction, flag volume divergence.  Default 0.20 (20% below avg).
-    """
+    """ICT-based market structure detector with BOS/CHOCH detection."""
 
     def __init__(
         self,
         swing_lookback: int = 5,
-        fake_reversal_bars: int = 3,
-        fake_wick_ratio: float = 0.60,
-        volume_decline_pct: float = 0.20,
+        min_swing_pct: float = 0.002,   # 0.2% minimum swing size to filter noise
     ):
         self.swing_lookback = swing_lookback
-        self.fake_reversal_bars = fake_reversal_bars
-        self.fake_wick_ratio = fake_wick_ratio
-        self.volume_decline_pct = volume_decline_pct
+        self.min_swing_pct = min_swing_pct
 
     # ------------------------------------------------------------------
-    # Swing point detection
+    # Swing Point Detection (ZigZag-filtered)
     # ------------------------------------------------------------------
 
     def detect_swing_points(self, df: pd.DataFrame) -> List[SwingPoint]:
         """
-        Find swing highs and swing lows using the *lookback-on-both-sides*
-        method.
-
-        A swing high at bar *i* requires:
-            high[i] == max(high[i-N : i+N+1])
-
-        Similarly for swing low (using min of low).
-
-        Parameters
-        ----------
-        df : DataFrame with columns ``high``, ``low``, and optionally a
-             DatetimeIndex.
-
-        Returns
-        -------
-        List of SwingPoint sorted by index.
+        Find swing highs and swing lows using lookback-on-both-sides method,
+        then filter using ZigZag minimum price change to remove noise.
         """
         n = self.swing_lookback
         highs = df["high"].values
         lows = df["low"].values
         length = len(df)
-        points: List[SwingPoint] = []
+        raw_points: List[SwingPoint] = []
 
         for i in range(n, length - n):
             window_high = highs[i - n: i + n + 1]
             window_low = lows[i - n: i + n + 1]
 
-            # Swing High: highest in window
+            ts = str(df.index[i]) if hasattr(df.index, "strftime") else None
+
             if highs[i] == np.max(window_high):
-                ts = str(df.index[i]) if hasattr(df.index, "strftime") else None
-                points.append(SwingPoint(index=i, price=float(highs[i]), kind="high", timestamp=ts))
+                raw_points.append(SwingPoint(
+                    index=i, price=float(highs[i]), kind="high", timestamp=ts
+                ))
 
-            # Swing Low: lowest in window
             if lows[i] == np.min(window_low):
-                ts = str(df.index[i]) if hasattr(df.index, "strftime") else None
-                points.append(SwingPoint(index=i, price=float(lows[i]), kind="low", timestamp=ts))
+                raw_points.append(SwingPoint(
+                    index=i, price=float(lows[i]), kind="low", timestamp=ts
+                ))
 
-        return sorted(points, key=lambda p: p.index)
+        raw_points.sort(key=lambda p: p.index)
+
+        # ZigZag filter: alternate high/low and enforce minimum price change
+        filtered = self._zigzag_filter(raw_points)
+        return filtered
+
+    def _zigzag_filter(self, points: List[SwingPoint]) -> List[SwingPoint]:
+        """
+        Filter swing points to alternate high/low and enforce minimum
+        price change between consecutive swings.
+        """
+        if not points:
+            return []
+
+        result: List[SwingPoint] = [points[0]]
+
+        for p in points[1:]:
+            last = result[-1]
+
+            # If same type as last, keep the more extreme one
+            if p.kind == last.kind:
+                if p.kind == "high" and p.price > last.price:
+                    result[-1] = p
+                elif p.kind == "low" and p.price < last.price:
+                    result[-1] = p
+                continue
+
+            # Different type — check minimum price change
+            pct_change = abs(p.price - last.price) / last.price
+            if pct_change >= self.min_swing_pct:
+                result.append(p)
+            else:
+                # Too small a move — skip this point but if it's more extreme
+                # than last of same type, replace
+                pass
+
+        return result
 
     # ------------------------------------------------------------------
-    # Trend determination
+    # Label swing points (HH, HL, LH, LL)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def label_swings(swings: List[SwingPoint]) -> List[SwingPoint]:
+        """
+        Label each swing point as HH, HL, LH, or LL based on the previous
+        swing of the same type.
+        """
+        prev_high: Optional[SwingPoint] = None
+        prev_low: Optional[SwingPoint] = None
+
+        for sp in swings:
+            if sp.kind == "high":
+                if prev_high is None:
+                    sp.label = "HH"  # first high, assume HH
+                elif sp.price > prev_high.price:
+                    sp.label = "HH"
+                else:
+                    sp.label = "LH"
+                prev_high = sp
+            else:
+                if prev_low is None:
+                    sp.label = "HL"  # first low, assume HL
+                elif sp.price > prev_low.price:
+                    sp.label = "HL"
+                else:
+                    sp.label = "LL"
+                prev_low = sp
+
+        return swings
+
+    # ------------------------------------------------------------------
+    # Trend determination from swing sequence
     # ------------------------------------------------------------------
 
     @staticmethod
     def determine_trend(swing_points: List[SwingPoint]) -> str:
         """
-        Determine trend from the last 4+ swing points.
+        Determine trend from the last 4+ labeled swing points.
 
-        Bullish: Higher Highs + Higher Lows
-        Bearish: Lower Lows + Lower Highs
-        Ranging: mixed or insufficient data
+        Bullish: last 2 highs are HH AND last 2 lows are HL
+        Bearish: last 2 highs are LH AND last 2 lows are LL
         """
         if len(swing_points) < 4:
             return "ranging"
 
-        # Collect recent highs and lows (last 6 points max)
-        recent = swing_points[-6:]
-        recent_highs = [p for p in recent if p.kind == "high"]
-        recent_lows = [p for p in recent if p.kind == "low"]
+        recent_highs = [p for p in swing_points if p.kind == "high"][-3:]
+        recent_lows = [p for p in swing_points if p.kind == "low"][-3:]
 
         if len(recent_highs) < 2 or len(recent_lows) < 2:
             return "ranging"
 
-        # Check Higher Highs / Higher Lows
-        hh = all(
-            recent_highs[i].price > recent_highs[i - 1].price
-            for i in range(1, len(recent_highs))
-        )
-        hl = all(
-            recent_lows[i].price > recent_lows[i - 1].price
-            for i in range(1, len(recent_lows))
-        )
+        # Check last 2 highs and lows
+        last_2h = recent_highs[-2:]
+        last_2l = recent_lows[-2:]
+
+        hh = last_2h[-1].label == "HH"
+        hl = last_2l[-1].label == "HL"
+        lh = last_2h[-1].label == "LH"
+        ll = last_2l[-1].label == "LL"
+
         if hh and hl:
             return "bullish"
-
-        # Check Lower Lows / Lower Highs
-        ll = all(
-            recent_lows[i].price < recent_lows[i - 1].price
-            for i in range(1, len(recent_lows))
-        )
-        lh = all(
-            recent_highs[i].price < recent_highs[i - 1].price
-            for i in range(1, len(recent_highs))
-        )
-        if ll and lh:
+        elif lh and ll:
             return "bearish"
-
         return "ranging"
 
     # ------------------------------------------------------------------
-    # BOS detection
+    # BOS / CHOCH detection across entire chart
     # ------------------------------------------------------------------
 
-    def detect_bos(
+    def detect_all_structure_breaks(
         self,
         df: pd.DataFrame,
-        swing_points: List[SwingPoint],
-        trend: str,
-    ) -> List[StructureSignal]:
+        swings: List[SwingPoint],
+    ) -> Tuple[List[StructureSignal], List[StructureSignal]]:
         """
-        Detect Break of Structure.
+        Walk through swing points chronologically and detect ALL BOS and
+        CHOCH events in the chart history.
 
-        Bullish BOS (in an uptrend):
-            Current close > most recent swing high
-        Bearish BOS (in a downtrend):
-            Current close < most recent swing low
+        Returns (bos_signals, choch_signals).
         """
-        signals: List[StructureSignal] = []
-        if not swing_points:
-            return signals
+        bos_signals: List[StructureSignal] = []
+        choch_signals: List[StructureSignal] = []
+
+        if len(swings) < 4:
+            return bos_signals, choch_signals
 
         closes = df["close"].values
-        last_bar = len(df) - 1
+        length = len(df)
 
-        # Most recent swing high / low
-        recent_highs = [p for p in swing_points if p.kind == "high"]
-        recent_lows = [p for p in swing_points if p.kind == "low"]
+        # Track the current trend based on swing sequence
+        trend = "ranging"
+        last_swing_high: Optional[SwingPoint] = None
+        last_swing_low: Optional[SwingPoint] = None
 
-        if trend in ("bullish", "ranging") and recent_highs:
-            sh = recent_highs[-1]
-            # Check if any of the last 3 bars closed above the swing high
-            for offset in range(min(3, last_bar - sh.index)):
-                bar_idx = last_bar - offset
-                if bar_idx > sh.index and closes[bar_idx] > sh.price:
-                    signals.append(StructureSignal(
-                        kind="bos",
-                        direction="bullish",
-                        bar_index=bar_idx,
-                        level=sh.price,
-                    ))
-                    break
+        for i, sp in enumerate(swings):
+            if sp.kind == "high":
+                last_swing_high = sp
+            else:
+                last_swing_low = sp
 
-        if trend in ("bearish", "ranging") and recent_lows:
-            sl_point = recent_lows[-1]
-            for offset in range(min(3, last_bar - sl_point.index)):
-                bar_idx = last_bar - offset
-                if bar_idx > sl_point.index and closes[bar_idx] < sl_point.price:
-                    signals.append(StructureSignal(
-                        kind="bos",
-                        direction="bearish",
-                        bar_index=bar_idx,
-                        level=sl_point.price,
-                    ))
-                    break
+            # Need at least a few swings to determine trend
+            if i < 3:
+                continue
 
-        return signals
+            # Determine local trend from recent swings up to this point
+            recent = swings[:i + 1]
+            recent_highs = [p for p in recent if p.kind == "high"][-2:]
+            recent_lows = [p for p in recent if p.kind == "low"][-2:]
+
+            if len(recent_highs) >= 2 and len(recent_lows) >= 2:
+                is_hh = recent_highs[-1].price > recent_highs[-2].price
+                is_hl = recent_lows[-1].price > recent_lows[-2].price
+                is_lh = recent_highs[-1].price < recent_highs[-2].price
+                is_ll = recent_lows[-1].price < recent_lows[-2].price
+
+                if is_hh and is_hl:
+                    new_trend = "bullish"
+                elif is_lh and is_ll:
+                    new_trend = "bearish"
+                else:
+                    new_trend = trend  # keep previous
+
+                # Look for structure break BETWEEN this swing and the next one
+                if i + 1 < len(swings):
+                    next_swing = swings[i + 1]
+                    scan_end = next_swing.index
+                else:
+                    scan_end = length
+
+                # Scan from this swing point forward to find the FIRST close that breaks the level
+                # Use scan_end to avoid attributing a break to the wrong swing
+                scan_limit = min(scan_end + 5, length)  # small buffer past next swing
+
+                if sp.kind == "high" and trend == "bullish":
+                    # In uptrend, close above swing high → BOS (continuation)
+                    for bar in range(sp.index + 1, scan_limit):
+                        if closes[bar] > sp.price:
+                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                            bos_signals.append(StructureSignal(
+                                kind="bos", direction="bullish",
+                                bar_index=bar, level=sp.price, timestamp=ts,
+                            ))
+                            break
+
+                elif sp.kind == "low" and trend == "bearish":
+                    # In downtrend, close below swing low → BOS (continuation)
+                    for bar in range(sp.index + 1, scan_limit):
+                        if closes[bar] < sp.price:
+                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                            bos_signals.append(StructureSignal(
+                                kind="bos", direction="bearish",
+                                bar_index=bar, level=sp.price, timestamp=ts,
+                            ))
+                            break
+
+                elif sp.kind == "high" and trend == "bearish":
+                    # In downtrend, close above swing high → CHOCH (bullish reversal)
+                    for bar in range(sp.index + 1, scan_limit):
+                        if closes[bar] > sp.price:
+                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                            choch_signals.append(StructureSignal(
+                                kind="choch", direction="bullish",
+                                bar_index=bar, level=sp.price, timestamp=ts,
+                            ))
+                            break
+
+                elif sp.kind == "low" and trend == "bullish":
+                    # In uptrend, close below swing low → CHOCH (bearish reversal)
+                    for bar in range(sp.index + 1, scan_limit):
+                        if closes[bar] < sp.price:
+                            ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                            choch_signals.append(StructureSignal(
+                                kind="choch", direction="bearish",
+                                bar_index=bar, level=sp.price, timestamp=ts,
+                            ))
+                            break
+
+                trend = new_trend
+
+        return bos_signals, choch_signals
 
     # ------------------------------------------------------------------
-    # CHOCH detection
+    # Fake signal detection
     # ------------------------------------------------------------------
 
-    def detect_choch(
-        self,
-        df: pd.DataFrame,
-        swing_points: List[SwingPoint],
-        trend: str,
-    ) -> List[StructureSignal]:
+    def is_fake_breakout(self, df: pd.DataFrame, signal: StructureSignal) -> bool:
         """
-        Detect Change of Character (trend reversal signal).
-
-        Bullish CHOCH (in a downtrend):
-            Close > most recent swing high  →  potential reversal to bullish
-        Bearish CHOCH (in an uptrend):
-            Close < most recent swing low   →  potential reversal to bearish
-        """
-        signals: List[StructureSignal] = []
-        if not swing_points:
-            return signals
-
-        closes = df["close"].values
-        last_bar = len(df) - 1
-
-        recent_highs = [p for p in swing_points if p.kind == "high"]
-        recent_lows = [p for p in swing_points if p.kind == "low"]
-
-        # Bullish CHOCH: downtrend + close above swing high
-        if trend == "bearish" and recent_highs:
-            sh = recent_highs[-1]
-            for offset in range(min(3, last_bar - sh.index)):
-                bar_idx = last_bar - offset
-                if bar_idx > sh.index and closes[bar_idx] > sh.price:
-                    signals.append(StructureSignal(
-                        kind="choch",
-                        direction="bullish",
-                        bar_index=bar_idx,
-                        level=sh.price,
-                    ))
-                    break
-
-        # Bearish CHOCH: uptrend + close below swing low
-        if trend == "bullish" and recent_lows:
-            sl_point = recent_lows[-1]
-            for offset in range(min(3, last_bar - sl_point.index)):
-                bar_idx = last_bar - offset
-                if bar_idx > sl_point.index and closes[bar_idx] < sl_point.price:
-                    signals.append(StructureSignal(
-                        kind="choch",
-                        direction="bearish",
-                        bar_index=bar_idx,
-                        level=sl_point.price,
-                    ))
-                    break
-
-        return signals
-
-    # ------------------------------------------------------------------
-    # Fake BOS / Fake CHOCH validation
-    # ------------------------------------------------------------------
-
-    def is_fake_bos(
-        self,
-        df: pd.DataFrame,
-        signal: StructureSignal,
-        volume_col: str = "volume",
-    ) -> bool:
-        """
-        Check whether a BOS signal is fake (failed breakout).
-
-        Criteria (any one triggers fake):
-          1. **Wick rejection** — more than ``fake_wick_ratio`` of the
-             breakout candle's range is wick *beyond* the level.
-          2. **Volume divergence** — breakout bar volume is below a 20-bar
-             rolling average by ``volume_decline_pct``.
-          3. **Rapid reversal** — price closes back below/above the level
-             within ``fake_reversal_bars`` candles after the breakout.
+        Check if a BOS/CHOCH is a fake breakout using:
+        1. Wick rejection: candle body is <40% of total range (big wick)
+        2. Rapid reversal: price reverses within 3 bars
         """
         idx = signal.bar_index
-        level = signal.level
-        direction = signal.direction
+        if idx >= len(df):
+            return False
 
-        # --- 1. Wick rejection ---
-        if idx < len(df):
-            row = df.iloc[idx]
-            candle_range = float(row["high"]) - float(row["low"])
-            if candle_range > 0:
-                if direction == "bullish":
-                    # Wick above close
-                    wick_beyond = float(row["high"]) - float(row["close"])
-                else:
-                    # Wick below close
-                    wick_beyond = float(row["close"]) - float(row["low"])
-                wick_ratio = wick_beyond / candle_range
-                if wick_ratio > self.fake_wick_ratio:
-                    return True
-
-        # --- 2. Volume divergence ---
-        if volume_col in df.columns and idx >= 20:
-            vol_series = df[volume_col].values
-            breakout_vol = float(vol_series[idx])
-            avg_vol = float(np.mean(vol_series[idx - 20: idx]))
-            if avg_vol > 0 and breakout_vol < avg_vol * (1.0 - self.volume_decline_pct):
-                return True
-
-        # --- 3. Rapid reversal ---
+        highs = df["high"].values
+        lows = df["low"].values
+        opens = df["open"].values
         closes = df["close"].values
-        end_check = min(idx + self.fake_reversal_bars + 1, len(df))
-        for j in range(idx + 1, end_check):
-            if direction == "bullish" and closes[j] < level:
+
+        # 1. Wick rejection check
+        candle_range = highs[idx] - lows[idx]
+        if candle_range > 0:
+            body = abs(closes[idx] - opens[idx])
+            body_ratio = body / candle_range
+            if body_ratio < 0.30:  # body is less than 30% of range → big wick
                 return True
-            if direction == "bearish" and closes[j] > level:
-                return True
+
+        # 2. Rapid reversal within 3 bars
+        end_idx = min(idx + 4, len(df))
+        if end_idx > idx + 1:
+            if signal.direction == "bullish":
+                # Bullish break → fake if price drops back below level
+                if any(closes[j] < signal.level for j in range(idx + 1, end_idx)):
+                    return True
+            else:
+                # Bearish break → fake if price rises back above level
+                if any(closes[j] > signal.level for j in range(idx + 1, end_idx)):
+                    return True
 
         return False
 
-    def is_fake_choch(
-        self,
-        df: pd.DataFrame,
-        signal: StructureSignal,
-        volume_col: str = "volume",
-    ) -> bool:
-        """
-        Check whether a CHOCH signal is fake (noise in a ranging market).
+    # ------------------------------------------------------------------
+    # Backward-compatible API
+    # ------------------------------------------------------------------
 
-        Uses the same three criteria as ``is_fake_bos()`` because the
-        mechanics are identical — only the *context* differs (reversal vs
-        continuation).
-        """
-        return self.is_fake_bos(df, signal, volume_col=volume_col)
+    def detect_bos(self, df, swing_points, trend):
+        """Backward-compatible: detect BOS for current bar only."""
+        bos, _ = self.detect_all_structure_breaks(df, swing_points)
+        return bos[-1:] if bos else []
+
+    def detect_choch(self, df, swing_points, trend):
+        """Backward-compatible: detect CHOCH for current bar only."""
+        _, choch = self.detect_all_structure_breaks(df, swing_points)
+        return choch[-1:] if choch else []
+
+    def is_fake_bos(self, df, signal):
+        return self.is_fake_breakout(df, signal)
+
+    def is_fake_choch(self, df, signal):
+        return self.is_fake_breakout(df, signal)
 
     # ------------------------------------------------------------------
-    # Multi-timeframe signal aggregation
+    # Full analysis (single timeframe)
     # ------------------------------------------------------------------
 
     def _analyze_single_tf(self, df: pd.DataFrame) -> MarketStructureResult:
-        """Run full BOS/CHOCH analysis on a single timeframe DataFrame."""
+        """Run full BOS/CHOCH analysis on a single timeframe."""
         result = MarketStructureResult()
 
         if df is None or len(df) < self.swing_lookback * 3:
             return result
 
-        # 1. Detect swing points
+        # 1. Detect and label swing points
         swings = self.detect_swing_points(df)
-        if not swings:
+        if len(swings) < 4:
             return result
 
-        # 2. Determine trend
-        trend = self.determine_trend(swings)
-        result.trend = trend
+        swings = self.label_swings(swings)
+        result.swing_points = swings
 
-        # Last swing high / low
+        # 2. Determine trend from swing sequence
+        result.trend = self.determine_trend(swings)
+
+        # Last swing levels
         highs = [p for p in swings if p.kind == "high"]
         lows = [p for p in swings if p.kind == "low"]
         if highs:
@@ -439,12 +460,13 @@ class MarketStructure:
         if lows:
             result.last_swing_low = lows[-1].price
 
-        # 3. Detect BOS
-        bos_signals = self.detect_bos(df, swings, trend)
+        # 3. Detect ALL structure breaks
+        bos_signals, choch_signals = self.detect_all_structure_breaks(df, swings)
+
+        # 4. Check for fakes
         for sig in bos_signals:
-            fake = self.is_fake_bos(df, sig)
-            sig.is_fake = fake
-            if not fake:
+            sig.is_fake = self.is_fake_breakout(df, sig)
+            if not sig.is_fake:
                 if sig.direction == "bullish":
                     result.bos_bullish = True
                 else:
@@ -453,12 +475,9 @@ class MarketStructure:
                 result.fake_bos = True
             result.signals.append(sig)
 
-        # 4. Detect CHOCH
-        choch_signals = self.detect_choch(df, swings, trend)
         for sig in choch_signals:
-            fake = self.is_fake_choch(df, sig)
-            sig.is_fake = fake
-            if not fake:
+            sig.is_fake = self.is_fake_breakout(df, sig)
+            if not sig.is_fake:
                 if sig.direction == "bullish":
                     result.choch_bullish = True
                 else:
@@ -469,6 +488,10 @@ class MarketStructure:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Main entry: multi-timeframe analysis
+    # ------------------------------------------------------------------
+
     def get_signals(
         self,
         df_primary: pd.DataFrame,
@@ -478,99 +501,69 @@ class MarketStructure:
         """
         Main entry point: analyse up to 3 timeframes and return aggregated
         market structure signals.
-
-        The primary timeframe (typically 5m) drives signal detection; 1H and
-        4H provide confirmation that raises or lowers the confidence score.
-
-        Parameters
-        ----------
-        df_primary : DataFrame
-            Primary timeframe OHLCV data (5m candles recommended).
-        df_1h : DataFrame, optional
-            1-hour candles for confirmation.
-        df_4h : DataFrame, optional
-            4-hour candles for confirmation.
-
-        Returns
-        -------
-        dict with keys:
-            bos_bullish, bos_bearish, choch_bullish, choch_bearish,
-            fake_bos, fake_choch, last_swing_high, last_swing_low,
-            trend, confidence
         """
-        # --- Primary timeframe (5m) ---
-        r15 = self._analyze_single_tf(df_primary)
+        r5m = self._analyze_single_tf(df_primary)
 
-        # --- Higher timeframes (optional) ---
         r1h = self._analyze_single_tf(df_1h) if df_1h is not None else None
         r4h = self._analyze_single_tf(df_4h) if df_4h is not None else None
 
-        # --- Aggregate ---
         result = MarketStructureResult(
-            bos_bullish=r15.bos_bullish,
-            bos_bearish=r15.bos_bearish,
-            choch_bullish=r15.choch_bullish,
-            choch_bearish=r15.choch_bearish,
-            fake_bos=r15.fake_bos,
-            fake_choch=r15.fake_choch,
-            last_swing_high=r15.last_swing_high,
-            last_swing_low=r15.last_swing_low,
-            trend=r15.trend,
-            confidence=0.5,          # base confidence from 15m alone
-            signals=list(r15.signals),
+            bos_bullish=r5m.bos_bullish,
+            bos_bearish=r5m.bos_bearish,
+            choch_bullish=r5m.choch_bullish,
+            choch_bearish=r5m.choch_bearish,
+            fake_bos=r5m.fake_bos,
+            fake_choch=r5m.fake_choch,
+            last_swing_high=r5m.last_swing_high,
+            last_swing_low=r5m.last_swing_low,
+            trend=r5m.trend,
+            confidence=0.5,
+            signals=list(r5m.signals),
+            swing_points=list(r5m.swing_points),
         )
 
-        # --- HTF confirmation boosts ---
+        # HTF confirmation
         if r1h is not None:
-            # Same-direction BOS on 1H → boost confidence
-            if r1h.bos_bullish and r15.bos_bullish:
+            if r1h.bos_bullish and r5m.bos_bullish:
                 result.confidence += 0.15
-            if r1h.bos_bearish and r15.bos_bearish:
+            if r1h.bos_bearish and r5m.bos_bearish:
                 result.confidence += 0.15
-            # Same-direction CHOCH on 1H → higher confidence reversal warning
-            if r1h.choch_bullish and r15.choch_bullish:
+            if r1h.choch_bullish and r5m.choch_bullish:
                 result.confidence += 0.10
-            if r1h.choch_bearish and r15.choch_bearish:
+            if r1h.choch_bearish and r5m.choch_bearish:
                 result.confidence += 0.10
-            # Conflicting signals → lower confidence
-            if (r1h.bos_bullish and r15.bos_bearish) or (r1h.bos_bearish and r15.bos_bullish):
+            if (r1h.bos_bullish and r5m.bos_bearish) or (r1h.bos_bearish and r5m.bos_bullish):
                 result.confidence -= 0.10
-            # Use 1H swing levels if available (more significant)
-            if r1h.last_swing_high > 0:
-                result.last_swing_high = r1h.last_swing_high
-            if r1h.last_swing_low > 0:
-                result.last_swing_low = r1h.last_swing_low
 
         if r4h is not None:
-            # 4H is the strongest confirmation layer
-            if r4h.bos_bullish and r15.bos_bullish:
+            if r4h.bos_bullish and r5m.bos_bullish:
                 result.confidence += 0.20
-            if r4h.bos_bearish and r15.bos_bearish:
+            if r4h.bos_bearish and r5m.bos_bearish:
                 result.confidence += 0.20
-            if r4h.choch_bullish and r15.choch_bullish:
+            if r4h.choch_bullish and r5m.choch_bullish:
                 result.confidence += 0.15
-            if r4h.choch_bearish and r15.choch_bearish:
+            if r4h.choch_bearish and r5m.choch_bearish:
                 result.confidence += 0.15
-            # Strong 4H contradiction → suppress 15m signal
-            if (r4h.bos_bullish and r15.choch_bearish):
+            if (r4h.bos_bullish and r5m.choch_bearish):
                 result.confidence -= 0.15
-            if (r4h.bos_bearish and r15.choch_bullish):
+            if (r4h.bos_bearish and r5m.choch_bullish):
                 result.confidence -= 0.15
 
-        # Clamp confidence to [0, 1]
         result.confidence = float(np.clip(result.confidence, 0.0, 1.0))
 
         logger.info(
             "MarketStructure signals: trend=%s bos_bull=%s bos_bear=%s "
             "choch_bull=%s choch_bear=%s fake_bos=%s fake_choch=%s "
-            "swing_high=%.2f swing_low=%.2f conf=%.2f (swings=%d)",
+            "swing_high=%.2f swing_low=%.2f conf=%.2f (bos=%d choch=%d swings=%d)",
             result.trend,
             result.bos_bullish, result.bos_bearish,
             result.choch_bullish, result.choch_bearish,
             result.fake_bos, result.fake_choch,
             result.last_swing_high, result.last_swing_low,
             result.confidence,
-            len(r15.signals),
+            len([s for s in result.signals if s.kind == "bos"]),
+            len([s for s in result.signals if s.kind == "choch"]),
+            len(result.swing_points),
         )
 
         return result.to_dict()

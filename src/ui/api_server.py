@@ -695,19 +695,19 @@ def get_market_structure():
 
         # Detect swing points
         swings = ms.detect_swing_points(df)
+        swings = ms.label_swings(swings)
         trend = ms.determine_trend(swings)
 
-        # Detect BOS and CHOCH
-        bos_signals = ms.detect_bos(df, swings, trend)
-        choch_signals = ms.detect_choch(df, swings, trend)
+        # Detect ALL BOS and CHOCH across the chart
+        bos_signals, choch_signals = ms.detect_all_structure_breaks(df, swings)
 
         # Check for fakes
         for sig in bos_signals:
-            sig.is_fake = ms.is_fake_bos(df, sig)
+            sig.is_fake = ms.is_fake_breakout(df, sig)
         for sig in choch_signals:
-            sig.is_fake = ms.is_fake_choch(df, sig)
+            sig.is_fake = ms.is_fake_breakout(df, sig)
 
-        # Also run the full get_signals for confidence
+        # Run full analysis for confidence
         full_result = ms.get_signals(df)
 
         # Build response
