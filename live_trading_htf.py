@@ -507,9 +507,9 @@ class HTFLiveBot:
 
     def _sync_position_from_exchange(self) -> None:
         """
-        Sync position_units with the actual exchange position.
-        The bot calculates its own units from balance*pct/price, but the
-        exchange may fill a different quantity. Exchange is source of truth.
+        Sync position state with the actual exchange position.
+        The exchange is the source of truth — if it shows no position for
+        this symbol, the bot resets to flat (fixes ghost SL/TP alerts).
         """
         if self.dry_run or self.position == 0:
             return
@@ -519,17 +519,51 @@ class HTFLiveBot:
             if executor is None:
                 return
             positions = executor.connector.get_positions()
+            # Find our symbol's position on the exchange
+            exchange_pos = None
             for p in positions:
                 if p.get("symbol") == self.symbol:
-                    real_amt = abs(float(p.get("positionAmt", 0)))
-                    if real_amt > 0 and abs(real_amt - self.position_units) > 0.0001:
-                        logger.info(
-                            "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
-                            self.position_units, real_amt,
-                        )
-                        self.position_units = real_amt
-                        self._save_state()
-                    return
+                    exchange_pos = p
+                    break
+
+            if exchange_pos is None:
+                # Symbol not even in exchange response — position is flat
+                real_amt = 0.0
+            else:
+                real_amt = abs(float(exchange_pos.get("positionAmt", 0)))
+
+            if real_amt == 0.0 and self.position != 0:
+                # Exchange says flat but bot thinks it has a position — reset
+                logger.warning(
+                    "⚠️ STALE POSITION DETECTED: bot has %s %s but exchange is FLAT. "
+                    "Resetting to flat (likely closed on exchange side).",
+                    "LONG" if self.position == 1 else "SHORT",
+                    self.symbol,
+                )
+                # Record a synthetic close trade for tracking
+                close_action = "CLOSE_LONG" if self.position == 1 else "CLOSE_SHORT"
+                self.position = 0
+                self.position_price = 0.0
+                self.position_units = 0.0
+                self.sl_price = 0.0
+                self.tp_price = 0.0
+                self.peak_price = 0.0
+                self.partial_tp_level = 0
+                self.partial_tp1_price = 0.0
+                self.partial_tp2_price = 0.0
+                self.mfe_pct = 0.0
+                self.mae_pct = 0.0
+                self._save_state()
+                logger.info("✅ Bot state reset to FLAT for %s", self.symbol)
+                return
+
+            if real_amt > 0 and abs(real_amt - self.position_units) > 0.0001:
+                logger.info(
+                    "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
+                    self.position_units, real_amt,
+                )
+                self.position_units = real_amt
+                self._save_state()
         except Exception as exc:
             logger.warning("Position sync failed: %s", exc)
 
@@ -1616,6 +1650,17 @@ class HTFLiveBot:
 
             # Cache data for regime detection in _open_position
             self._last_df = df_15m
+
+            # Exchange position sync: detect stale positions (exchange closed
+            # but bot still thinks it's in a trade → ghost SL/TP alerts).
+            # Runs every iteration when bot thinks it has a position.
+            if self.position != 0 and not self.dry_run:
+                self._sync_position_from_exchange()
+                # If sync reset us to flat, skip the rest of position logic
+                if self.position == 0:
+                    status["action"] = "SYNC_FLAT"
+                    logger.info("Position was stale — synced to FLAT, skipping to next iteration")
+                    return status
 
             # Phase 1 §3.9: Update MFE/MAE every iteration while in position
             if self.position != 0 and self.position_price > 0:
