@@ -509,12 +509,12 @@ class HTFLiveBot:
             old_balance = self.balance
             if abs(old_balance - real_balance) > 1.0:  # Only log if meaningful difference
                 logger.info(
-                    "💰 Balance sync: state=$%,.2f → exchange=$%,.2f (corrected)",
+                    "💰 Balance sync: state=$%.2f → exchange=$%.2f (corrected)",
                     old_balance, real_balance,
                 )
             else:
                 logger.info(
-                    "💰 Balance sync: state=$%,.2f ≈ exchange=$%,.2f (in sync)",
+                    "💰 Balance sync: state=$%.2f ≈ exchange=$%.2f (in sync)",
                     old_balance, real_balance,
                 )
 
@@ -1359,8 +1359,11 @@ class HTFLiveBot:
                 except Exception as _exc:
                     logger.warning("Testnet SL/TP update failed: %s", _exc)
 
-        # --- Liquidation safety check (every iteration) ---
-        self._check_liquidation_safety()
+        # --- Liquidation safety check (max once per 5 min to avoid spam) ---
+        _now = time.time()
+        if not hasattr(self, '_last_liq_check') or (_now - self._last_liq_check) > 300:
+            self._check_liquidation_safety()
+            self._last_liq_check = _now
 
         # --- Check if current price hits the (possibly adjusted) SL ---
         if self.position == 1:
