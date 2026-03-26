@@ -396,26 +396,43 @@ class FuturesTestnetExecutor:
                     logger.info("TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
                                 sym, tp_oid, tp, tp_order.get("_algo_order", False) if tp_order else False)
                 else:
-                    # TP FAILED — position is unprotected, close immediately
-                    logger.error(
-                        "❌ TP placement FAILED for LONG %s — closing position immediately. Error: %s",
-                        sym, tp_error,
+                    # TP placement failed — check if it's a testnet limitation
+                    # Error -4509 ("TIF GTE can only be used with open positions")
+                    # and -2021 ("Order would immediately trigger") are testnet
+                    # quirks, not real failures. Bot-side WS monitoring handles TP.
+                    _is_testnet_limitation = tp_error and (
+                        "-4509" in str(tp_error) or
+                        "-2021" in str(tp_error) or
+                        "not supported" in str(tp_error).lower()
                     )
-                    try:
-                        self.connector.place_market_order(sym, "SELL", quantity)
-                        logger.info("Emergency close of LONG %s completed (qty=%s)", sym, quantity)
-                    except Exception as close_exc:
-                        logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
-                    # Cancel any SL order we placed
-                    if sym in self._sl_orders:
+                    if _is_testnet_limitation:
+                        logger.warning(
+                            "⚠️ TP placement failed for LONG %s (testnet limitation): %s "
+                            "— bot-side WebSocket monitoring will handle TP @ $%.2f",
+                            sym, tp_error, tp,
+                        )
+                        # Position stays open — WS monitors TP
+                    else:
+                        # Real TP failure — close position for safety
+                        logger.error(
+                            "❌ TP placement FAILED for LONG %s — closing position immediately. Error: %s",
+                            sym, tp_error,
+                        )
                         try:
-                            is_algo = self._algo_sl_flags.pop(sym, False)
-                            self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
-                        except Exception:
-                            pass
-                    result["executed"] = False
-                    result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
-                    return result
+                            self.connector.place_market_order(sym, "SELL", quantity)
+                            logger.info("Emergency close of LONG %s completed (qty=%s)", sym, quantity)
+                        except Exception as close_exc:
+                            logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
+                        # Cancel any SL order we placed
+                        if sym in self._sl_orders:
+                            try:
+                                is_algo = self._algo_sl_flags.pop(sym, False)
+                                self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
+                            except Exception:
+                                pass
+                        result["executed"] = False
+                        result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
+                        return result
 
             logger.info(
                 "🚀 FUTURES LONG opened: %s qty=%s mark=$%.2f "
@@ -546,26 +563,38 @@ class FuturesTestnetExecutor:
                     logger.info("TP order placed for %s: orderId=%s @ $%.2f (algo=%s)",
                                 sym, tp_oid, tp, tp_order.get("_algo_order", False) if tp_order else False)
                 else:
-                    # TP FAILED — position is unprotected, close immediately
-                    logger.error(
-                        "❌ TP placement FAILED for SHORT %s — closing position immediately. Error: %s",
-                        sym, tp_error,
+                    # Check if testnet limitation vs real failure
+                    _is_testnet_limitation = tp_error and (
+                        "-4509" in str(tp_error) or
+                        "-2021" in str(tp_error) or
+                        "not supported" in str(tp_error).lower()
                     )
-                    try:
-                        self.connector.place_market_order(sym, "BUY", quantity)
-                        logger.info("Emergency close of SHORT %s completed (qty=%s)", sym, quantity)
-                    except Exception as close_exc:
-                        logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
-                    # Cancel any SL order we placed
-                    if sym in self._sl_orders:
+                    if _is_testnet_limitation:
+                        logger.warning(
+                            "⚠️ TP placement failed for SHORT %s (testnet limitation): %s "
+                            "— bot-side WebSocket monitoring will handle TP @ $%.2f",
+                            sym, tp_error, tp,
+                        )
+                    else:
+                        logger.error(
+                            "❌ TP placement FAILED for SHORT %s — closing position immediately. Error: %s",
+                            sym, tp_error,
+                        )
                         try:
-                            is_algo = self._algo_sl_flags.pop(sym, False)
-                            self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
-                        except Exception:
-                            pass
-                    result["executed"] = False
-                    result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
-                    return result
+                            self.connector.place_market_order(sym, "BUY", quantity)
+                            logger.info("Emergency close of SHORT %s completed (qty=%s)", sym, quantity)
+                        except Exception as close_exc:
+                            logger.error("Emergency close ALSO failed for %s: %s", sym, close_exc)
+                        # Cancel any SL order we placed
+                        if sym in self._sl_orders:
+                            try:
+                                is_algo = self._algo_sl_flags.pop(sym, False)
+                                self.connector.cancel_order(sym, self._sl_orders.pop(sym), is_algo=is_algo)
+                            except Exception:
+                                pass
+                        result["executed"] = False
+                        result["error"] = f"TP placement failed, position auto-closed: {tp_error}"
+                        return result
 
             logger.info(
                 "🚀 FUTURES SHORT opened: %s qty=%s mark=$%.2f "

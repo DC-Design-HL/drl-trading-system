@@ -602,13 +602,43 @@ class HTFLiveBot:
                 logger.info("✅ Bot state reset to FLAT for %s", self.symbol)
                 return
 
-            if real_amt > 0 and abs(real_amt - self.position_units) > 0.0001:
-                logger.info(
-                    "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
-                    self.position_units, real_amt,
-                )
-                self.position_units = real_amt
-                self._save_state()
+            if real_amt > 0:
+                # Check direction mismatch (bot says LONG but exchange has SHORT, or vice versa)
+                raw_amt = float(exchange_pos.get("positionAmt", 0))
+                exchange_dir = 1 if raw_amt > 0 else -1  # positive = LONG, negative = SHORT
+                if exchange_dir != self.position:
+                    exchange_entry = float(exchange_pos.get("entryPrice", 0))
+                    logger.warning(
+                        "⚠️ DIRECTION MISMATCH: bot has %s but exchange has %s %s (entry=$%.2f, qty=%.6f). "
+                        "Syncing to exchange state.",
+                        "LONG" if self.position == 1 else "SHORT",
+                        "LONG" if exchange_dir == 1 else "SHORT",
+                        self.symbol, exchange_entry, real_amt,
+                    )
+                    self.position = exchange_dir
+                    self.position_price = exchange_entry if exchange_entry > 0 else self.position_price
+                    self.position_units = real_amt
+                    self.peak_price = self.position_price
+                    # Recalculate SL/TP for the correct direction
+                    if exchange_dir == 1:  # LONG
+                        self.sl_price = round(self.position_price * (1 - STOP_LOSS_PCT), 2)
+                        self.tp_price = round(self.position_price * (1 + TAKE_PROFIT_PCT), 2)
+                    else:  # SHORT
+                        self.sl_price = round(self.position_price * (1 + STOP_LOSS_PCT), 2)
+                        self.tp_price = round(self.position_price * (1 - TAKE_PROFIT_PCT), 2)
+                    self._save_state()
+                    logger.info(
+                        "✅ Synced to exchange: %s %s @ $%.2f, SL=$%.2f, TP=$%.2f",
+                        "LONG" if exchange_dir == 1 else "SHORT",
+                        self.symbol, self.position_price, self.sl_price, self.tp_price,
+                    )
+                elif abs(real_amt - self.position_units) > 0.0001:
+                    logger.info(
+                        "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
+                        self.position_units, real_amt,
+                    )
+                    self.position_units = real_amt
+                    self._save_state()
         except Exception as exc:
             logger.warning("Position sync failed: %s", exc)
 
