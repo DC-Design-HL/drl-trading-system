@@ -102,6 +102,16 @@ RANGING_ADX_THRESHOLD = 20.0   # ADX below this = ranging
 # Momentum exhaustion: skip entries when price is extended
 EXHAUSTION_ATR_THRESHOLD = 3.0  # Skip if price > 3 ATR from 20-bar VWAP
 
+# ── Market Signal Gate ──
+# Tier 1: conf >= SIGNAL_GATE_AUTONOMOUS → model decides alone
+# Tier 2: conf < SIGNAL_GATE_AUTONOMOUS → needs SIGNAL_GATE_MIN_CONFIRMS out of 4 signals
+# Signals: MTF alignment, Order Flow, Regime, Orderbook Imbalance
+SIGNAL_GATE_AUTONOMOUS = 0.80       # Above this, model acts alone
+SIGNAL_GATE_MIN_CONFIRMS = 2        # Need at least 2/4 signals to agree
+SIGNAL_GATE_OF_THRESHOLD = 0.20     # Order flow score magnitude to count as directional
+SIGNAL_GATE_OB_THRESHOLD = 0.30     # Orderbook imbalance magnitude to count as directional
+SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count as opposing
+
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
@@ -719,6 +729,130 @@ class HTFLiveBot:
             summary["price"] = market["price"]
 
         return summary
+
+    def _check_signal_gate(self, action: int, confidence: float) -> bool:
+        """
+        Market Signal Gate: validate low-confidence trades against real market signals.
+        
+        Returns True if the trade is ALLOWED, False if BLOCKED.
+        
+        Tier 1 (conf >= 0.80): model decides alone → always True
+        Tier 2 (conf < 0.80): needs at least 2/4 market signals to agree with direction
+        
+        Signals checked:
+          1. MTF Alignment — all timeframes agree with direction
+          2. Order Flow Score — net buying/selling pressure matches direction
+          3. Regime — not trading against a strong trend
+          4. Orderbook Imbalance — bid/ask pressure matches direction
+        """
+        if confidence >= SIGNAL_GATE_AUTONOMOUS:
+            return True  # Tier 1: autonomous
+
+        if action == ACTION_HOLD:
+            return True  # Not opening, no gate needed
+
+        direction = "LONG" if action == ACTION_LONG else "SHORT"
+
+        try:
+            market = self._fetch_market_signals(self.symbol)
+            if not market:
+                logger.warning("Signal gate: no market data — allowing trade (fail-open)")
+                return True
+        except Exception as exc:
+            logger.warning("Signal gate: fetch failed (%s) — allowing trade (fail-open)", exc)
+            return True
+
+        confirmations = 0
+        vetoes = 0
+        details = []
+
+        # 1. MTF Alignment
+        mtf = market.get("mtf", {})
+        mtf_bias = (mtf.get("bias") or "NEUTRAL").upper()
+        mtf_aligned = mtf.get("aligned", False)
+        if direction == "LONG" and mtf_bias == "BULLISH" and mtf_aligned:
+            confirmations += 1
+            details.append("MTF=✅ bullish aligned")
+        elif direction == "SHORT" and mtf_bias == "BEARISH" and mtf_aligned:
+            confirmations += 1
+            details.append("MTF=✅ bearish aligned")
+        elif mtf_bias == "NEUTRAL" or not mtf_aligned:
+            details.append(f"MTF=➖ {mtf_bias.lower()} (not aligned)")
+        else:
+            vetoes += 1
+            details.append(f"MTF=❌ {mtf_bias.lower()} vs {direction}")
+
+        # 2. Order Flow Score
+        of = market.get("order_flow", {})
+        of_score = of.get("score", 0)
+        if isinstance(of_score, (int, float)):
+            if direction == "LONG" and of_score > SIGNAL_GATE_OF_THRESHOLD:
+                confirmations += 1
+                details.append(f"OF=✅ {of_score:+.2f}")
+            elif direction == "SHORT" and of_score < -SIGNAL_GATE_OF_THRESHOLD:
+                confirmations += 1
+                details.append(f"OF=✅ {of_score:+.2f}")
+            elif abs(of_score) <= SIGNAL_GATE_OF_THRESHOLD:
+                details.append(f"OF=➖ neutral ({of_score:+.2f})")
+            else:
+                vetoes += 1
+                details.append(f"OF=❌ {of_score:+.2f} vs {direction}")
+        else:
+            details.append("OF=➖ no data")
+
+        # 3. Regime — check we're not fighting a strong trend
+        regime = market.get("regime", {})
+        regime_type = (regime.get("type") or "UNKNOWN").upper()
+        regime_adx = regime.get("adx", 0) or 0
+        if direction == "LONG" and "DOWN" in regime_type and regime_adx >= SIGNAL_GATE_REGIME_ADX_MIN:
+            vetoes += 1
+            details.append(f"REG=❌ {regime_type} ADX={regime_adx:.0f}")
+        elif direction == "SHORT" and "UP" in regime_type and regime_adx >= SIGNAL_GATE_REGIME_ADX_MIN:
+            vetoes += 1
+            details.append(f"REG=❌ {regime_type} ADX={regime_adx:.0f}")
+        elif direction == "LONG" and "UP" in regime_type and regime_adx >= SIGNAL_GATE_REGIME_ADX_MIN:
+            confirmations += 1
+            details.append(f"REG=✅ {regime_type} ADX={regime_adx:.0f}")
+        elif direction == "SHORT" and "DOWN" in regime_type and regime_adx >= SIGNAL_GATE_REGIME_ADX_MIN:
+            confirmations += 1
+            details.append(f"REG=✅ {regime_type} ADX={regime_adx:.0f}")
+        else:
+            details.append(f"REG=➖ {regime_type} ADX={regime_adx:.0f}")
+
+        # 4. Orderbook Imbalance
+        ob = of.get("orderbook", {})
+        ob_imbalance = ob.get("imbalance_10", 0)
+        ob_bias = (ob.get("bias") or "neutral").lower()
+        if isinstance(ob_imbalance, (int, float)):
+            if direction == "LONG" and ob_imbalance > SIGNAL_GATE_OB_THRESHOLD:
+                confirmations += 1
+                details.append(f"OB=✅ {ob_imbalance:+.2f} bullish")
+            elif direction == "SHORT" and ob_imbalance < -SIGNAL_GATE_OB_THRESHOLD:
+                confirmations += 1
+                details.append(f"OB=✅ {ob_imbalance:+.2f} bearish")
+            elif abs(ob_imbalance) <= SIGNAL_GATE_OB_THRESHOLD:
+                details.append(f"OB=➖ neutral ({ob_imbalance:+.2f})")
+            else:
+                vetoes += 1
+                details.append(f"OB=❌ {ob_imbalance:+.2f} vs {direction}")
+        else:
+            details.append("OB=➖ no data")
+
+        allowed = confirmations >= SIGNAL_GATE_MIN_CONFIRMS
+        detail_str = " | ".join(details)
+
+        if allowed:
+            logger.info(
+                "✅ Signal gate PASS: %s conf=%.2f | %d/%d confirms | %s",
+                direction, confidence, confirmations, SIGNAL_GATE_MIN_CONFIRMS, detail_str,
+            )
+        else:
+            logger.info(
+                "🚫 Signal gate BLOCK: %s conf=%.2f | %d/%d confirms (%d vetoes) | %s",
+                direction, confidence, confirmations, SIGNAL_GATE_MIN_CONFIRMS, vetoes, detail_str,
+            )
+
+        return allowed
 
     def _send_telegram_alert(self, trade: Dict) -> None:
         """Write trade alert with market signal context to pending alerts file."""
@@ -1521,6 +1655,15 @@ class HTFLiveBot:
                             return None
             except Exception as exc:
                 logger.debug("Exhaustion filter check failed: %s", exc)
+
+        # ── Guard: Market Signal Gate ──
+        # Low-confidence entries need confirmation from real market signals
+        # Applies to new entries AND reversals (close existing + open opposite)
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_signal_gate(action, confidence):
+                return None
 
         trade: Optional[Dict] = None
 
