@@ -78,9 +78,9 @@ TAKE_PROFIT_PCT = 0.030  # 3.0% take profit
 TRADING_FEE = 0.0004   # 0.04% taker fee
 
 # Trailing stop configuration
-TRAILING_BREAKEVEN_PCT = 0.01    # At +1% profit, move SL to break-even
-TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit
-TRAILING_DISTANCE_PCT = 0.01     # Trail 1% behind peak
+TRAILING_BREAKEVEN_PCT = 0.01    # At +1% profit, activate trailing stop
+TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit (legacy, kept for BOS overlay)
+TRAILING_DISTANCE_PCT = 0.005    # Trail 0.5% behind peak (continuous after breakeven)
 
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
@@ -1251,29 +1251,26 @@ class HTFLiveBot:
         new_tp = self.tp_price
         adjustment_reason = ""
 
-        if profit_pct >= TRAILING_LOCK_PCT:
-            # At +2% profit → lock 50% of profit from entry
+        if profit_pct >= TRAILING_BREAKEVEN_PCT:
+            # Continuous trailing stop: trail TRAILING_DISTANCE_PCT behind peak price
+            # At +1% profit → SL = peak - 0.5% distance (locks ~0.5% profit)
+            # At +1.5% profit → SL = peak - 0.5% (locks ~1% profit)
+            # At +2% profit → SL = peak - 0.5% (locks ~1.5% profit)
+            # This eliminates the gap between breakeven and profit lock
             if self.position == 1:
-                locked_sl = entry + 0.5 * (self.peak_price - entry)
-                if locked_sl > new_sl:
-                    new_sl = locked_sl
-                    adjustment_reason = "trailing_lock_50pct"
+                trailing_sl = self.peak_price * (1.0 - TRAILING_DISTANCE_PCT)
+                # Never let trailing SL go below entry (minimum breakeven)
+                trailing_sl = max(trailing_sl, entry)
+                if trailing_sl > new_sl:
+                    new_sl = trailing_sl
+                    adjustment_reason = "trailing_continuous"
             else:
-                locked_sl = entry - 0.5 * (entry - self.peak_price)
-                if new_sl <= 0 or locked_sl < new_sl:
-                    new_sl = locked_sl
-                    adjustment_reason = "trailing_lock_50pct"
-
-        elif profit_pct >= TRAILING_BREAKEVEN_PCT:
-            # At +1% profit → move SL to break-even (entry price)
-            if self.position == 1:
-                if entry > new_sl:
-                    new_sl = entry
-                    adjustment_reason = "trailing_breakeven"
-            else:
-                if new_sl <= 0 or entry < new_sl:
-                    new_sl = entry
-                    adjustment_reason = "trailing_breakeven"
+                trailing_sl = self.peak_price * (1.0 + TRAILING_DISTANCE_PCT)
+                # Never let trailing SL go above entry (minimum breakeven)
+                trailing_sl = min(trailing_sl, entry)
+                if new_sl <= 0 or trailing_sl < new_sl:
+                    new_sl = trailing_sl
+                    adjustment_reason = "trailing_continuous"
 
         # --- BOS/CHOCH overlay (ONLY when profitable) ---
         if is_profitable and self._last_structure_signals:
