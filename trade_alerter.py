@@ -431,17 +431,71 @@ def format_liquidation_risk(alert: dict) -> str:
 
 
 def _format_signals(signals: dict) -> list:
-    """Format market signals into message lines."""
+    """Format market signals into message lines — includes all 4 gate signals."""
     lines = []
     if not signals:
         return lines
 
-    whale = signals.get("whale", {})
-    if whale:
-        direction = whale.get("direction", "NEUTRAL")
-        confidence = whale.get("confidence", 0)
-        lines.append(f"🐋 Whale: {direction} ({confidence}%)")
+    # Signal Gate decision (if present)
+    gate = signals.get("signal_gate", {})
+    if gate:
+        result = gate.get("result", "N/A")
+        confirms = gate.get("confirmations", 0)
+        tier = gate.get("tier", "?")
+        if result == "PASS":
+            lines.append(f"🚦 Signal Gate: ✅ PASS ({confirms}/4 confirms) — {tier}")
+        elif result == "AUTONOMOUS":
+            lines.append(f"🚦 Signal Gate: 🟢 AUTONOMOUS (conf ≥ 80%)")
+        else:
+            lines.append(f"🚦 Signal Gate: ❌ {result} ({confirms}/4 confirms)")
 
+    # 1. MTF Alignment
+    mtf = signals.get("mtf", {})
+    if mtf:
+        bias = mtf.get("bias", "NEUTRAL")
+        aligned = mtf.get("aligned", False)
+        strength = mtf.get("strength", 0)
+        align_icon = "✅" if aligned else "➖"
+        sigs = mtf.get("signals", {})
+        tf_str = ""
+        if sigs:
+            parts = []
+            for tf in ["15m", "1h", "4h"]:
+                s = sigs.get(tf, {})
+                if s:
+                    d = s.get("direction", "?")[:1].upper()
+                    rsi = s.get("rsi", 0)
+                    parts.append(f"{tf}:{d}({rsi:.0f})")
+            tf_str = " | " + " ".join(parts) if parts else ""
+        lines.append(f"📊 MTF: {align_icon} {bias} (str={strength:.0%}){tf_str}")
+
+    # 2. Order Flow
+    order_flow = signals.get("order_flow", {})
+    if order_flow:
+        bias = order_flow.get("bias", "neutral").title()
+        score = order_flow.get("score", 0)
+        buys = order_flow.get("large_buys", 0)
+        sells = order_flow.get("large_sells", 0)
+        score_str = f"{score:+.2f}" if isinstance(score, (int, float)) else "N/A"
+        lines.append(f"💹 Order Flow: {bias} (score={score_str} | {buys}B/{sells}S)")
+
+    # 3. Regime
+    regime = signals.get("regime", {})
+    if regime:
+        regime_type = regime.get("type", regime.get("state", "unknown"))
+        adx = regime.get("adx")
+        adx_str = f" ADX={adx:.0f}" if adx else ""
+        lines.append(f"📉 Regime: {regime_type}{adx_str}")
+
+    # 4. Orderbook Imbalance
+    ob = signals.get("orderbook", {})
+    if ob:
+        ob_bias = ob.get("bias", "neutral").title()
+        imbalance = ob.get("imbalance_10", 0)
+        imb_str = f"{imbalance:+.2f}" if isinstance(imbalance, (int, float)) else "N/A"
+        lines.append(f"📖 Orderbook: {ob_bias} (imbalance={imb_str})")
+
+    # Funding rate
     funding = signals.get("funding", {})
     if funding:
         rate = funding.get("rate", 0)
@@ -449,19 +503,12 @@ def _format_signals(signals: dict) -> list:
         bias_display = bias.replace("_", " ").title() if bias else "Neutral"
         lines.append(f"💱 Funding: {bias_display} ({rate})")
 
-    order_flow = signals.get("order_flow", {})
-    if order_flow:
-        bias = order_flow.get("bias", "neutral").title()
-        buys = order_flow.get("large_buys", 0)
-        sells = order_flow.get("large_sells", 0)
-        lines.append(f"📊 Order Flow: {bias} ({buys}B/{sells}S)")
-
-    regime = signals.get("regime", {})
-    if regime:
-        state = regime.get("state", "unknown")
-        adx = regime.get("adx")
-        if adx:
-            lines.append(f"📉 Regime: {state} (ADX: {adx})")
+    # Whale signals
+    whale = signals.get("whale", {})
+    if whale:
+        direction = whale.get("direction", "NEUTRAL")
+        confidence = whale.get("confidence", 0)
+        lines.append(f"🐋 Whale: {direction} ({confidence}%)")
 
     return lines
 

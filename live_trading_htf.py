@@ -281,6 +281,7 @@ class HTFLiveBot:
         # swing_lookback=8 for 5m candles (noisier than 15m, needs wider window)
         self.market_structure = MarketStructure(swing_lookback=8)
         self._last_structure_signals: Dict = {}
+        self._last_signal_gate: Dict = {}  # Last signal gate decision for alerts
 
         # Phase 1 §3.2: Regime detector for adaptive SL/TP multipliers
         try:
@@ -689,22 +690,42 @@ class HTFLiveBot:
         """Extract a compact signal summary from market analysis data."""
         summary = {}
 
+        # MTF Alignment (key signal for gate)
+        mtf = market.get("mtf", {})
+        if mtf:
+            summary["mtf"] = {
+                "bias": mtf.get("bias", "NEUTRAL"),
+                "aligned": mtf.get("aligned", False),
+                "strength": mtf.get("strength", 0),
+                "signals": mtf.get("signals", {}),
+            }
+
+        # Order flow (full data for gate)
+        of = market.get("order_flow", {})
+        if of:
+            summary["order_flow"] = {
+                "bias": of.get("bias", "neutral"),
+                "score": of.get("score", 0),
+                "large_buys": of.get("large_buys", of.get("notable", {}).get("large_buys", 0)),
+                "large_sells": of.get("large_sells", of.get("notable", {}).get("large_sells", 0)),
+            }
+
         # Regime
         regime = market.get("regime", {})
         if regime:
             summary["regime"] = {
-                "state": regime.get("regime", "unknown"),
+                "type": regime.get("type", "UNKNOWN"),
+                "state": regime.get("regime", regime.get("type", "unknown")),
                 "adx": regime.get("adx"),
                 "trend": regime.get("trend_strength"),
             }
 
-        # Whale signals
-        whale = market.get("whale", {})
-        if whale:
-            summary["whale"] = {
-                "direction": whale.get("direction", "NEUTRAL"),
-                "score": whale.get("score", 0),
-                "confidence": whale.get("confidence", 0),
+        # Orderbook Imbalance (key signal for gate)
+        ob = of.get("orderbook", {}) if of else {}
+        if ob:
+            summary["orderbook"] = {
+                "bias": ob.get("bias", "neutral"),
+                "imbalance_10": ob.get("imbalance_10", 0),
             }
 
         # Funding rate
@@ -715,13 +736,13 @@ class HTFLiveBot:
                 "bias": funding.get("bias"),
             }
 
-        # Order flow
-        of = market.get("order_flow", {})
-        if of:
-            summary["order_flow"] = {
-                "bias": of.get("bias", "neutral"),
-                "large_buys": of.get("large_buys", 0),
-                "large_sells": of.get("large_sells", 0),
+        # Whale signals
+        whale = market.get("whale", {})
+        if whale:
+            summary["whale"] = {
+                "direction": whale.get("direction", "NEUTRAL"),
+                "score": whale.get("score", 0),
+                "confidence": whale.get("confidence", 0),
             }
 
         # Price
@@ -746,6 +767,7 @@ class HTFLiveBot:
           4. Orderbook Imbalance — bid/ask pressure matches direction
         """
         if confidence >= SIGNAL_GATE_AUTONOMOUS:
+            self._last_signal_gate = {"result": "AUTONOMOUS", "tier": "Tier 1", "confirmations": 4, "details": "conf >= 0.80"}
             return True  # Tier 1: autonomous
 
         if action == ACTION_HOLD:
@@ -841,6 +863,14 @@ class HTFLiveBot:
         allowed = confirmations >= SIGNAL_GATE_MIN_CONFIRMS
         detail_str = " | ".join(details)
 
+        self._last_signal_gate = {
+            "result": "PASS" if allowed else "BLOCKED",
+            "tier": "Tier 2",
+            "confirmations": confirmations,
+            "vetoes": vetoes,
+            "details": detail_str,
+        }
+
         if allowed:
             logger.info(
                 "✅ Signal gate PASS: %s conf=%.2f | %d/%d confirms | %s",
@@ -860,6 +890,10 @@ class HTFLiveBot:
             # Fetch current market signals for context
             market = self._fetch_market_signals(trade.get("symbol", "BTCUSDT"))
             signal_summary = self._build_signal_summary(market)
+
+            # Include signal gate decision in alerts
+            if self._last_signal_gate:
+                signal_summary["signal_gate"] = self._last_signal_gate
 
             alert_file = Path("logs/htf_pending_alerts.jsonl")
             alert_file.parent.mkdir(parents=True, exist_ok=True)
