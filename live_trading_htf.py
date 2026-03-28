@@ -2268,6 +2268,7 @@ class HTFLiveBot:
                 return status
 
             # Phase 1 §3.4: Time-based stagnant exit (>6h, PnL between -0.3% and +0.5%)
+            # BUT: keep position if model confidence ≥ 0.80 OR 2/4 market signals agree
             if self.position != 0 and self.position_price > 0 and self.position_entry_time > 0:
                 _time_in_pos = time.time() - self.position_entry_time
                 if _time_in_pos > 21600:  # 6 hours
@@ -2276,17 +2277,96 @@ class HTFLiveBot:
                     else:
                         _stagnant_pct = (self.position_price - current_price) / self.position_price
                     if -0.003 <= _stagnant_pct <= 0.005:
-                        logger.info(
-                            "⏱️ TIME-BASED STAGNANT EXIT: %s in position %.1fh, "
-                            "PnL=%+.3f%% (within stagnant band [-0.3%%, +0.5%%]) → closing",
-                            self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
-                        )
-                        stagnant_trade = self._close_position(current_price, "STAGNANT_EXIT", 1.0)
-                        status["action"] = stagnant_trade.get("action", "CLOSE")
-                        status["position"] = self.position
-                        status["balance"] = self.balance
-                        status["realized_pnl"] = self.realized_pnl
-                        return status
+                        # Check if we should KEEP the position despite stagnation
+                        _keep_position = False
+                        _keep_reason = ""
+
+                        # Check 1: Model confidence — if agent is still confident, hold
+                        try:
+                            obs = self.compute_observation(df_15m)
+                            if obs is not None:
+                                _action, _conf = self.predict(obs)
+                                # Keep if model confidence ≥ 0.80 AND model still agrees with direction
+                                if _conf >= 0.80:
+                                    _model_wants_long = (_action == ACTION_LONG)
+                                    _model_wants_short = (_action == ACTION_SHORT)
+                                    if (self.position == 1 and _model_wants_long) or \
+                                       (self.position == -1 and _model_wants_short):
+                                        _keep_position = True
+                                        _keep_reason = f"model conf={_conf:.2f} agrees with position"
+                        except Exception as _exc:
+                            logger.debug("Stagnant gate model check failed: %s", _exc)
+
+                        # Check 2: Market signal gate — same logic as entry gate
+                        if not _keep_position:
+                            try:
+                                _direction = "LONG" if self.position == 1 else "SHORT"
+                                _market = self._fetch_market_signals(self.symbol)
+                                if _market:
+                                    _confirmations = 0
+
+                                    # MTF
+                                    _mtf = _market.get("mtf", {})
+                                    _mtf_bias = (_mtf.get("bias") or "NEUTRAL").upper()
+                                    _mtf_aligned = _mtf.get("aligned", False)
+                                    if _direction == "LONG" and _mtf_bias == "BULLISH" and _mtf_aligned:
+                                        _confirmations += 1
+                                    elif _direction == "SHORT" and _mtf_bias == "BEARISH" and _mtf_aligned:
+                                        _confirmations += 1
+
+                                    # Order Flow
+                                    _of = _market.get("order_flow", {})
+                                    _of_score = _of.get("score", 0)
+                                    if isinstance(_of_score, (int, float)):
+                                        if _direction == "LONG" and _of_score > 0.3:
+                                            _confirmations += 1
+                                        elif _direction == "SHORT" and _of_score < -0.3:
+                                            _confirmations += 1
+
+                                    # Regime
+                                    _regime = _market.get("regime", {})
+                                    _regime_type = (_regime.get("type") or "").upper()
+                                    _regime_adx = _regime.get("adx", 0) or 0
+                                    if _direction == "LONG" and "UP" in _regime_type and _regime_adx >= 20:
+                                        _confirmations += 1
+                                    elif _direction == "SHORT" and "DOWN" in _regime_type and _regime_adx >= 20:
+                                        _confirmations += 1
+
+                                    # Orderbook
+                                    _ob = _of.get("orderbook", {})
+                                    _ob_imb = _ob.get("imbalance_10", 0)
+                                    if isinstance(_ob_imb, (int, float)):
+                                        if _direction == "LONG" and _ob_imb > 0.15:
+                                            _confirmations += 1
+                                        elif _direction == "SHORT" and _ob_imb < -0.15:
+                                            _confirmations += 1
+
+                                    if _confirmations >= 2:
+                                        _keep_position = True
+                                        _keep_reason = f"{_confirmations}/4 market signals agree with {_direction}"
+                            except Exception as _exc:
+                                logger.debug("Stagnant gate market check failed: %s", _exc)
+
+                        if _keep_position:
+                            logger.info(
+                                "⏱️ STAGNANT but HOLDING: %s in position %.1fh, "
+                                "PnL=%+.3f%% — keeping because %s",
+                                self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
+                                _keep_reason,
+                            )
+                        else:
+                            logger.info(
+                                "⏱️ TIME-BASED STAGNANT EXIT: %s in position %.1fh, "
+                                "PnL=%+.3f%% (within stagnant band [-0.3%%, +0.5%%]) "
+                                "— no model confidence or market signal support → closing",
+                                self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
+                            )
+                            stagnant_trade = self._close_position(current_price, "STAGNANT_EXIT", 1.0)
+                            status["action"] = stagnant_trade.get("action", "CLOSE")
+                            status["position"] = self.position
+                            status["balance"] = self.balance
+                            status["realized_pnl"] = self.realized_pnl
+                            return status
 
             # 3. Compute observation
             obs = self.compute_observation(df_15m)
