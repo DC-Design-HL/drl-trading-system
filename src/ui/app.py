@@ -1790,6 +1790,184 @@ def on_asset_change():
     st.session_state.market_analysis = None
     # Optional: Reset other asset-specific state if needed
 
+
+def render_system_dashboard():
+    """Render the System Statistics dashboard tab."""
+    import requests as _req
+
+    st.markdown("### 🖥️ System Dashboard")
+
+    API_BASE = os.environ.get("API_SERVER_URL", "http://127.0.0.1:5001")
+
+    # Fetch metrics
+    try:
+        overview = _req.get(f"{API_BASE}/api/metrics/overview", timeout=10).json()
+    except Exception as exc:
+        st.error(f"Could not fetch metrics: {exc}")
+        overview = {}
+
+    if not overview:
+        st.warning("No metrics data available yet. The system needs a few minutes to collect data.")
+        return
+
+    # ── Section 1: System Health ──────────────────────────────────────
+    st.markdown("#### 🏥 Service Health")
+
+    health = overview.get("health", {})
+    if health:
+        # Group by category
+        services_ext = {k: v for k, v in health.items() if not k.startswith("Bot:")}
+        services_bots = {k: v for k, v in health.items() if k.startswith("Bot:")}
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**External Services**")
+            for name, info in services_ext.items():
+                status = info.get("status", "unknown")
+                latency = info.get("response_time_ms", 0)
+                emoji = "🟢" if status == "healthy" else "🟡" if status == "degraded" else "🔴" if status == "down" else "⚪"
+                err = info.get("last_error", "")
+                err_text = f" — _{err[:60]}_" if err and status != "healthy" else ""
+                st.markdown(f"{emoji} **{name}** — {latency:.0f}ms{err_text}")
+
+        with col2:
+            st.markdown("**Trading Bots**")
+            for name, info in services_bots.items():
+                status = info.get("status", "unknown")
+                emoji = "🟢" if status == "healthy" else "🔴"
+                bot_name = name.replace("Bot: ", "")
+                st.markdown(f"{emoji} **{bot_name}**")
+
+        # Refresh button
+        if st.button("🔄 Refresh Health Checks", key="refresh_health"):
+            try:
+                fresh = _req.get(f"{API_BASE}/api/metrics/health/check", timeout=30).json()
+                st.success(f"Health check completed — {sum(1 for v in fresh.values() if v.get('status') == 'healthy')}/{len(fresh)} healthy")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Health check failed: {exc}")
+    else:
+        st.info("Health checks haven't run yet. They run every 60 seconds automatically.")
+
+    st.markdown("---")
+
+    # ── Section 2: API Statistics ─────────────────────────────────────
+    st.markdown("#### 📡 API Statistics")
+
+    api_stats = overview.get("api", {})
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        outbound_rate = api_stats.get("outbound_rate_per_min", 0)
+        st.metric("Outbound Rate", f"{outbound_rate}/min")
+    with col2:
+        inbound_rate = api_stats.get("inbound_rate_per_min", 0)
+        st.metric("Inbound Rate", f"{inbound_rate}/min")
+    with col3:
+        uptime = overview.get("uptime", "0h 0m")
+        st.metric("Uptime", uptime)
+    with col4:
+        total_errors = sum(e.get("count", 0) for e in overview.get("errors", {}).values())
+        st.metric("Total Errors", total_errors)
+
+    # Outbound API breakdown
+    outbound = api_stats.get("outbound", {})
+    if outbound:
+        st.markdown("**Outbound API Calls (us → external)**")
+        rows = []
+        for endpoint, stats in sorted(outbound.items(), key=lambda x: x[1].get("total_calls", 0), reverse=True):
+            rows.append({
+                "Endpoint": endpoint,
+                "Calls": stats.get("total_calls", 0),
+                "Success": stats.get("success", 0),
+                "Errors": stats.get("errors", 0),
+                "Error Rate": stats.get("error_rate", "0%"),
+                "Avg Latency": f"{stats.get('avg_latency_ms', 0):.0f}ms",
+            })
+        if rows:
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    # Inbound API breakdown
+    inbound = api_stats.get("inbound", {})
+    if inbound:
+        st.markdown("**Inbound API Calls (external → us)**")
+        rows = []
+        for endpoint, stats in sorted(inbound.items(), key=lambda x: x[1].get("total_calls", 0), reverse=True):
+            rows.append({
+                "Endpoint": endpoint,
+                "Calls": stats.get("total_calls", 0),
+                "Avg Latency": f"{stats.get('avg_latency_ms', 0):.0f}ms",
+            })
+        if rows:
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ── Section 3: Error Dashboard ────────────────────────────────────
+    st.markdown("#### ❌ Errors")
+
+    errors = overview.get("errors", {})
+    if errors:
+        rows = []
+        for error_type, info in errors.items():
+            rows.append({
+                "Error Type": error_type,
+                "Count": info.get("count", 0),
+                "Last Seen": info.get("last_seen", "N/A"),
+                "Sample": (info.get("sample", "") or "")[:80],
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    else:
+        st.success("No errors recorded since last restart 🎉")
+
+    st.markdown("---")
+
+    # ── Section 4: Trade Statistics ───────────────────────────────────
+    st.markdown("#### 📊 Trade Statistics")
+
+    trades = overview.get("trades", {})
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**🧪 Testnet Trades**")
+        testnet = trades.get("testnet", {})
+        if testnet.get("total_trades", 0) > 0:
+            tc1, tc2, tc3 = st.columns(3)
+            tc1.metric("Total", testnet.get("total_trades", 0))
+            tc2.metric("Win Rate", testnet.get("win_rate", "N/A"))
+            tc3.metric("Total PnL", f"${testnet.get('total_pnl', 0):,.2f}")
+
+            tc4, tc5, tc6 = st.columns(3)
+            tc4.metric("Best", f"${testnet.get('best_trade', 0):,.2f}")
+            tc5.metric("Worst", f"${testnet.get('worst_trade', 0):,.2f}")
+            tc6.metric("Avg", f"${testnet.get('avg_pnl', 0):,.2f}")
+
+            recent = testnet.get("recent_trades", [])
+            if recent:
+                st.markdown("**Recent Trades:**")
+                st.dataframe(recent, use_container_width=True, hide_index=True)
+        else:
+            st.info("No testnet trades recorded yet in this session.")
+
+    with col2:
+        st.markdown("**📝 Paper Trades**")
+        paper = trades.get("paper", {})
+        if paper.get("total_trades", 0) > 0:
+            pc1, pc2, pc3 = st.columns(3)
+            pc1.metric("Total", paper.get("total_trades", 0))
+            pc2.metric("Win Rate", paper.get("win_rate", "N/A"))
+            pc3.metric("Total PnL", f"${paper.get('total_pnl', 0):,.2f}")
+
+            recent = paper.get("recent_trades", [])
+            if recent:
+                st.markdown("**Recent Trades:**")
+                st.dataframe(recent, use_container_width=True, hide_index=True)
+        else:
+            st.info("No paper trades recorded yet in this session.")
+
+
 def main():
     """Main application entry point."""
     
@@ -1990,8 +2168,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_system = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "🖥️ System"
         ])
         
         with tab_chart:
@@ -3556,6 +3734,9 @@ def main():
                 if st.button("🚀 Run Backtest", key="run_backtest"):
                     st.info("To run backtest, execute in terminal:")
                     st.code("python train_advanced.py --evaluate ./data/models/advanced_agent.zip")
+
+        with tab_system:
+            render_system_dashboard()
 
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
