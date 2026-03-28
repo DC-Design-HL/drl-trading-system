@@ -1245,6 +1245,84 @@ def get_htf_performance():
         return jsonify({'error': str(e)}), 500
 
 
+# ── Metrics & Health Endpoints ────────────────────────────────────────────
+
+@app.route('/api/metrics/overview')
+def metrics_overview():
+    """Get complete system metrics overview (API stats, errors, health, trades)."""
+    try:
+        from src.metrics.collector import get_collector
+        return jsonify(get_collector().get_overview())
+    except Exception as e:
+        logger.error(f"GET /api/metrics/overview error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/api')
+def metrics_api():
+    """Get API call statistics (inbound/outbound counts, latency, error rates)."""
+    try:
+        from src.metrics.collector import get_collector
+        return jsonify(get_collector().get_api_stats())
+    except Exception as e:
+        logger.error(f"GET /api/metrics/api error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/errors')
+def metrics_errors():
+    """Get error statistics by type."""
+    try:
+        from src.metrics.collector import get_collector
+        return jsonify(get_collector().get_error_stats())
+    except Exception as e:
+        logger.error(f"GET /api/metrics/errors error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/health')
+def metrics_health():
+    """Get service health status for all integrations."""
+    try:
+        from src.metrics.collector import get_collector
+        return jsonify(get_collector().get_health_stats())
+    except Exception as e:
+        logger.error(f"GET /api/metrics/health error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/health/check')
+def metrics_health_check_now():
+    """Run health checks immediately and return results."""
+    try:
+        from src.metrics.health_checker import run_health_checks
+        results = run_health_checks()
+        return jsonify(results)
+    except Exception as e:
+        logger.error(f"GET /api/metrics/health/check error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/trades')
+def metrics_trades():
+    """Get trade statistics for testnet and paper trading."""
+    try:
+        from src.metrics.collector import get_collector
+        return jsonify(get_collector().get_trade_stats())
+    except Exception as e:
+        logger.error(f"GET /api/metrics/trades error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# Start background health checker when API server starts
+try:
+    from src.metrics.health_checker import start_health_checker
+    _health_thread = start_health_checker()
+    logger.info("Background health checker started")
+except Exception as _hc_exc:
+    logger.warning("Could not start health checker: %s", _hc_exc)
+
+
 if __name__ == '__main__':
     # threaded=True is CRITICAL to prevent single requests (like Market Analysis fallback)
     # from locking up the entire dashboard and causing 'Trades: 0' sidebars

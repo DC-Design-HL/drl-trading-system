@@ -67,42 +67,86 @@ class BinanceFuturesConnector:
         ).hexdigest()
         return f"{query}&signature={sig}"
 
+    @staticmethod
+    def _record_metric(path: str, method: str, success: bool, latency_ms: float, error: str = ""):
+        """Record API call metric (best-effort, never throws)."""
+        try:
+            from src.metrics.collector import get_collector
+            endpoint = f"binance{path}"
+            get_collector().record_api_call(
+                "outbound", endpoint, success=success,
+                latency_ms=latency_ms, error=error,
+            )
+            if not success:
+                error_type = "binance_api_error"
+                if "-4120" in error:
+                    error_type = "binance_algo_migration"
+                elif "-2021" in error:
+                    error_type = "binance_would_trigger"
+                elif "-4509" in error:
+                    error_type = "binance_gte_position"
+                elif "timeout" in error.lower():
+                    error_type = "binance_timeout"
+                elif "Connection" in error:
+                    error_type = "binance_connection"
+                get_collector().record_error(error_type, error)
+        except Exception:
+            pass  # Metrics should never break trading
+
     def _get(
         self,
         path: str,
         params: Optional[Dict] = None,
         signed: bool = False,
     ) -> Any:
+        t0 = time.time()
         p = dict(params or {})
-        if signed:
-            p["timestamp"] = int(time.time() * 1000)
-            p["recvWindow"] = self.recv_window
-            url = f"{self.base_url}{path}?{self._sign_query(p)}"
-            resp = self._session.get(url, timeout=15)
-        else:
-            resp = self._session.get(
-                f"{self.base_url}{path}", params=p or None, timeout=15
-            )
-        self._raise_for_status(resp)
-        return resp.json()
+        try:
+            if signed:
+                p["timestamp"] = int(time.time() * 1000)
+                p["recvWindow"] = self.recv_window
+                url = f"{self.base_url}{path}?{self._sign_query(p)}"
+                resp = self._session.get(url, timeout=15)
+            else:
+                resp = self._session.get(
+                    f"{self.base_url}{path}", params=p or None, timeout=15
+                )
+            self._raise_for_status(resp)
+            self._record_metric(path, "GET", True, (time.time() - t0) * 1000)
+            return resp.json()
+        except Exception as exc:
+            self._record_metric(path, "GET", False, (time.time() - t0) * 1000, str(exc))
+            raise
 
     def _post(self, path: str, params: Optional[Dict] = None) -> Any:
+        t0 = time.time()
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000)
         p["recvWindow"] = self.recv_window
         url = f"{self.base_url}{path}?{self._sign_query(p)}"
-        resp = self._session.post(url, timeout=15)
-        self._raise_for_status(resp)
-        return resp.json()
+        try:
+            resp = self._session.post(url, timeout=15)
+            self._raise_for_status(resp)
+            self._record_metric(path, "POST", True, (time.time() - t0) * 1000)
+            return resp.json()
+        except Exception as exc:
+            self._record_metric(path, "POST", False, (time.time() - t0) * 1000, str(exc))
+            raise
 
     def _delete(self, path: str, params: Optional[Dict] = None) -> Any:
+        t0 = time.time()
         p = dict(params or {})
         p["timestamp"] = int(time.time() * 1000)
         p["recvWindow"] = self.recv_window
         url = f"{self.base_url}{path}?{self._sign_query(p)}"
-        resp = self._session.delete(url, timeout=15)
-        self._raise_for_status(resp)
-        return resp.json()
+        try:
+            resp = self._session.delete(url, timeout=15)
+            self._raise_for_status(resp)
+            self._record_metric(path, "DELETE", True, (time.time() - t0) * 1000)
+            return resp.json()
+        except Exception as exc:
+            self._record_metric(path, "DELETE", False, (time.time() - t0) * 1000, str(exc))
+            raise
 
     @staticmethod
     def _raise_for_status(resp: requests.Response) -> None:
