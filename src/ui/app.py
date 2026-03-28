@@ -964,92 +964,78 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                     console.log('[BOS/CHOCH] Swing low line drawn:', swingLowLine.length, 'points');
                 }}
 
-                // --- BOS signals as horizontal lines with markers ---
-                const bosSignals = msData.bos_signals || [];
-                bosSignals.forEach((bos, idx) => {{
-                    const isFake = bos.is_fake;
-                    const isBullish = bos.direction === 'bullish';
-                    const lineColor = isBullish
-                        ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
-                        : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
-                    const lineStyle = isFake ? 1 : 2;  // Dotted for fake, Dashed for real
-                    const label = isBullish
-                        ? (isFake ? 'BOS↑(fake)' : 'BOS↑')
-                        : (isFake ? 'BOS↓(fake)' : 'BOS↓');
+                // --- Helper: draw structure break line from Candle A wick → Candle B body ---
+                const candleTimes = candleData.map(c => c.time);
 
-                    // Draw a short horizontal line at the BOS level
-                    // spanning from the signal time back a few candles
-                    const sigTime = bos.time;
-                    const candleTimes = candleData.map(c => c.time);
-                    const sigIdx = candleTimes.indexOf(sigTime);
-                    const startIdx = Math.max(0, sigIdx - 8);
-                    const endIdx = Math.min(candleTimes.length - 1, sigIdx + 2);
-
-                    if (sigIdx >= 0 && startIdx < endIdx) {{
-                        const bosLine = chart.addLineSeries({{
-                            color: lineColor,
-                            lineWidth: 2,
-                            lineStyle: lineStyle,
-                            lastValueVisible: false,
-                            priceLineVisible: false,
-                            crosshairMarkerVisible: false,
-                        }});
-                        bosLine.setData([
-                            {{ time: candleTimes[startIdx], value: bos.level }},
-                            {{ time: candleTimes[endIdx], value: bos.level }},
-                        ]);
-                        // Add label as marker on this line
-                        bosLine.setMarkers([{{
-                            time: candleTimes[Math.min(sigIdx, endIdx)],
-                            position: isBullish ? 'aboveBar' : 'belowBar',
-                            color: lineColor,
-                            shape: 'square',
-                            text: label,
-                        }}]);
+                function drawStructureLine(sig, sigType) {{
+                    const isFake = sig.is_fake;
+                    const isBullish = sig.direction === 'bullish';
+                    let lineColor;
+                    if (sigType === 'bos') {{
+                        lineColor = isBullish
+                            ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
+                            : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
+                    }} else {{
+                        lineColor = isBullish
+                            ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
+                            : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
                     }}
-                }});
-
-                // --- CHOCH signals as horizontal lines with markers ---
-                const chochSignals = msData.choch_signals || [];
-                chochSignals.forEach((choch, idx) => {{
-                    const isFake = choch.is_fake;
-                    const isBullish = choch.direction === 'bullish';
-                    const lineColor = isBullish
-                        ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
-                        : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
                     const lineStyle = isFake ? 1 : 2;  // 1=Dotted, 2=Dashed
-                    const label = isBullish
-                        ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑')
-                        : (isFake ? 'CHOCH↓(fake)' : 'CHOCH↓');
+                    const label = sigType === 'bos'
+                        ? (isBullish ? (isFake ? 'BOS↑(fake)' : 'BOS↑') : (isFake ? 'BOS↓(fake)' : 'BOS↓'))
+                        : (isBullish ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑') : (isFake ? 'CHOCH↓(fake)' : 'CHOCH↓'));
 
-                    const sigTime = choch.time;
-                    const candleTimes = candleData.map(c => c.time);
-                    const sigIdx = candleTimes.indexOf(sigTime);
-                    const startIdx = Math.max(0, sigIdx - 8);
-                    const endIdx = Math.min(candleTimes.length - 1, sigIdx + 2);
+                    // Candle B (break candle) index
+                    const breakIdx = candleTimes.indexOf(sig.time);
+                    // Candle A (swing origin) index
+                    const originIdx = sig.origin_time ? candleTimes.indexOf(sig.origin_time) : -1;
 
-                    if (sigIdx >= 0 && startIdx < endIdx) {{
-                        const chochLine = chart.addLineSeries({{
-                            color: lineColor,
-                            lineWidth: 2,
-                            lineStyle: lineStyle,
-                            lastValueVisible: false,
-                            priceLineVisible: false,
-                            crosshairMarkerVisible: false,
-                        }});
-                        chochLine.setData([
-                            {{ time: candleTimes[startIdx], value: choch.level }},
-                            {{ time: candleTimes[endIdx], value: choch.level }},
-                        ]);
-                        chochLine.setMarkers([{{
-                            time: candleTimes[Math.min(sigIdx, endIdx)],
-                            position: isBullish ? 'aboveBar' : 'belowBar',
-                            color: lineColor,
-                            shape: 'square',
-                            text: label,
-                        }}]);
-                    }}
-                }});
+                    if (breakIdx < 0) return;
+
+                    // Origin = Candle A wick price, Break = Candle B body price
+                    const originPrice = sig.origin_price || sig.level;
+                    const breakBodyPrice = sig.break_body_price || sig.level;
+
+                    // Start point: Candle A wick (or fallback to a few candles back)
+                    const startTime = originIdx >= 0 ? candleTimes[originIdx] : candleTimes[Math.max(0, breakIdx - 8)];
+                    const startPrice = originIdx >= 0 ? originPrice : sig.level;
+
+                    // End point: Candle B body
+                    const endTime = candleTimes[breakIdx];
+                    const endPrice = breakBodyPrice;
+
+                    const lineSeries = chart.addLineSeries({{
+                        color: lineColor,
+                        lineWidth: 2,
+                        lineStyle: lineStyle,
+                        lastValueVisible: false,
+                        priceLineVisible: false,
+                        crosshairMarkerVisible: false,
+                    }});
+
+                    // Draw diagonal line from A wick → B body
+                    lineSeries.setData([
+                        {{ time: startTime, value: startPrice }},
+                        {{ time: endTime, value: endPrice }},
+                    ]);
+
+                    // Label marker at the break candle
+                    lineSeries.setMarkers([{{
+                        time: endTime,
+                        position: isBullish ? 'aboveBar' : 'belowBar',
+                        color: lineColor,
+                        shape: 'square',
+                        text: label,
+                    }}]);
+                }}
+
+                // --- BOS signals ---
+                const bosSignals = msData.bos_signals || [];
+                bosSignals.forEach((bos) => drawStructureLine(bos, 'bos'));
+
+                // --- CHOCH signals ---
+                const chochSignals = msData.choch_signals || [];
+                chochSignals.forEach((choch) => drawStructureLine(choch, 'choch'));
 
                 // Log summary
                 console.log('[chart] Market structure loaded:',

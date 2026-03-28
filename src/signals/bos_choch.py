@@ -63,10 +63,13 @@ class StructureSignal:
     """A BOS or CHOCH signal."""
     kind: str            # "bos" | "choch"
     direction: str       # "bullish" | "bearish"
-    bar_index: int       # bar where the break happened
+    bar_index: int       # bar where the break happened (Candle B)
     level: float         # price level that was broken
     is_fake: bool = False
     timestamp: Optional[str] = None
+    origin_index: int = -1       # bar index of the swing point (Candle A)
+    origin_price: float = 0.0    # wick price of Candle A (swing high or low)
+    break_body_price: float = 0.0  # body price of Candle B (open or close that broke)
 
 
 @dataclass
@@ -254,6 +257,66 @@ class MarketStructure:
         return "ranging"
 
     # ------------------------------------------------------------------
+    # Clean-line validation (Chen's rule)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_clean_break(
+        df: pd.DataFrame,
+        candle_a_idx: int,
+        candle_a_price: float,
+        candle_b_idx: int,
+        direction: str,
+    ) -> bool:
+        """
+        Validate that the structure break line from Candle A's wick to
+        Candle B's body is CLEAN — no intermediate candle wicks intersect it.
+
+        Rule (5m BOS/CHOCH validation):
+          - The line starts at Candle A's wick (the swing point price).
+          - It ends at Candle B's body (the open/close area that breaks the level).
+          - The straight line between A and B must NOT pass through any
+            intermediate candle's wick (high for bullish, low for bearish).
+
+        If any intermediate wick crosses the line, the break is INVALID.
+
+        For bullish breaks: line goes from low wick (A) upward to close/open (B).
+          - Invalid if any intermediate candle's HIGH pokes above the line.
+          - Actually: the line represents the breakout level (candle_a_price).
+          - For a clean bullish break, no intermediate wick should reach above
+            the level — because that would mean price already touched/exceeded
+            the level before Candle B, making B's break non-impulsive.
+
+        Simplified clean-line rule:
+          - Bullish: No intermediate candle's HIGH should reach or exceed
+            candle_a_price (the swing high being broken).
+          - Bearish: No intermediate candle's LOW should reach or drop below
+            candle_a_price (the swing low being broken).
+
+        This ensures the move from A to B is direct and impulsive.
+        """
+        if candle_b_idx <= candle_a_idx + 1:
+            # Adjacent candles — always clean (no intermediates)
+            return True
+
+        highs = df["high"].values
+        lows = df["low"].values
+
+        for bar in range(candle_a_idx + 1, candle_b_idx):
+            if direction == "bullish":
+                # For bullish break above swing high: no intermediate wick
+                # should have already reached the level being broken
+                if highs[bar] >= candle_a_price:
+                    return False
+            else:
+                # For bearish break below swing low: no intermediate wick
+                # should have already reached the level being broken
+                if lows[bar] <= candle_a_price:
+                    return False
+
+        return True
+
+    # ------------------------------------------------------------------
     # BOS / CHOCH detection across entire chart
     # ------------------------------------------------------------------
 
@@ -266,6 +329,11 @@ class MarketStructure:
         Walk through swing points chronologically and detect ALL BOS and
         CHOCH events in the chart history.
 
+        Validation: Each break must pass the clean-line test — the path from
+        Candle A (swing point wick) to Candle B (breaking candle body) must
+        not have any intermediate wicks intersecting the line. Only clean,
+        uninterrupted price movement qualifies as a valid structural break.
+
         Returns (bos_signals, choch_signals).
         """
         bos_signals: List[StructureSignal] = []
@@ -275,6 +343,7 @@ class MarketStructure:
             return bos_signals, choch_signals
 
         closes = df["close"].values
+        opens = df["open"].values
         length = len(df)
 
         # Walk through swings and detect breaks
@@ -319,40 +388,95 @@ class MarketStructure:
                     if sp.kind == "high" and trend == "bullish":
                         for bar in range(sp.index + 1, scan_limit):
                             if closes[bar] > sp.price:
+                                # Validate clean line: no intermediate wick
+                                # should touch/exceed the swing high level
+                                if not self._is_clean_break(
+                                    df, sp.index, sp.price, bar, "bullish"
+                                ):
+                                    logger.debug(
+                                        "BOS bullish rejected (dirty line): "
+                                        "swing_idx=%d break_idx=%d level=%.2f",
+                                        sp.index, bar, sp.price,
+                                    )
+                                    break  # not clean — skip this break entirely
                                 ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                # Candle B body price = the close that broke above
+                                body_price = float(closes[bar])
                                 bos_signals.append(StructureSignal(
                                     kind="bos", direction="bullish",
                                     bar_index=bar, level=sp.price, timestamp=ts,
+                                    origin_index=sp.index,
+                                    origin_price=sp.price,
+                                    break_body_price=body_price,
                                 ))
                                 break
 
                     elif sp.kind == "low" and trend == "bearish":
                         for bar in range(sp.index + 1, scan_limit):
                             if closes[bar] < sp.price:
+                                if not self._is_clean_break(
+                                    df, sp.index, sp.price, bar, "bearish"
+                                ):
+                                    logger.debug(
+                                        "BOS bearish rejected (dirty line): "
+                                        "swing_idx=%d break_idx=%d level=%.2f",
+                                        sp.index, bar, sp.price,
+                                    )
+                                    break
                                 ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                body_price = float(closes[bar])
                                 bos_signals.append(StructureSignal(
                                     kind="bos", direction="bearish",
                                     bar_index=bar, level=sp.price, timestamp=ts,
+                                    origin_index=sp.index,
+                                    origin_price=sp.price,
+                                    break_body_price=body_price,
                                 ))
                                 break
 
                     elif sp.kind == "high" and trend == "bearish":
                         for bar in range(sp.index + 1, scan_limit):
                             if closes[bar] > sp.price:
+                                if not self._is_clean_break(
+                                    df, sp.index, sp.price, bar, "bullish"
+                                ):
+                                    logger.debug(
+                                        "CHOCH bullish rejected (dirty line): "
+                                        "swing_idx=%d break_idx=%d level=%.2f",
+                                        sp.index, bar, sp.price,
+                                    )
+                                    break
                                 ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                body_price = float(closes[bar])
                                 choch_signals.append(StructureSignal(
                                     kind="choch", direction="bullish",
                                     bar_index=bar, level=sp.price, timestamp=ts,
+                                    origin_index=sp.index,
+                                    origin_price=sp.price,
+                                    break_body_price=body_price,
                                 ))
                                 break
 
                     elif sp.kind == "low" and trend == "bullish":
                         for bar in range(sp.index + 1, scan_limit):
                             if closes[bar] < sp.price:
+                                if not self._is_clean_break(
+                                    df, sp.index, sp.price, bar, "bearish"
+                                ):
+                                    logger.debug(
+                                        "CHOCH bearish rejected (dirty line): "
+                                        "swing_idx=%d break_idx=%d level=%.2f",
+                                        sp.index, bar, sp.price,
+                                    )
+                                    break
                                 ts = str(df.index[bar]) if hasattr(df.index, "strftime") else None
+                                body_price = float(closes[bar])
                                 choch_signals.append(StructureSignal(
                                     kind="choch", direction="bearish",
                                     bar_index=bar, level=sp.price, timestamp=ts,
+                                    origin_index=sp.index,
+                                    origin_price=sp.price,
+                                    break_body_price=body_price,
                                 ))
                                 break
 

@@ -729,6 +729,9 @@ def get_market_structure():
                 "level": sig.level,
                 "direction": sig.direction,
                 "is_fake": sig.is_fake,
+                "origin_time": int(time_values[sig.origin_index]) if 0 <= sig.origin_index < len(time_values) else None,
+                "origin_price": sig.origin_price,
+                "break_body_price": sig.break_body_price,
             })
 
         choch_list = []
@@ -738,6 +741,9 @@ def get_market_structure():
                 "level": sig.level,
                 "direction": sig.direction,
                 "is_fake": sig.is_fake,
+                "origin_time": int(time_values[sig.origin_index]) if 0 <= sig.origin_index < len(time_values) else None,
+                "origin_price": sig.origin_price,
+                "break_body_price": sig.break_body_price,
             })
 
         return jsonify({

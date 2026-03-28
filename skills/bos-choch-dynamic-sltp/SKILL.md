@@ -89,11 +89,31 @@ The `MarketStructure` class provides:
 3. **Testnet bots sync SL/TP changes to exchange** via `testnet_executor.update_sl_tp()` which cancels old + places new STOP_MARKET / TAKE_PROFIT_MARKET orders
 4. **Paper bots only adjust internal state** — no exchange interaction
 
-### Fake Signal Detection (3 criteria)
+### Clean-Line Validation Rule (Primary Filter)
+
+**This is the #1 validation rule for ALL BOS/CHOCH signals on 5m timeframe.**
+
+A structure break is only valid if the line from **Candle A** (the swing point) to **Candle B** (the breaking candle) is **clean and direct**:
+
+| Element | Definition |
+|---------|-----------|
+| **Candle A** | The swing point candle — line starts at its **wick** (high for swing high, low for swing low) |
+| **Candle B** | The breaking candle — line ends at its **body** (open/close area that closes beyond the level) |
+| **Clean line** | The straight path from A's wick to B's body does NOT intersect any intermediate candle wicks |
+
+**Invalid condition**: If ANY candle between A and B has a wick that touches or crosses the line (i.e., any intermediate high reaches the swing high level for bullish, or any intermediate low reaches the swing low level for bearish), the BOS/CHOCH is **rejected**.
+
+**Why this works**:
+- A clean line = genuine impulse/momentum behind the structural break
+- Intermediate wicks crossing = price struggled and was rejected multiple times, meaning the "break" is a grind, not a true shift
+- Filters out the majority of fake/weak structural breaks that trap traders
+
+**Implementation**: `MarketStructure._is_clean_break()` in `src/signals/bos_choch.py`
+
+### Fake Signal Detection (Secondary Filter — 2 criteria)
 
 1. **Wick Rejection**: >60% of breakout candle range is wick beyond the broken level
-2. **Volume Divergence**: Breakout-bar volume is >20% below the 20-bar rolling average
-3. **Rapid Reversal**: Price closes back below/above the broken level within 3 bars
+2. **Rapid Reversal**: Price closes back below/above the broken level within 3 bars
 
 ## Data Flow
 
