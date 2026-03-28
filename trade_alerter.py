@@ -28,6 +28,12 @@ CHECK_INTERVAL = 5  # seconds between file checks
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# Additional chat IDs to receive alerts (comma-separated in env, or hardcoded)
+TELEGRAM_EXTRA_CHAT_IDS = [
+    cid.strip() for cid in os.environ.get("TELEGRAM_EXTRA_CHAT_IDS", "-5233405100").split(",")
+    if cid.strip()
+]
+
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds between retries on network failure
 
@@ -54,21 +60,11 @@ def save_offset(offset: int) -> None:
 # Telegram sender
 # ---------------------------------------------------------------------------
 
-def send_telegram(text: str) -> bool:
-    """
-    Send a message via Telegram Bot API.
-    Uses urllib so we have zero external dependencies.
-    Returns True on success, False on failure.
-    """
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[alerter] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set", flush=True)
-        return False
-
+def _send_to_chat(text: str, chat_id: str) -> bool:
+    """Send a message to a specific Telegram chat. Returns True on success."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # Use plain text (no parse_mode) to avoid Markdown/HTML parsing failures
-    # that cause 400 errors and silently drop alerts
     payload = json.dumps({
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": text.replace("*", "").replace("_", ""),
         "disable_web_page_preview": True,
     }).encode("utf-8")
@@ -85,20 +81,41 @@ def send_telegram(text: str) -> bool:
                 if resp.status == 200:
                     return True
                 body = resp.read().decode()
-                print(f"[alerter] Telegram API returned {resp.status}: {body}", flush=True)
+                print(f"[alerter] Telegram API returned {resp.status} for chat {chat_id}: {body}", flush=True)
         except urllib.error.HTTPError as e:
             body = e.read().decode() if e.fp else ""
-            print(f"[alerter] HTTP {e.code}: {body}", flush=True)
-            # Don't retry on 4xx client errors (bad token, bad chat id, etc.)
+            print(f"[alerter] HTTP {e.code} for chat {chat_id}: {body}", flush=True)
             if 400 <= e.code < 500:
                 return False
         except Exception as e:
-            print(f"[alerter] Attempt {attempt}/{MAX_RETRIES} failed: {e}", flush=True)
-
+            print(f"[alerter] Error sending to chat {chat_id} (attempt {attempt}): {e}", flush=True)
         if attempt < MAX_RETRIES:
             time.sleep(RETRY_DELAY)
-
     return False
+
+
+def send_telegram(text: str) -> bool:
+    """
+    Send a message to all configured Telegram chats.
+    Uses urllib so we have zero external dependencies.
+    Returns True if at least the primary chat succeeded.
+    """
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[alerter] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set", flush=True)
+        return False
+
+    # Send to primary chat
+    primary_ok = _send_to_chat(text, TELEGRAM_CHAT_ID)
+
+    # Send to extra chats (best-effort, don't fail if these fail)
+    for extra_id in TELEGRAM_EXTRA_CHAT_IDS:
+        if extra_id and extra_id != TELEGRAM_CHAT_ID:
+            try:
+                _send_to_chat(text, extra_id)
+            except Exception as e:
+                print(f"[alerter] Failed to send to extra chat {extra_id}: {e}", flush=True)
+
+    return primary_ok
 
 
 # ---------------------------------------------------------------------------
