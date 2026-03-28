@@ -30,12 +30,26 @@ POSITION_SIZE = 0.25  # Fraction of available balance used per trade
 # it can be accepted (avoids error -4509: TIF GTE requires open position).
 SL_TP_PLACEMENT_DELAY = 2.0
 
+# ── SL Exchange Update Throttling ─────────────────────────────────────────
+# Bot-side WS handles real-time SL monitoring and closes via MARKET order.
+# Exchange SL is a crashguard backstop — updated only when:
+#   1. Change exceeds MIN_SL_CHANGE_PCT (0.1%)
+#   2. At least SL_UPDATE_COOLDOWN_SECS since last exchange update
+MIN_SL_CHANGE_PCT = 0.001   # 0.1% minimum change to update exchange SL
+SL_UPDATE_COOLDOWN_SECS = 60  # Max 1 exchange SL update per 60 seconds
+
 
 class FuturesTestnetExecutor:
     """
     Manages long/short futures positions on Binance paper trading.
 
-    Tracks SL/TP order IDs per symbol so they can be updated (trailing SL).
+    SL/TP Strategy:
+      - Exchange SL/TP orders are placed ONCE at position open.
+      - Bot-side WebSocket monitors price ticks and triggers MARKET close
+        when SL/TP is hit (instant, no API latency).
+      - Exchange SL is updated as a crashguard backstop only when the change
+        is significant (>0.1%) and respects a 60-second cooldown.
+      - If bot crashes, exchange SL catches the position at the last synced level.
     """
 
     def __init__(self, connector: Optional[BinanceFuturesConnector] = None):
@@ -59,6 +73,12 @@ class FuturesTestnetExecutor:
         # Track which orders are algo orders (need algo cancel endpoint)
         self._algo_sl_flags: Dict[str, bool] = {}
         self._algo_tp_flags: Dict[str, bool] = {}
+
+        # ── SL exchange update throttling state ──
+        # symbol → last exchange SL price that was actually placed
+        self._last_exchange_sl: Dict[str, float] = {}
+        # symbol → timestamp of last successful exchange SL update
+        self._last_sl_update_time: Dict[str, float] = {}
 
         # Re-populate order tracking from exchange on startup so that trailing
         # SL/TP updates after a bot restart cancel the *existing* orders rather
@@ -356,7 +376,7 @@ class FuturesTestnetExecutor:
                 )
                 time.sleep(SL_TP_PLACEMENT_DELAY)
 
-            # ── SL placement ──────────────────────────────────────────
+            # ── SL placement (initial crashguard) ─────────────────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -367,7 +387,10 @@ class FuturesTestnetExecutor:
                         self._sl_orders[sym] = sl_oid
                         if sl_order.get("_algo_order"):
                             self._algo_sl_flags[sym] = True
-                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                        # Initialize throttle state for this position
+                        self._last_exchange_sl[sym] = sl
+                        self._last_sl_update_time[sym] = time.time()
+                        logger.info("SL crashguard placed for %s: orderId=%s @ $%.2f (algo=%s)",
                                     sym, sl_oid, sl, sl_order.get("_algo_order", False))
                     else:
                         logger.info(
@@ -529,7 +552,7 @@ class FuturesTestnetExecutor:
                 )
                 time.sleep(SL_TP_PLACEMENT_DELAY)
 
-            # ── SL placement ──────────────────────────────────────────
+            # ── SL placement (initial crashguard) ─────────────────────
             if sl > 0:
                 try:
                     sl_order = self.connector.place_stop_loss_order(
@@ -540,7 +563,10 @@ class FuturesTestnetExecutor:
                         self._sl_orders[sym] = sl_oid
                         if sl_order.get("_algo_order"):
                             self._algo_sl_flags[sym] = True
-                        logger.info("SL exchange order placed for %s: orderId=%s @ $%.2f (algo=%s)",
+                        # Initialize throttle state for this position
+                        self._last_exchange_sl[sym] = sl
+                        self._last_sl_update_time[sym] = time.time()
+                        logger.info("SL crashguard placed for %s: orderId=%s @ $%.2f (algo=%s)",
                                     sym, sl_oid, sl, sl_order.get("_algo_order", False))
                     else:
                         logger.info(
@@ -634,14 +660,137 @@ class FuturesTestnetExecutor:
 
     # ── SL/TP management ──────────────────────────────────────────────────────
 
-    def update_sl(self, symbol: str, side: str, new_sl: float) -> bool:
+    def close_position_market(self, symbol: str, side: str) -> Dict[str, Any]:
         """
-        Replace the live SL order with a new stop price (trailing SL).
+        Close a position via MARKET order (bot-side SL/TP trigger).
 
-        side: 'LONG' → close side is 'SELL'; 'SHORT' → close side is 'BUY'.
-        Returns True on success, False on failure.
+        This is the primary exit mechanism — called by the bot's WebSocket
+        price monitor when SL or TP is hit. Faster than waiting for exchange
+        algo orders because there's no trigger-price evaluation latency.
+
+        Also cancels any remaining SL/TP exchange orders for the symbol.
+
+        side: 'LONG' (will SELL to close) or 'SHORT' (will BUY to close).
+        Returns result dict with executed=True/False.
         """
         sym = symbol.upper().replace("/", "")
+        close_side = "SELL" if side.upper() == "LONG" else "BUY"
+        result: Dict[str, Any] = {
+            "symbol": sym,
+            "side": side.upper(),
+            "executed": False,
+            "error": None,
+        }
+
+        try:
+            # Get current position quantity from exchange
+            pos = self.connector.get_position(sym)
+            if not pos:
+                logger.warning("close_position_market: no open position for %s", sym)
+                result["error"] = "No open position"
+                return result
+
+            qty = abs(float(pos.get("positionAmt", 0)))
+            if qty == 0:
+                logger.warning("close_position_market: position qty is 0 for %s", sym)
+                result["error"] = "Position quantity is 0"
+                return result
+
+            # Place MARKET close order
+            order = self.connector.place_market_order(sym, close_side, qty)
+            result["order_id"] = order.get("orderId")
+            result["executed"] = True
+            result["quantity"] = qty
+            logger.info(
+                "📉 MARKET close: %s %s qty=%s (orderId=%s)",
+                sym, side.upper(), qty, order.get("orderId"),
+            )
+
+            # Cancel remaining exchange SL/TP orders (cleanup)
+            self._cancel_sl_tp_orders(sym)
+
+        except Exception as exc:
+            logger.error("close_position_market failed for %s: %s", sym, exc, exc_info=True)
+            result["error"] = str(exc)
+
+        return result
+
+    def _cancel_sl_tp_orders(self, symbol: str) -> None:
+        """Cancel any tracked SL/TP exchange orders for a symbol (cleanup after close)."""
+        sym = symbol.upper()
+
+        # Cancel SL
+        sl_id = self._sl_orders.pop(sym, None)
+        sl_algo = self._algo_sl_flags.pop(sym, False)
+        if sl_id is not None:
+            try:
+                self.connector.cancel_order(sym, sl_id, is_algo=sl_algo)
+                logger.info("Cancelled SL order %s for %s (cleanup)", sl_id, sym)
+            except Exception as exc:
+                logger.debug("SL cancel cleanup for %s: %s (may already be triggered)", sym, exc)
+
+        # Cancel TP
+        tp_id = self._tp_orders.pop(sym, None)
+        tp_algo = self._algo_tp_flags.pop(sym, False)
+        if tp_id is not None:
+            try:
+                self.connector.cancel_order(sym, tp_id, is_algo=tp_algo)
+                logger.info("Cancelled TP order %s for %s (cleanup)", tp_id, sym)
+            except Exception as exc:
+                logger.debug("TP cancel cleanup for %s: %s (may already be triggered)", sym, exc)
+
+        # Clear throttle state
+        self._last_exchange_sl.pop(sym, None)
+        self._last_sl_update_time.pop(sym, None)
+
+    def should_update_exchange_sl(self, symbol: str, new_sl: float) -> bool:
+        """
+        Check if the exchange SL (crashguard) should be updated.
+
+        Returns True only if:
+          1. The price change exceeds MIN_SL_CHANGE_PCT (0.1%)
+          2. At least SL_UPDATE_COOLDOWN_SECS (60s) since last update
+
+        This prevents the API-hammering cascade of cancel+place on every tick.
+        """
+        sym = symbol.upper().replace("/", "")
+        now = time.time()
+
+        # Check cooldown
+        last_time = self._last_sl_update_time.get(sym, 0)
+        if now - last_time < SL_UPDATE_COOLDOWN_SECS:
+            return False
+
+        # Check minimum change
+        last_sl = self._last_exchange_sl.get(sym, 0)
+        if last_sl > 0:
+            change_pct = abs(new_sl - last_sl) / last_sl
+            if change_pct < MIN_SL_CHANGE_PCT:
+                return False
+
+        return True
+
+    def update_sl(self, symbol: str, side: str, new_sl: float, force: bool = False) -> bool:
+        """
+        Update the exchange SL order (crashguard backstop).
+
+        By default, updates are throttled:
+          - Minimum 0.1% change from last exchange SL
+          - Maximum 1 update per 60 seconds
+        Set force=True to bypass throttling (e.g., on position open or WS reconnect).
+
+        The bot-side WebSocket monitor is the PRIMARY SL authority.
+        This exchange SL is only a safety net in case the bot crashes.
+
+        side: 'LONG' → close side is 'SELL'; 'SHORT' → close side is 'BUY'.
+        Returns True on success, False on failure/throttled.
+        """
+        sym = symbol.upper().replace("/", "")
+
+        # Throttle check (unless forced)
+        if not force and not self.should_update_exchange_sl(sym, new_sl):
+            return False  # Throttled — not an error, just skipped
+
         order_side = "SELL" if side.upper() == "LONG" else "BUY"
 
         # Cancel tracked SL order
@@ -665,7 +814,10 @@ class FuturesTestnetExecutor:
                 self._sl_orders[sym] = new_id
                 if sl_order.get("_algo_order"):
                     self._algo_sl_flags[sym] = True
-            logger.info("🔄 SL updated: %s → $%.2f (orderId=%s algo=%s)",
+            # Track for throttling
+            self._last_exchange_sl[sym] = new_sl
+            self._last_sl_update_time[sym] = time.time()
+            logger.info("🔄 SL crashguard updated: %s → $%.2f (orderId=%s algo=%s)",
                         sym, new_sl, new_id, sl_order.get("_algo_order", False))
             return True
         except Exception as exc:
@@ -678,7 +830,7 @@ class FuturesTestnetExecutor:
                         if ao.get("symbol") == sym and ao.get("orderType") == "STOP_MARKET":
                             self.connector.cancel_algo_order(algo_id=ao["algoId"])
                             logger.info("Cancelled stale SL algo %s for %s", ao["algoId"], sym)
-                    import time; time.sleep(1)
+                    time.sleep(1)
                     sl_order = self.connector.place_stop_loss_order(
                         sym, order_side, new_sl, close_position=True
                     )
@@ -687,7 +839,9 @@ class FuturesTestnetExecutor:
                         self._sl_orders[sym] = new_id
                         if sl_order.get("_algo_order"):
                             self._algo_sl_flags[sym] = True
-                    logger.info("🔄 SL updated (after stale cleanup): %s → $%.2f (orderId=%s)", sym, new_sl, new_id)
+                    self._last_exchange_sl[sym] = new_sl
+                    self._last_sl_update_time[sym] = time.time()
+                    logger.info("🔄 SL crashguard updated (after stale cleanup): %s → $%.2f (orderId=%s)", sym, new_sl, new_id)
                     return True
                 except Exception as retry_exc:
                     logger.error("Failed to place SL for %s even after stale cleanup: %s", sym, retry_exc)

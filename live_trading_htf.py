@@ -1527,56 +1527,68 @@ class HTFLiveBot:
                     logger.info("⚠️ Fake CHOCH bearish detected — ignoring")
 
         # --- Safety: SL must never move to a worse position ---
-        # Minimum change threshold: 0.01% of price (e.g. BTC=$7, ETH=$0.22)
-        # Prevents spam from sub-cent trailing recalculations on every tick.
-        MIN_SLTP_CHANGE_PCT = 0.0001
-        _min_change = current_price * MIN_SLTP_CHANGE_PCT
+        # Bot-side SL is updated on every tick for precision (WS monitor checks
+        # exact sl_price). But LOGGING, ALERTS, and EXCHANGE UPDATES only fire
+        # when the change exceeds 0.1% to avoid noise/API spam.
+        MIN_SLTP_LOG_PCT = 0.001  # 0.1% threshold for logging/alerts/exchange
+        _min_change = current_price * MIN_SLTP_LOG_PCT
 
-        sl_changed = False
+        # ── Step 1: Always update bot-side SL to best trailing value ──
+        # This is the PRIMARY SL — checked on every WS tick for instant exit.
+        # No threshold here — precision matters for the actual exit check.
+        sl_moved = False  # did the internal sl_price actually change?
         if self.position == 1:
-            if new_sl > self.sl_price and (new_sl - self.sl_price) >= _min_change:
-                sl_changed = True
+            if new_sl > self.sl_price:
+                sl_moved = True
             else:
-                new_sl = self.sl_price  # revert
+                new_sl = self.sl_price  # revert — SL only moves toward profit
         elif self.position == -1:
-            if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price and (self.sl_price - new_sl) >= _min_change):
-                sl_changed = True
+            if self.sl_price <= 0 or (new_sl > 0 and new_sl < self.sl_price):
+                sl_moved = True
             else:
                 new_sl = self.sl_price  # revert
 
-        tp_changed = new_tp != self.tp_price and abs(new_tp - self.tp_price) >= _min_change
+        tp_moved = new_tp != self.tp_price and new_tp > 0
 
-        # --- Apply and log SL/TP changes ---
-        if sl_changed or tp_changed:
-            old_sl_price = self.sl_price
-            old_tp_price = self.tp_price
+        # ── Step 2: Apply internal SL/TP (always, no threshold) ──
+        old_sl_price = self.sl_price
+        old_tp_price = self.tp_price
 
-            if sl_changed:
+        if sl_moved:
+            self.sl_price = new_sl
+        if tp_moved:
+            self.tp_price = new_tp
+        if sl_moved or tp_moved:
+            self._save_state()
+
+        # ── Step 3: Log/alert/exchange sync ONLY when change is significant ──
+        # This prevents the 10-updates-in-8-seconds spam.
+        sl_significant = sl_moved and abs(self.sl_price - old_sl_price) >= _min_change
+        tp_significant = tp_moved and abs(self.tp_price - old_tp_price) >= _min_change
+
+        if sl_significant or tp_significant:
+            if sl_significant:
                 logger.info(
                     "🔄 SL adjusted: $%.2f → $%.2f (reason=%s, profit=%.2f%%, peak=$%.2f)",
-                    self.sl_price, new_sl, adjustment_reason or "trailing",
+                    old_sl_price, self.sl_price, adjustment_reason or "trailing",
                     profit_pct * 100, self.peak_price,
                 )
-                self.sl_price = new_sl
 
-            if tp_changed:
+            if tp_significant:
                 logger.info(
                     "🔄 TP adjusted: $%.2f → $%.2f (reason=%s)",
-                    self.tp_price, new_tp, adjustment_reason or "structure",
+                    old_tp_price, self.tp_price, adjustment_reason or "structure",
                 )
-                self.tp_price = new_tp
-
-            self._save_state()
 
             # Write SL/TP update alerts to the shared alerts file
             self._write_sltp_update_alert(
-                sl_changed, tp_changed,
+                sl_significant, tp_significant,
                 old_sl_price, self.sl_price,
                 old_tp_price, self.tp_price,
                 adjustment_reason or "trailing",
             )
 
-            # Sync updated SL/TP to exchange (for testnet bots: both LONG and SHORT)
+            # Sync updated SL/TP to exchange crashguard (throttled: 0.1% + 60s cooldown)
             if not self.dry_run and self.testnet_executor:
                 try:
                     self.testnet_executor.update_sl_tp(
@@ -1972,39 +1984,31 @@ class HTFLiveBot:
         Mirror a bot decision to futures testnet.
 
         OPEN_LONG / OPEN_SHORT → places real futures order + SL/TP exchange orders.
-        ALL CLOSE actions → close the position on the exchange.
+        CLOSE_LONG / CLOSE_SHORT → MARKET close + cancel remaining SL/TP orders.
         """
         if not self.testnet_executor:
             return
         action = trade.get("action", "")
         symbol = trade.get("symbol", self.symbol)
 
-        # ALL close actions: close the exchange position
+        # ALL close actions: close via MARKET order + cleanup SL/TP
         if "CLOSE" in action:
             try:
                 from src.api.futures_executor import get_futures_executor
                 executor = get_futures_executor()
                 if executor:
-                    positions = executor.connector.get_positions()
-                    for p in positions:
-                        if p.get("symbol") == symbol:
-                            amt = float(p.get("positionAmt", 0))
-                            if amt != 0:
-                                side = "SELL" if amt > 0 else "BUY"
-                                qty = abs(amt)
-                                executor.connector.place_market_order(symbol, side, qty)
-                                logger.info(
-                                    "✅ Testnet mirror: %s %s %s qty=%.6f",
-                                    action, symbol, side, qty,
-                                )
-                            else:
-                                logger.info(
-                                    "Testnet mirror: %s %s — already flat on exchange",
-                                    action, symbol,
-                                )
-                            break
+                    side = "LONG" if "CLOSE_LONG" in action else "SHORT"
+                    result = executor.close_position_market(symbol, side)
+                    if result.get("executed"):
+                        logger.info(
+                            "✅ Testnet mirror: %s %s via MARKET close (qty=%s, orderId=%s)",
+                            action, symbol, result.get("quantity"), result.get("order_id"),
+                        )
                     else:
-                        logger.warning("Testnet mirror: %s not found in exchange positions", symbol)
+                        logger.warning(
+                            "Testnet mirror: %s %s — %s",
+                            action, symbol, result.get("error", "unknown error"),
+                        )
             except Exception as exc:
                 logger.warning("Testnet mirror close failed for %s: %s", symbol, exc)
             return

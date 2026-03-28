@@ -86,8 +86,35 @@ The `MarketStructure` class provides:
 
 1. **SL never moves to a worse position** — only trails toward profit
 2. **BOS/CHOCH adjustments are layered ON TOP of basic trailing** (break-even at +1%, lock 50% at +2%)
-3. **Testnet bots sync SL/TP changes to exchange** via `testnet_executor.update_sl_tp()` which cancels old + places new STOP_MARKET / TAKE_PROFIT_MARKET orders
-4. **Paper bots only adjust internal state** — no exchange interaction
+3. **Bot-side WS is the PRIMARY SL authority** — checks `sl_price` on every price tick and executes MARKET close instantly
+4. **Exchange SL is a crashguard backstop** — only updated when change exceeds 0.1% AND 60-second cooldown has elapsed
+5. **Paper bots only adjust internal state** — no exchange interaction
+
+### SL/TP Architecture (Testnet Bots)
+
+```
+WebSocket price tick
+  → _check_sl_tp(price)
+    → Update internal sl_price (every tick, no threshold)
+    → If price <= sl_price: MARKET close via close_position_market() [INSTANT]
+    → If sl_price changed ≥0.1%: log + alert + sync exchange crashguard [THROTTLED]
+```
+
+**Two-layer SL system:**
+
+| Layer | Authority | Speed | Purpose |
+|-------|-----------|-------|---------|
+| Bot-side WS | PRIMARY | Instant (~ms) | Real-time SL check on every tick → MARKET close |
+| Exchange STOP_MARKET | CRASHGUARD | Exchange trigger | Safety net if bot crashes — uses last synced SL level |
+
+**Exchange SL update throttling** (in `FuturesTestnetExecutor`):
+- `MIN_SL_CHANGE_PCT = 0.001` (0.1%) — minimum price change to trigger exchange update
+- `SL_UPDATE_COOLDOWN_SECS = 60` — maximum 1 exchange update per 60 seconds
+- Prevents the old problem: 10+ API cancel+place calls in 8 seconds for $7 SL changes
+
+**Bot-side SL logging/alert throttling** (in `live_trading_htf.py`):
+- `MIN_SLTP_LOG_PCT = 0.001` (0.1%) — minimum change to log/alert
+- Internal `sl_price` still updates on every tick (no threshold for the actual exit check)
 
 ### Clean-Line Validation Rule (Primary Filter)
 
@@ -118,31 +145,39 @@ A structure break is only valid if the line from **Candle A** (the swing point) 
 ## Data Flow
 
 ```
-Each Iteration:
+Each Iteration (15-min cycle):
   1. Fetch 15m OHLCV (existing)
-  2. Fetch 1H + 4H OHLCV (NEW)
+  2. Fetch 1H + 4H OHLCV
   3. Run MarketStructure.get_signals() → cached result
-  4. _check_sl_tp() reads cached signals
-  5. If SL/TP adjusted & testnet bot → update exchange orders
+  4. _check_sl_tp() reads cached signals → adjusts internal sl_price
+
+On every WebSocket price tick (~1/sec):
+  1. _check_sl_tp(price) → recalculates trailing SL (no threshold)
+  2. If price <= sl_price → MARKET close via close_position_market() [instant]
+  3. If SL change ≥ 0.1% → log + alert + sync exchange crashguard [throttled, max 1/60s]
 ```
 
 ## Files
 
-| Path | Status |
-|------|--------|
-| `src/signals/__init__.py` | NEW |
-| `src/signals/bos_choch.py` | NEW — core detection module |
-| `live_trading_htf.py` | MODIFIED — enhanced `_check_sl_tp()` |
-| `live_trading_htf_partial.py` | MODIFIED — BOS/CHOCH in `_check_partial_tp()` |
-| `live_trading_htf_hybrid.py` | MODIFIED — BOS/CHOCH in `_check_hybrid_exit()` |
-| `research/bos_choch_deep_research.md` | NEW — deep research document |
+| Path | Role |
+|------|------|
+| `src/signals/__init__.py` | Signal package init |
+| `src/signals/bos_choch.py` | Core BOS/CHOCH detection + clean-line validation |
+| `src/api/futures_executor.py` | `close_position_market()`, throttled `update_sl()`, `should_update_exchange_sl()` |
+| `src/api/testnet_executor.py` | Bridge: `update_sl_tp()` → futures executor |
+| `live_trading_htf.py` | `_check_sl_tp()` — bot-side WS SL, separated internal tracking from log/exchange sync |
+| `live_trading_htf_partial.py` | BOS/CHOCH in `_check_partial_tp()` |
+| `live_trading_htf_hybrid.py` | BOS/CHOCH in `_check_hybrid_exit()` |
+| `research/bos_choch_deep_research.md` | Deep research document |
+| `docs/TODO-ws-testnet-integration.md` | Pre-change state documentation |
 
 ## Logging
 
-All SL/TP adjustments include the reason in log output:
+SL/TP adjustments are logged only when change ≥ 0.1% (prevents spam):
 
 ```
 🔄 SL adjusted: $84000.00 → $84500.00 (reason=BOS_bullish(conf=0.65), profit=1.50%, peak=$85200.00)
 🔄 TP adjusted: $87000.00 → $88500.00 (reason=BOS_bullish(conf=0.65))
-🔄 SL adjusted: $84000.00 → $84800.00 (reason=CHOCH_bearish(conf=0.70), profit=2.10%, peak=$85200.00)
+🔄 SL crashguard updated: BTCUSDT → $84500.00 (orderId=123 algo=True)
+📉 MARKET close: BTCUSDT LONG qty=0.025 (orderId=456)
 ```
