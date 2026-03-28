@@ -917,6 +917,34 @@ class HTFLiveBot:
         except Exception as exc:
             logger.warning("Failed to queue trade alert: %s", exc)
 
+    def _write_system_alert(self, alert_type: str, details: str) -> None:
+        """Write a system/connectivity alert to the shared alerts file."""
+        try:
+            alert_file = Path("logs/htf_pending_alerts.jsonl")
+            alert_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(alert_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "strategy": "htf",
+                    "trade": {
+                        "type": alert_type,
+                        "symbol": self.symbol,
+                        "details": details,
+                        "has_open_position": self.position != 0,
+                        "position_direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
+                    },
+                    "signals": {},
+                    "position": {
+                        "entry_price": self.position_price,
+                        "sl_price": self.sl_price,
+                        "tp_price": self.tp_price,
+                        "units": self.position_units,
+                        "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
+                    },
+                }) + "\n")
+        except Exception as exc:
+            logger.error("Failed to write system alert: %s", exc)
+
     def _write_sltp_update_alert(
         self, sl_changed: bool, tp_changed: bool,
         old_sl: float, new_sl: float,
@@ -1596,6 +1624,10 @@ class HTFLiveBot:
                     )
                 except Exception as _exc:
                     logger.warning("Testnet SL/TP update failed: %s", _exc)
+                    self._write_system_alert(
+                        "REST_API_ERROR",
+                        f"SL/TP exchange sync failed for {self.symbol}: {_exc}"
+                    )
 
         # --- Liquidation safety check (max once per 5 min to avoid spam) ---
         _now = time.time()
@@ -2011,6 +2043,10 @@ class HTFLiveBot:
                         )
             except Exception as exc:
                 logger.warning("Testnet mirror close failed for %s: %s", symbol, exc)
+                self._write_system_alert(
+                    "REST_API_ERROR",
+                    f"Failed to close {symbol} position on exchange: {exc}"
+                )
             return
         try:
             result = self.testnet_executor.mirror_trade(trade, {})
@@ -2025,6 +2061,10 @@ class HTFLiveBot:
                 )
         except Exception as exc:
             logger.warning("Testnet mirror failed: %s", exc)
+            self._write_system_alert(
+                "REST_API_ERROR",
+                f"Testnet mirror failed for {action} {symbol}: {exc}"
+            )
 
     # ------------------------------------------------------------------
     # Main iteration
@@ -2293,14 +2333,72 @@ class HTFLiveBot:
         ws_symbol = self.symbol.lower()  # e.g. "ethusdt"
         url = f"wss://stream.binance.com:9443/ws/{ws_symbol}@aggTrade"
 
+        # Track WS state for disconnect alerting
+        ws_state = {
+            "connected": False,
+            "last_tick_time": 0,
+            "disconnect_alerted": False,
+            "reconnect_count": 0,
+        }
+
+        def _write_connectivity_alert(alert_type: str, details: str) -> None:
+            """Write a connectivity alert to the shared alerts file."""
+            try:
+                alert_file = Path("logs/htf_pending_alerts.jsonl")
+                alert_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(alert_file, "a") as f:
+                    f.write(json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "strategy": "htf",
+                        "trade": {
+                            "type": alert_type,
+                            "symbol": self.symbol,
+                            "details": details,
+                            "has_open_position": self.position != 0,
+                            "position_direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
+                        },
+                        "signals": {},
+                        "position": {
+                            "entry_price": self.position_price,
+                            "sl_price": self.sl_price,
+                            "tp_price": self.tp_price,
+                            "units": self.position_units,
+                            "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
+                        },
+                    }) + "\n")
+            except Exception as exc:
+                logger.error("Failed to write connectivity alert: %s", exc)
+
         def _on_open(ws):
             logger.info("WS price monitor connected to aggTrade stream")
+            if ws_state["reconnect_count"] > 0:
+                _write_connectivity_alert(
+                    "WS_RECONNECTED",
+                    f"WebSocket reconnected after {ws_state['reconnect_count']} retries"
+                )
+            ws_state["connected"] = True
+            ws_state["disconnect_alerted"] = False
+            ws_state["last_tick_time"] = time.time()
 
         def _on_error(ws, error):
             logger.warning("WS price monitor error: %s", error)
+            if self.position != 0 and not ws_state["disconnect_alerted"]:
+                _write_connectivity_alert(
+                    "WS_ERROR",
+                    f"WebSocket error while {self.symbol} position is open: {error}"
+                )
+                ws_state["disconnect_alerted"] = True
 
         def _on_close(ws, code, msg):
             logger.info("WS price monitor closed (code=%s)", code)
+            ws_state["connected"] = False
+            if self.position != 0 and not ws_state["disconnect_alerted"]:
+                _write_connectivity_alert(
+                    "WS_DISCONNECTED",
+                    f"WebSocket disconnected (code={code}) while {self.symbol} position is open! "
+                    f"Exchange crashguard SL is active as backup."
+                )
+                ws_state["disconnect_alerted"] = True
 
         first_price_logged = [False]  # mutable container for nonlocal in Python 2-compat closure
 
@@ -2323,6 +2421,8 @@ class HTFLiveBot:
                         self.mfe_pct = _tick_unrealized
                     if _tick_unrealized < self.mae_pct:
                         self.mae_pct = _tick_unrealized
+
+                ws_state["last_tick_time"] = time.time()
 
                 if not first_price_logged[0]:
                     logger.info("WS first price tick: $%.2f — stream is live", price)
@@ -2353,7 +2453,8 @@ class HTFLiveBot:
                     ws.run_forever()
                 except Exception as exc:
                     logger.warning("WS run_forever exception: %s", exc)
-                logger.info("WS reconnecting in %ds...", backoff)
+                ws_state["reconnect_count"] += 1
+                logger.info("WS reconnecting in %ds... (attempt #%d)", backoff, ws_state["reconnect_count"])
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 30)
 

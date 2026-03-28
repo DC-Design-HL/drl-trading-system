@@ -532,6 +532,72 @@ _last_liq_alert_time: dict = {}  # {symbol: timestamp} — cooldown tracker
 _LIQ_ALERT_COOLDOWN = 600  # 10 minutes between liquidation alerts per symbol
 
 
+# Cooldown tracking for system alerts (prevent spam)
+_last_system_alert_time: dict = {}
+_SYSTEM_ALERT_COOLDOWN = 300  # 5-minute cooldown per alert type per symbol
+
+
+def format_system_alert(alert: dict) -> str:
+    """Format a connectivity/system alert (WS disconnect, REST API error, etc.)."""
+    trade = alert.get("trade", {})
+    alert_type = trade.get("type", "UNKNOWN")
+    symbol = trade.get("symbol", "?")
+    details = trade.get("details", "No details")
+    has_position = trade.get("has_open_position", False)
+    direction = trade.get("position_direction", "FLAT")
+    ts = alert.get("timestamp", "")
+
+    # Cooldown: max 1 alert per type+symbol per 5 minutes
+    key = f"{alert_type}:{symbol}"
+    now = time.time()
+    last_sent = _last_system_alert_time.get(key, 0)
+    if now - last_sent < _SYSTEM_ALERT_COOLDOWN:
+        return ""  # Skip — cooldown active
+    _last_system_alert_time[key] = now
+
+    # Choose emoji and label
+    if alert_type == "WS_DISCONNECTED":
+        emoji = "🔴"
+        label = "WebSocket Disconnected"
+    elif alert_type == "WS_ERROR":
+        emoji = "⚠️"
+        label = "WebSocket Error"
+    elif alert_type == "WS_RECONNECTED":
+        emoji = "🟢"
+        label = "WebSocket Reconnected"
+    elif alert_type == "REST_API_ERROR":
+        emoji = "🔴"
+        label = "REST API Error"
+    else:
+        emoji = "❗"
+        label = alert_type
+
+    lines = [f"{emoji} {label} — {symbol}"]
+    lines.append(f"Details: {details}")
+
+    if has_position:
+        pos = alert.get("position", {})
+        lines.append(f"Position: {direction}")
+        entry = pos.get("entry_price", 0)
+        sl = pos.get("sl_price", 0)
+        tp = pos.get("tp_price", 0)
+        if entry:
+            lines.append(f"Entry: ${entry:,.2f}")
+        if sl:
+            lines.append(f"SL: ${sl:,.2f}")
+        if tp:
+            lines.append(f"TP: ${tp:,.2f}")
+
+        if alert_type in ("WS_DISCONNECTED", "WS_ERROR"):
+            lines.append("")
+            lines.append("Exchange crashguard SL is active as backup.")
+
+    if ts:
+        lines.append(f"Time: {_format_timestamp(ts)}")
+
+    return "\n".join(lines)
+
+
 def format_alert(alert: dict) -> str:
     """Route an alert to the appropriate formatter based on action type."""
     trade = alert.get("trade", {})
@@ -547,6 +613,10 @@ def format_alert(alert: dict) -> str:
             return ""  # Empty string = skip sending
         _last_liq_alert_time[symbol] = now
         return format_liquidation_risk(alert)
+
+    # Connectivity/system alerts
+    if trade.get("type") in ("WS_ERROR", "WS_DISCONNECTED", "WS_RECONNECTED", "REST_API_ERROR"):
+        return format_system_alert(alert)
 
     # SL/TP update alerts
     if trade.get("type") == "SL_UPDATE" or trade.get("update_type") == "SL":
