@@ -104,7 +104,7 @@ def _check_local_api_server() -> tuple:
     """Check our local Flask API server."""
     t0 = time.time()
     try:
-        resp = requests.get("http://127.0.0.1:5000/api/status", timeout=10)
+        resp = requests.get("http://127.0.0.1:5001/api/status", timeout=10)
         latency = (time.time() - t0) * 1000
         if resp.ok:
             return "healthy", latency, ""
