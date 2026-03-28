@@ -1,7 +1,7 @@
 # TODO: WebSocket-Based Testnet SL/TP Management
 
 ## Date Created: 2026-03-28
-## Status: PLANNED
+## Status: IMPLEMENTED (commit a368de6, 2026-03-28)
 ## Risk Level: HIGH — changes core exit logic for live testnet positions
 
 ---
@@ -132,13 +132,13 @@ Last commit: 8638d56 feat: BOS/CHOCH clean-line validation + diagonal chart line
 
 ## Implementation Checklist
 
-- [ ] Add minimum SL change threshold (0.1%) to `update_sl()` in futures_executor.py
-- [ ] Add cooldown timer (60s) between exchange SL updates
-- [ ] Bot-side `_check_sl_tp()` triggers MARKET close when SL hit (instead of relying solely on exchange)
-- [ ] Exchange SL remains as crashguard backstop
-- [ ] Update exchange SL periodically when change is significant
-- [ ] Test with BTC testnet position
-- [ ] Test with ETH testnet position
-- [ ] Verify bot restart still syncs properly
-- [ ] Verify exchange SL catches position if bot is killed mid-trade
-- [ ] Update skill docs
+- [x] Add minimum SL change threshold (0.1%) to `update_sl()` in futures_executor.py
+- [x] Add cooldown timer (60s) between exchange SL updates
+- [x] Bot-side `_check_sl_tp()` triggers MARKET close when SL hit via `close_position_market()`
+- [x] Exchange SL remains as crashguard backstop
+- [x] Update exchange SL periodically when change is significant
+- [x] Test with BTC testnet position — ✅ 0 SL spam in 30s (was 30+)
+- [x] Test with ETH testnet position — ✅ running clean
+- [x] Verify bot restart still syncs properly — ✅ existing SL/TP orders found
+- [ ] Verify exchange SL catches position if bot is killed mid-trade (manual test needed)
+- [x] Update skill docs
