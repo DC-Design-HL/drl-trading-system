@@ -2140,7 +2140,11 @@ def main():
     # Render Sidebar Metrics using Fragment
     with st.sidebar:
         render_sidebar_metrics_fragment()
-    
+
+    # ── System Dashboard (top-level, collapsible) ──
+    with st.expander("🖥️ System Dashboard", expanded=False):
+        render_system_dashboard()
+
     st.divider()
     
     # Main layout
@@ -2168,8 +2172,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_system = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "🖥️ System"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest"
         ])
         
         with tab_chart:
@@ -3734,9 +3738,6 @@ def main():
                 if st.button("🚀 Run Backtest", key="run_backtest"):
                     st.info("To run backtest, execute in terminal:")
                     st.code("python train_advanced.py --evaluate ./data/models/advanced_agent.zip")
-
-        with tab_system:
-            render_system_dashboard()
 
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
