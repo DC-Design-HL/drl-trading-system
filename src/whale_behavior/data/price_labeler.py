@@ -137,6 +137,8 @@ class PriceLabeler:
             if not df.empty:
                 df.to_parquet(cache_file)
 
+        # Ensure no duplicate timestamps (causes idxmin to return Series)
+        df = df.drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
         self._price_cache = df
         return df
 
@@ -144,8 +146,15 @@ class PriceLabeler:
         """Get ETH price closest to a timestamp."""
         if self._price_cache is None or self._price_cache.empty:
             return None
-        idx = (self._price_cache["timestamp"] - timestamp).abs().idxmin()
-        return float(self._price_cache.loc[idx, "close"])
+        diffs = (self._price_cache["timestamp"] - timestamp).abs()
+        idx = diffs.idxmin()
+        # Handle case where idxmin returns a Series (duplicate timestamps)
+        if hasattr(idx, '__len__') and not isinstance(idx, str):
+            idx = idx.iloc[0]
+        val = self._price_cache.loc[idx, "close"]
+        if hasattr(val, '__len__') and not isinstance(val, str):
+            val = val.iloc[0]
+        return float(val)
 
     def get_price_change(
         self, timestamp: int, hours_ahead: int
@@ -161,8 +170,21 @@ class PriceLabeler:
         start_idx = (df["timestamp"] - timestamp).abs().idxmin()
         end_idx = (df["timestamp"] - target_time).abs().idxmin()
 
-        start_price = float(df.loc[start_idx, "close"])
-        end_price = float(df.loc[end_idx, "close"])
+        # Handle duplicate index edge cases
+        if hasattr(start_idx, '__len__') and not isinstance(start_idx, str):
+            start_idx = start_idx.iloc[0]
+        if hasattr(end_idx, '__len__') and not isinstance(end_idx, str):
+            end_idx = end_idx.iloc[0]
+
+        start_price = df.loc[start_idx, "close"]
+        end_price = df.loc[end_idx, "close"]
+        if hasattr(start_price, '__len__') and not isinstance(start_price, str):
+            start_price = start_price.iloc[0]
+        if hasattr(end_price, '__len__') and not isinstance(end_price, str):
+            end_price = end_price.iloc[0]
+
+        start_price = float(start_price)
+        end_price = float(end_price)
 
         if start_price <= 0:
             return None
