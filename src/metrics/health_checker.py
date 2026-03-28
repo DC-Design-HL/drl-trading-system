@@ -71,12 +71,33 @@ def _check_mongodb() -> tuple:
         return "unknown", 0, "MONGO_URI not set"
     t0 = time.time()
     try:
+        import certifi
         from pymongo import MongoClient
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=10000)
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=10000,
+            tlsCAFile=certifi.where(),
+        )
         client.admin.command("ping")
         latency = (time.time() - t0) * 1000
         client.close()
         return "healthy", latency, ""
+    except ImportError:
+        # certifi not available — try without explicit CA
+        try:
+            from pymongo import MongoClient
+            client = MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=10000,
+                tlsAllowInvalidCertificates=True,
+            )
+            client.admin.command("ping")
+            latency = (time.time() - t0) * 1000
+            client.close()
+            return "healthy", latency, ""
+        except Exception as exc:
+            latency = (time.time() - t0) * 1000
+            return "down", latency, str(exc)
     except Exception as exc:
         latency = (time.time() - t0) * 1000
         return "down", latency, str(exc)
@@ -104,7 +125,7 @@ def _check_local_api_server() -> tuple:
     """Check our local Flask API server."""
     t0 = time.time()
     try:
-        resp = requests.get("http://127.0.0.1:5001/api/status", timeout=10)
+        resp = requests.get("http://127.0.0.1:5001/api/ping", timeout=10)
         latency = (time.time() - t0) * 1000
         if resp.ok:
             return "healthy", latency, ""
