@@ -1,0 +1,26 @@
+{
+  "test_intent_acc": 23.5,
+  "test_dir_acc": 56.4,
+  "test_total": 19250,
+  "best_val_loss": 0.983,
+  "epochs_trained": 15,
+  "per_class": {
+    "BUY_acc": 11.7,
+    "SELL_acc": 78.4,
+    "NEUTRAL_acc": 9.9
+  },
+  "wallet_names": [
+    "binance_cold_2",
+    "binance_cold_wallet",
+    "binance_hot_wallet",
+    "binance_reserve",
+    "coinbase_institutional",
+    "eth_2.0_deposit_contract",
+    "galaxy_digital",
+    "jump_trading",
+    "kraken_deposit",
+    "robinhood",
+    "smart_money_whale_1"
+  ],
+  "num_sequences": 128330
+}

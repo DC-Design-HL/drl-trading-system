@@ -36,6 +36,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
+    parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps (effective batch = batch_size * accum_steps)")
     args = parser.parse_args()
 
     logger.info("=" * 60)
@@ -44,6 +45,7 @@ def main():
     logger.info("  Epochs: %d", args.epochs)
     logger.info("  Batch size: %d", args.batch_size)
     logger.info("  Learning rate: %s", args.lr)
+    logger.info("  Accum steps: %d (effective batch: %d)", args.accum_steps, args.batch_size * args.accum_steps)
     logger.info("=" * 60)
 
     from src.whale_behavior.models.sequence_model import train_model
@@ -54,6 +56,7 @@ def main():
         lr=args.lr,
         label_window=args.window,
         patience=args.patience,
+        accum_steps=args.accum_steps,
     )
 
     if "error" in results:

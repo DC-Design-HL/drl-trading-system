@@ -391,6 +391,7 @@ def train_model(
     lr: float = 1e-3,
     label_window: str = "4h",
     patience: int = 10,
+    accum_steps: int = 1,
 ) -> Dict:
     """
     Full training pipeline: load data → build sequences → train LSTM → save model.
@@ -468,8 +469,9 @@ def train_model(
         model.train()
         train_loss_sum = 0
         train_batches = 0
+        optimizer.zero_grad()
 
-        for seq, wid, intent, direction, magnitude in train_loader:
+        for batch_idx, (seq, wid, intent, direction, magnitude) in enumerate(train_loader):
             seq, wid = seq.to(device), wid.to(device)
             intent, direction, magnitude = intent.to(device), direction.to(device), magnitude.to(device)
 
@@ -480,11 +482,14 @@ def train_model(
             loss_mag = magnitude_loss_fn(mag_pred.squeeze(-1), magnitude.squeeze(-1))
 
             loss = alpha * loss_intent + beta * loss_dir + gamma * loss_mag
+            # Scale loss by accumulation steps so gradients are averaged correctly
+            scaled_loss = loss / accum_steps
+            scaled_loss.backward()
 
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            if (batch_idx + 1) % accum_steps == 0 or (batch_idx + 1) == len(train_loader):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                optimizer.zero_grad()
 
             train_loss_sum += loss.item()
             train_batches += 1

@@ -24,6 +24,21 @@ ALERTS_FILE = Path("logs/htf_pending_alerts.jsonl")
 OFFSET_FILE = Path("logs/.alerter_offset")
 CHECK_INTERVAL = 5  # seconds between file checks
 
+# Whale behavior predictor (display only — not used for decisions)
+_whale_predictor = None
+
+def _get_whale_signal() -> dict:
+    """Get whale behavior model signal. Returns empty dict on failure."""
+    global _whale_predictor
+    try:
+        if _whale_predictor is None:
+            from src.whale_behavior.models.predictor import WhaleIntentPredictor
+            _whale_predictor = WhaleIntentPredictor()
+        return _whale_predictor.get_signal()
+    except Exception as e:
+        print(f"[alerter] Whale behavior signal unavailable: {e}", flush=True)
+        return {}
+
 # Use dedicated alert bot token (separate from AI bot), fallback to main token
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -203,6 +218,16 @@ def format_open_trade(alert: dict) -> str:
         lines.append("")
         lines.extend(signal_lines)
 
+    # Whale behavior model signal (display only)
+    whale_beh = _get_whale_signal()
+    if whale_beh and whale_beh.get("intent") not in ("unavailable", "no_data", None):
+        intent = whale_beh["intent"].title()
+        conf = whale_beh.get("confidence", 0)
+        sell_conf = whale_beh.get("sell_confidence", 0)
+        buy_conf = whale_beh.get("buy_confidence", 0)
+        active = whale_beh.get("active_wallets", 0)
+        lines.append(f"🧬 Whale Behavior: {intent} ({conf:.0%}) — {active} wallets (B:{buy_conf:.0%}/S:{sell_conf:.0%})")
+
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
         lines.append(f"🕐 {ts}")
@@ -278,6 +303,16 @@ def format_close_trade(alert: dict) -> str:
     if signal_lines:
         lines.append("")
         lines.extend(signal_lines)
+
+    # Whale behavior model signal (display only)
+    whale_beh = _get_whale_signal()
+    if whale_beh and whale_beh.get("intent") not in ("unavailable", "no_data", None):
+        intent = whale_beh["intent"].title()
+        conf = whale_beh.get("confidence", 0)
+        sell_conf = whale_beh.get("sell_confidence", 0)
+        buy_conf = whale_beh.get("buy_confidence", 0)
+        active = whale_beh.get("active_wallets", 0)
+        lines.append(f"🧬 Whale Behavior: {intent} ({conf:.0%}) — {active} wallets (B:{buy_conf:.0%}/S:{sell_conf:.0%})")
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
