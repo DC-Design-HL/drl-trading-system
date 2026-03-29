@@ -884,6 +884,55 @@ class HTFLiveBot:
 
         return allowed
 
+    def _get_whale_behavior_signal(self) -> Dict:
+        """Get whale behavior model signal for trade logging. Fail-safe."""
+        try:
+            from src.whale_behavior.models.predictor import WhaleIntentPredictor
+            if not hasattr(self, '_whale_predictor'):
+                self._whale_predictor = WhaleIntentPredictor()
+            signal = self._whale_predictor.get_signal()
+            # Compact version for logging — keep per-wallet SELL probs
+            wallet_sells = {}
+            for name, d in signal.get("wallet_details", {}).items():
+                sell_p = d.get("probs", {}).get("SELL", 0)
+                if sell_p >= 0.30:  # Only log wallets with meaningful sell signal
+                    wallet_sells[name] = round(sell_p, 3)
+            return {
+                "intent": signal.get("intent", "unavailable"),
+                "sell_confidence": round(signal.get("sell_confidence", 0), 3),
+                "buy_confidence": round(signal.get("buy_confidence", 0), 3),
+                "direction": round(signal.get("direction", 0.5), 3),
+                "active_wallets": signal.get("active_wallets", 0),
+                "top_sellers": wallet_sells,
+            }
+        except Exception as exc:
+            logger.debug("Whale behavior signal unavailable: %s", exc)
+            return {"intent": "unavailable", "sell_confidence": 0, "buy_confidence": 0}
+
+    def _log_whale_shadow(self, trade: Dict, whale_signal: Dict) -> None:
+        """Log whale signal alongside trade for shadow analysis.
+        
+        This creates a separate log at logs/whale_shadow.jsonl that tracks:
+        - Every trade action (OPEN/CLOSE) with the whale signal at that moment
+        - Used later to analyze correlation between whale SELL and trade outcomes
+        """
+        try:
+            shadow_file = Path("logs/whale_shadow.jsonl")
+            shadow_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(shadow_file, "a") as f:
+                f.write(json.dumps({
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": trade.get("symbol", "?"),
+                    "action": trade.get("action", "?"),
+                    "price": trade.get("price", 0),
+                    "confidence": trade.get("confidence", 0),
+                    "entry_price": trade.get("entry_price", self.position_price),
+                    "pnl": trade.get("pnl", None),
+                    "whale": whale_signal,
+                }, default=str) + "\n")
+        except Exception as exc:
+            logger.debug("Failed to write whale shadow log: %s", exc)
+
     def _send_telegram_alert(self, trade: Dict) -> None:
         """Write trade alert with market signal context to pending alerts file."""
         try:
@@ -895,6 +944,12 @@ class HTFLiveBot:
             if self._last_signal_gate:
                 signal_summary["signal_gate"] = self._last_signal_gate
 
+            # Get whale behavior signal
+            whale_signal = self._get_whale_behavior_signal()
+
+            # Log whale shadow data for analysis
+            self._log_whale_shadow(trade, whale_signal)
+
             alert_file = Path("logs/htf_pending_alerts.jsonl")
             alert_file.parent.mkdir(parents=True, exist_ok=True)
             with open(alert_file, "a") as f:
@@ -903,6 +958,7 @@ class HTFLiveBot:
                     "strategy": "htf",
                     "trade": trade,
                     "signals": signal_summary,
+                    "whale_behavior": whale_signal,
                     "position": {
                         "entry_price": self.position_price,
                         "sl_price": self.sl_price,
@@ -911,9 +967,9 @@ class HTFLiveBot:
                         "direction": "LONG" if self.position == 1 else "SHORT" if self.position == -1 else "FLAT",
                     },
                 }, default=str) + "\n")
-            logger.info("Trade alert queued: %s %s @ $%.2f",
+            logger.info("Trade alert queued: %s %s @ $%.2f (whale_sell=%.0f%%)",
                         trade.get("action", "?"), trade.get("symbol", "?"),
-                        trade.get("price", 0))
+                        trade.get("price", 0), whale_signal.get("sell_confidence", 0) * 100)
         except Exception as exc:
             logger.warning("Failed to queue trade alert: %s", exc)
 
