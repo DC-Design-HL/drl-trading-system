@@ -277,13 +277,20 @@ class HTFQRDQNAgent:
     
     def _create_model(self) -> QRDQN:
         """Create a new QRDQN model."""
+        # QRDQN expects net_arch as a flat list [512, 256, 128]
+        net_arch_config = self.config["net_arch"]
+        if isinstance(net_arch_config, dict):
+            net_arch_list = net_arch_config.get("hidden_dims", [512, 512, 256, 128])
+        else:
+            net_arch_list = net_arch_config
+        
         policy_kwargs = {
             "n_quantiles": self.config["n_quantiles"],
-            "net_arch": self.config["net_arch"]
+            "net_arch": net_arch_list
         }
         
         model = QRDQN(
-            policy="MultiInputPolicy",  # Use MultiInputPolicy for custom architecture
+            policy="MlpPolicy",
             env=self.env,
             learning_rate=self.config["learning_rate"],
             buffer_size=self.config["buffer_size"],
