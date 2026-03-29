@@ -45,6 +45,7 @@ class WhaleIntentPredictor:
         self.model_path = model_path or (MODEL_DIR / "whale_behavior_lstm.pt")
         self.model = None
         self.wallet_names = []
+        # Predictor always runs on CPU for minimal memory footprint on server
         self.device = torch.device("cpu")
         self._loaded = False
 

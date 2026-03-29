@@ -37,6 +37,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps (effective batch = batch_size * accum_steps)")
+    parser.add_argument("--seq-length", type=int, default=None, help="Sequence length (default: 20, increase on machines with more RAM)")
     args = parser.parse_args()
 
     logger.info("=" * 60)
@@ -46,9 +47,17 @@ def main():
     logger.info("  Batch size: %d", args.batch_size)
     logger.info("  Learning rate: %s", args.lr)
     logger.info("  Accum steps: %d (effective batch: %d)", args.accum_steps, args.batch_size * args.accum_steps)
+    if args.seq_length:
+        logger.info("  Sequence length: %d", args.seq_length)
     logger.info("=" * 60)
 
     from src.whale_behavior.models.sequence_model import train_model
+
+    # Override SEQ_LENGTH if specified
+    if args.seq_length:
+        import src.whale_behavior.models.sequence_model as sm
+        sm.SEQ_LENGTH = args.seq_length
+        logger.info("Overriding SEQ_LENGTH to %d", args.seq_length)
 
     results = train_model(
         epochs=args.epochs,

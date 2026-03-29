@@ -1,13 +1,13 @@
 {
-  "test_intent_acc": 23.5,
-  "test_dir_acc": 56.4,
+  "test_intent_acc": 19.0,
+  "test_dir_acc": 54.3,
   "test_total": 19250,
-  "best_val_loss": 0.983,
-  "epochs_trained": 15,
+  "best_val_loss": 1.243,
+  "epochs_trained": 18,
   "per_class": {
-    "BUY_acc": 11.7,
-    "SELL_acc": 78.4,
-    "NEUTRAL_acc": 9.9
+    "BUY_acc": 0.7,
+    "SELL_acc": 99.1,
+    "NEUTRAL_acc": 0.4
   },
   "wallet_names": [
     "binance_cold_2",
