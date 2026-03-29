@@ -14,7 +14,7 @@ Key features:
 """
 
 import logging
-from typing import Dict, Tuple, Optional, List
+from typing import Any, Dict, Tuple, Optional, List
 from enum import Enum
 
 import numpy as np
