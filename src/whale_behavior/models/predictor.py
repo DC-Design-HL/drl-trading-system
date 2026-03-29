@@ -24,6 +24,9 @@ from .sequence_model import (
     action_to_features,
 )
 
+# Live data directory (unlabeled, continuously updated by collector)
+LIVE_DIR = Path("data/whale_behavior/eth")
+
 logger = logging.getLogger(__name__)
 
 # Reverse intent map
@@ -78,22 +81,56 @@ class WhaleIntentPredictor:
             return False
 
     def _load_recent_actions(self, wallet_name: str, n: int = SEQ_LENGTH) -> list:
-        """Load the N most recent labeled actions for a wallet."""
-        labeled_file = LABELED_DIR / f"{wallet_name}_labeled.jsonl"
-        if not labeled_file.exists():
-            return []
+        """
+        Load the N most recent actions for a wallet.
+        
+        Prefers LIVE data (data/whale_behavior/eth/) which is continuously
+        updated by the collector service. Falls back to labeled data if
+        live data doesn't exist.
+        """
+        # Try live data first (continuously updated by collector)
+        live_file = LIVE_DIR / f"{wallet_name}.jsonl"
+        if live_file.exists():
+            actions = self._read_last_n_lines(live_file, n)
+            if len(actions) >= n:
+                return actions
 
+        # Fallback to labeled data (static, from training)
+        labeled_file = LABELED_DIR / f"{wallet_name}_labeled.jsonl"
+        if labeled_file.exists():
+            actions = self._read_last_n_lines(labeled_file, n)
+            if len(actions) >= n:
+                return actions
+
+        return []
+
+    @staticmethod
+    def _read_last_n_lines(filepath: Path, n: int) -> list:
+        """Efficiently read the last N JSON lines from a file."""
         actions = []
-        with open(labeled_file) as f:
-            for line in f:
+        try:
+            # Read from end for efficiency on large files
+            with open(filepath, 'rb') as f:
+                f.seek(0, 2)  # End of file
+                file_size = f.tell()
+                
+                # Read last chunk (estimate ~300 bytes per line)
+                chunk_size = min(file_size, n * 500)
+                f.seek(max(0, file_size - chunk_size))
+                data = f.read().decode('utf-8', errors='replace')
+            
+            lines = data.strip().split('\n')
+            # Take last N lines
+            for line in lines[-n:]:
+                line = line.strip()
+                if not line:
+                    continue
                 try:
-                    actions.append(json.loads(line.strip()))
+                    actions.append(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-
-        # Return last N actions
-        if len(actions) >= n:
-            return actions[-n:]
+        except Exception:
+            pass
         return actions
 
     def predict_wallet(self, wallet_name: str) -> Optional[Dict]:
