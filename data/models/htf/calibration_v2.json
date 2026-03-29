@@ -1,0 +1,21 @@
+{
+  "temperature": 0.5,
+  "win_rate_bins": {
+    "0.70-0.80": 0.333,
+    "0.80-0.90": 0.364,
+    "0.90-1.00": 0.353,
+    "0.60-0.70": 0.5,
+    "0.50-0.60": 0.333,
+    "0.00-0.50": 0.0
+  },
+  "regime_discounts": {
+    "RANGING": 0.167,
+    "LOW_VOLATILITY": 1.0,
+    "TRENDING_UP": 0.429,
+    "TRENDING_DOWN": 0.0,
+    "HIGH_VOLATILITY": 0.85,
+    "unknown": 0.385
+  },
+  "adx_threshold": 20.0,
+  "adx_discount": 0.75
+}

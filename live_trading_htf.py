@@ -884,6 +884,24 @@ class HTFLiveBot:
 
         return allowed
 
+    def _get_calibrated_confidence(self, raw_confidence: float, action_probs=None,
+                                      regime: str = "unknown", adx: float = 0) -> float:
+        """Get v2 calibrated confidence. Returns raw if calibrator not available."""
+        try:
+            if not hasattr(self, '_confidence_calibrator'):
+                from src.brain.confidence_calibrator import ConfidenceCalibrator
+                self._confidence_calibrator = ConfidenceCalibrator()
+                if not self._confidence_calibrator.load():
+                    self._confidence_calibrator = None
+                    return raw_confidence
+            if self._confidence_calibrator is None:
+                return raw_confidence
+            return self._confidence_calibrator.calibrate(
+                raw_confidence, action_probs=action_probs,
+                regime=regime, adx=adx)
+        except Exception:
+            return raw_confidence
+
     def _get_whale_behavior_signal(self) -> Dict:
         """Get whale behavior model signal for trade logging. Fail-safe."""
         try:
@@ -910,13 +928,22 @@ class HTFLiveBot:
             return {"intent": "unavailable", "sell_confidence": 0, "buy_confidence": 0}
 
     def _log_whale_shadow(self, trade: Dict, whale_signal: Dict) -> None:
-        """Log whale signal alongside trade for shadow analysis.
+        """Log whale signal + v2 confidence alongside trade for shadow analysis.
         
         This creates a separate log at logs/whale_shadow.jsonl that tracks:
         - Every trade action (OPEN/CLOSE) with the whale signal at that moment
-        - Used later to analyze correlation between whale SELL and trade outcomes
+        - v1 confidence (raw) vs v2 confidence (calibrated)
+        - Used later to analyze correlation between signals and trade outcomes
         """
         try:
+            raw_conf = trade.get("confidence", 0)
+            # Get regime info for v2 calibration
+            market = self._fetch_market_signals(trade.get("symbol", self.symbol))
+            regime = market.get("regime", {}).get("type",
+                     market.get("regime", {}).get("state", "unknown"))
+            adx = market.get("regime", {}).get("adx", 0) or 0
+            v2_conf = self._get_calibrated_confidence(raw_conf, regime=regime, adx=adx)
+
             shadow_file = Path("logs/whale_shadow.jsonl")
             shadow_file.parent.mkdir(parents=True, exist_ok=True)
             with open(shadow_file, "a") as f:
@@ -925,7 +952,10 @@ class HTFLiveBot:
                     "symbol": trade.get("symbol", "?"),
                     "action": trade.get("action", "?"),
                     "price": trade.get("price", 0),
-                    "confidence": trade.get("confidence", 0),
+                    "confidence_v1": raw_conf,
+                    "confidence_v2": round(v2_conf, 4),
+                    "regime": regime,
+                    "adx": adx,
                     "entry_price": trade.get("entry_price", self.position_price),
                     "pnl": trade.get("pnl", None),
                     "whale": whale_signal,
