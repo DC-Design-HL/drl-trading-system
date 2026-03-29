@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 import torch
 import psutil
+import gymnasium
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -147,7 +148,7 @@ class CheckpointManager:
         return self.checkpoint_file.exists()
 
 
-class EnhancedRewardWrapper:
+class EnhancedRewardWrapper(gymnasium.Wrapper):
     """
     Enhanced reward function wrapper for HTFTradingEnv.
     
@@ -159,7 +160,7 @@ class EnhancedRewardWrapper:
     """
     
     def __init__(self, env, regime_detector):
-        self.env = env
+        super().__init__(env)
         self.regime_detector = regime_detector
         
         # Component weights
@@ -174,10 +175,6 @@ class EnhancedRewardWrapper:
         self.recent_returns = []
         self.max_balance = env.initial_balance
         
-    def __getattr__(self, name):
-        """Delegate to wrapped environment."""
-        return getattr(self.env, name)
-    
     def step(self, action):
         """Enhanced step with multi-component reward."""
         obs, base_reward, done, truncated, info = self.env.step(action)
