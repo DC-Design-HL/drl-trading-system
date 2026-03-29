@@ -310,6 +310,9 @@ class ChampionshipTrainer:
             raise FileNotFoundError(f"Data file not found: {data_file}")
         
         df_15m = pd.read_csv(data_file)
+        # Handle both column naming conventions
+        if 'timestamp' in df_15m.columns and 'open_time' not in df_15m.columns:
+            df_15m = df_15m.rename(columns={'timestamp': 'open_time'})
         df_15m['open_time'] = pd.to_datetime(df_15m['open_time'])
         df_15m = df_15m.sort_values('open_time').reset_index(drop=True)
         
