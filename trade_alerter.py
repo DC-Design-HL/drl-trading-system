@@ -218,15 +218,11 @@ def format_open_trade(alert: dict) -> str:
         lines.append("")
         lines.extend(signal_lines)
 
-    # Whale behavior model signal (display only)
-    whale_beh = _get_whale_signal()
-    if whale_beh and whale_beh.get("intent") not in ("unavailable", "no_data", None):
-        intent = whale_beh["intent"].title()
-        conf = whale_beh.get("confidence", 0)
-        sell_conf = whale_beh.get("sell_confidence", 0)
-        buy_conf = whale_beh.get("buy_confidence", 0)
-        active = whale_beh.get("active_wallets", 0)
-        lines.append(f"🧬 Whale Behavior: {intent} ({conf:.0%}) — {active} wallets (B:{buy_conf:.0%}/S:{sell_conf:.0%})")
+    # Whale behavior model signal (display only — sell-focused)
+    whale_lines = _format_whale_behavior()
+    if whale_lines:
+        lines.append("")
+        lines.extend(whale_lines)
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -304,15 +300,11 @@ def format_close_trade(alert: dict) -> str:
         lines.append("")
         lines.extend(signal_lines)
 
-    # Whale behavior model signal (display only)
-    whale_beh = _get_whale_signal()
-    if whale_beh and whale_beh.get("intent") not in ("unavailable", "no_data", None):
-        intent = whale_beh["intent"].title()
-        conf = whale_beh.get("confidence", 0)
-        sell_conf = whale_beh.get("sell_confidence", 0)
-        buy_conf = whale_beh.get("buy_confidence", 0)
-        active = whale_beh.get("active_wallets", 0)
-        lines.append(f"🧬 Whale Behavior: {intent} ({conf:.0%}) — {active} wallets (B:{buy_conf:.0%}/S:{sell_conf:.0%})")
+    # Whale behavior model signal (display only — sell-focused)
+    whale_lines = _format_whale_behavior()
+    if whale_lines:
+        lines.append("")
+        lines.extend(whale_lines)
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -480,6 +472,53 @@ def format_liquidation_risk(alert: dict) -> str:
         lines.append(f"🕐 {ts}")
 
     return "\n".join(lines)
+
+
+def _format_whale_behavior() -> list:
+    """Format whale behavior model signal — sell-focused."""
+    whale_beh = _get_whale_signal()
+    if not whale_beh or whale_beh.get("intent") in ("unavailable", "no_data", None):
+        return []
+
+    lines = []
+    sell_conf = whale_beh.get("sell_confidence", 0)
+    buy_conf = whale_beh.get("buy_confidence", 0)
+    active = whale_beh.get("active_wallets", 0)
+    details = whale_beh.get("wallet_details", {})
+
+    # Find wallets with strong sell signals
+    sellers = []
+    for name, d in details.items():
+        sell_p = d.get("probs", {}).get("SELL", 0)
+        if sell_p >= 0.40:
+            # Shorten wallet names for readability
+            short = name.replace("binance_", "B.").replace("_wallet", "").replace("_", " ").title()
+            sellers.append((short, sell_p))
+    sellers.sort(key=lambda x: x[1], reverse=True)
+
+    # Overall whale sell pressure indicator
+    if sell_conf >= 0.50:
+        emoji = "🔴"
+        label = "SELL PRESSURE"
+    elif sell_conf >= 0.35:
+        emoji = "⚠️"
+        label = "Mild sell"
+    elif buy_conf >= 0.40:
+        emoji = "🟢"
+        label = "Accumulating"
+    else:
+        emoji = "🐋"
+        label = "Neutral"
+
+    line = f"{emoji} Whale Signal: {label} (sell={sell_conf:.0%} buy={buy_conf:.0%})"
+    lines.append(line)
+
+    # Show individual distributing wallets
+    if sellers:
+        seller_parts = [f"{name} {p:.0%}" for name, p in sellers[:3]]
+        lines.append(f"   Distributing: {' | '.join(seller_parts)}")
+
+    return lines
 
 
 def _format_signals(signals: dict) -> list:
