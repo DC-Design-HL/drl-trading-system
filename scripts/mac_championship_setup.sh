@@ -42,7 +42,8 @@ fi
 PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 echo -e "${GREEN}Found Python ${PYTHON_VERSION}${NC}"
 
-if [[ $(echo "${PYTHON_VERSION} >= 3.8" | bc -l) -ne 1 ]]; then
+PYTHON_OK=$(python3 -c "import sys; print(1 if sys.version_info >= (3, 8) else 0)")
+if [[ "$PYTHON_OK" != "1" ]]; then
     echo -e "${RED}Error: Python 3.8+ required (found ${PYTHON_VERSION})${NC}"
     exit 1
 fi
