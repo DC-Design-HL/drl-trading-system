@@ -19,7 +19,11 @@ from enum import Enum
 
 import numpy as np
 import pandas as pd
-import talib
+try:
+    import talib
+    HAS_TALIB = True
+except ImportError:
+    HAS_TALIB = False
 
 logger = logging.getLogger(__name__)
 
@@ -126,9 +130,12 @@ class RegimeDetector:
         close = data['close'].values
         
         # ADX and directional movement
-        adx = self._safe_talib(talib.ADX, high, low, close, timeperiod=self.adx_period)
-        plus_di = self._safe_talib(talib.PLUS_DI, high, low, close, timeperiod=self.adx_period)
-        minus_di = self._safe_talib(talib.MINUS_DI, high, low, close, timeperiod=self.adx_period)
+        if HAS_TALIB:
+            adx = self._safe_talib(talib.ADX, high, low, close, timeperiod=self.adx_period)
+            plus_di = self._safe_talib(talib.PLUS_DI, high, low, close, timeperiod=self.adx_period)
+            minus_di = self._safe_talib(talib.MINUS_DI, high, low, close, timeperiod=self.adx_period)
+        else:
+            adx, plus_di, minus_di = self._adx_numpy(high, low, close, self.adx_period)
         
         # Current values (last valid)
         current_adx = self._get_last_valid(adx, default=20.0)
@@ -274,6 +281,74 @@ class RegimeDetector:
         
         return best_regime, min(0.95, max(0.1, confidence))
     
+    @staticmethod
+    def _adx_numpy(high, low, close, period=14):
+        """Pure numpy ADX calculation (no TA-Lib dependency)."""
+        n = len(close)
+        adx = np.full(n, np.nan)
+        plus_di = np.full(n, np.nan)
+        minus_di = np.full(n, np.nan)
+        
+        if n < period + 1:
+            return adx, plus_di, minus_di
+        
+        # True Range
+        tr = np.maximum(
+            high[1:] - low[1:],
+            np.maximum(
+                np.abs(high[1:] - close[:-1]),
+                np.abs(low[1:] - close[:-1])
+            )
+        )
+        
+        # Directional Movement
+        up_move = high[1:] - high[:-1]
+        down_move = low[:-1] - low[1:]
+        
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+        
+        # Smoothed averages (Wilder's smoothing)
+        atr = np.zeros(len(tr))
+        smooth_plus = np.zeros(len(tr))
+        smooth_minus = np.zeros(len(tr))
+        
+        atr[:period] = np.nan
+        atr[period - 1] = np.mean(tr[:period])
+        for i in range(period, len(tr)):
+            atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+        
+        smooth_plus[:period] = np.nan
+        smooth_plus[period - 1] = np.mean(plus_dm[:period])
+        for i in range(period, len(tr)):
+            smooth_plus[i] = (smooth_plus[i - 1] * (period - 1) + plus_dm[i]) / period
+        
+        smooth_minus[:period] = np.nan
+        smooth_minus[period - 1] = np.mean(minus_dm[:period])
+        for i in range(period, len(tr)):
+            smooth_minus[i] = (smooth_minus[i - 1] * (period - 1) + minus_dm[i]) / period
+        
+        # DI values
+        with np.errstate(divide='ignore', invalid='ignore'):
+            pdi = 100 * smooth_plus / np.where(atr > 0, atr, 1.0)
+            mdi = 100 * smooth_minus / np.where(atr > 0, atr, 1.0)
+            dx = 100 * np.abs(pdi - mdi) / np.where((pdi + mdi) > 0, pdi + mdi, 1.0)
+        
+        # ADX (smoothed DX)
+        adx_raw = np.full(len(tr), np.nan)
+        start = 2 * period - 1
+        if start < len(dx):
+            adx_raw[start] = np.nanmean(dx[period:start + 1])
+            for i in range(start + 1, len(dx)):
+                adx_raw[i] = (adx_raw[i - 1] * (period - 1) + dx[i]) / period
+        
+        # Align back to original array size (offset by 1 due to diff)
+        adx[1:] = adx_raw
+        plus_di[1:] = pdi
+        minus_di[1:] = mdi
+        
+        return adx, plus_di, minus_di
+
     def _safe_talib(self, func, *args, **kwargs):
         """Safely call TA-Lib function with error handling."""
         try:
