@@ -489,8 +489,9 @@ class ConfidenceCalibrator:
         
         return self._apply_temperature([confidence], self.temperature)[0]
     
-    def _apply_temperature(self, confidences: np.ndarray, temperature: float) -> np.ndarray:
+    def _apply_temperature(self, confidences, temperature: float) -> np.ndarray:
         """Apply temperature scaling."""
+        confidences = np.array(confidences, dtype=np.float64)
         # Convert confidence to logits (approximately)
         logits = np.log(confidences / (1 - confidences + 1e-8) + 1e-8)
         # Scale by temperature
