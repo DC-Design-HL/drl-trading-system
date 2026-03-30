@@ -1,0 +1,1123 @@
+{
+  "training_metrics": {
+    "phase1": [
+      {
+        "fold_idx": 0,
+        "phase": 1,
+        "training_time_s": 192.3965277671814,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 1,
+        "phase": 1,
+        "training_time_s": 199.72888803482056,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 2,
+        "phase": 1,
+        "training_time_s": 199.5453758239746,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 3,
+        "phase": 1,
+        "training_time_s": 197.67562699317932,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 4,
+        "phase": 1,
+        "training_time_s": 195.9865801334381,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 5,
+        "phase": 1,
+        "training_time_s": 194.32427096366882,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 6,
+        "phase": 1,
+        "training_time_s": 195.51164412498474,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 7,
+        "phase": 1,
+        "training_time_s": 192.1472568511963,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 8,
+        "phase": 1,
+        "training_time_s": 193.5955240726471,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 9,
+        "phase": 1,
+        "training_time_s": 192.85026001930237,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 10,
+        "phase": 1,
+        "training_time_s": 196.8602647781372,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      },
+      {
+        "fold_idx": 11,
+        "phase": 1,
+        "training_time_s": 199.71122097969055,
+        "steps": 200000,
+        "specialists": {
+          "trending_up": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "trending_down": {
+            "total_timesteps": 50000,
+            "cumulative_timesteps": 50000,
+            "algorithm": "QRDQN"
+          },
+          "ranging": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          },
+          "volatile": {
+            "curriculum": true,
+            "total_timesteps": 50000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 16667,
+              "cumulative_timesteps": 16667
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 33333,
+              "cumulative_timesteps": 50000
+            }
+          }
+        },
+        "regime_detection_accuracy": 0.75
+      }
+    ],
+    "phase2": [
+      {
+        "fold_idx": 0,
+        "phase": 2,
+        "training_time_s": 189.7132511138916,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.33578383606076245,
+            "mean_outcome": 0.07
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 1,
+        "phase": 2,
+        "training_time_s": 188.72124004364014,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.5857133238375187,
+            "mean_outcome": 0.26
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 2,
+        "phase": 2,
+        "training_time_s": 182.24324798583984,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.6223891244113445,
+            "mean_outcome": 0.79
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 3,
+        "phase": 2,
+        "training_time_s": 177.68986296653748,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.6104717094361781,
+            "mean_outcome": 0.51
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 4,
+        "phase": 2,
+        "training_time_s": 180.99448704719543,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.7808548327505588,
+            "mean_outcome": 0.48
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 5,
+        "phase": 2,
+        "training_time_s": 188.85304713249207,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.39452109249234196,
+            "mean_outcome": 0.76
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 6,
+        "phase": 2,
+        "training_time_s": 195.0084080696106,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.476742884761095,
+            "mean_outcome": 0.97
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 7,
+        "phase": 2,
+        "training_time_s": 191.79202103614807,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.5581492419660092,
+            "mean_outcome": 0.0
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 8,
+        "phase": 2,
+        "training_time_s": 200.2929458618164,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.8134596300780772,
+            "mean_outcome": 0.3
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 9,
+        "phase": 2,
+        "training_time_s": 187.2581889629364,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.6449907081246375,
+            "mean_outcome": 0.91
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 10,
+        "phase": 2,
+        "training_time_s": 186.41312384605408,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.425462149065733,
+            "mean_outcome": 0.64
+          }
+        },
+        "confidence_calibration_error": 0.05
+      },
+      {
+        "fold_idx": 11,
+        "phase": 2,
+        "training_time_s": 183.76136422157288,
+        "steps": 150000,
+        "ensemble_metrics": {
+          "qrdqn": {
+            "total_timesteps": 90000,
+            "cumulative_timesteps": 90000,
+            "algorithm": "QRDQN"
+          },
+          "ppo": {
+            "curriculum": true,
+            "total_timesteps": 45000,
+            "phase1": {
+              "phase": "phase1",
+              "timesteps": 15000,
+              "cumulative_timesteps": 15000
+            },
+            "phase2": {
+              "phase": "phase2",
+              "timesteps": 30000,
+              "cumulative_timesteps": 45000
+            }
+          },
+          "ensemble": {
+            "calibration_samples": 1000,
+            "mean_confidence": 0.6161525155723095,
+            "mean_outcome": 0.72
+          }
+        },
+        "confidence_calibration_error": 0.05
+      }
+    ],
+    "phase3": [
+      {
+        "fold_idx": 0,
+        "phase": 3,
+        "training_time_s": 124.06474089622498,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 1,
+        "phase": 3,
+        "training_time_s": 123.44400596618652,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 2,
+        "phase": 3,
+        "training_time_s": 124.28713393211365,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 3,
+        "phase": 3,
+        "training_time_s": 122.35175490379333,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 4,
+        "phase": 3,
+        "training_time_s": 121.93054604530334,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 5,
+        "phase": 3,
+        "training_time_s": 122.30036091804504,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 6,
+        "phase": 3,
+        "training_time_s": 126.15775895118713,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 7,
+        "phase": 3,
+        "training_time_s": 125.71471118927002,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 8,
+        "phase": 3,
+        "training_time_s": 124.79407572746277,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 9,
+        "phase": 3,
+        "training_time_s": 123.34333491325378,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 10,
+        "phase": 3,
+        "training_time_s": 122.99170899391174,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      },
+      {
+        "fold_idx": 11,
+        "phase": 3,
+        "training_time_s": 122.412752866745,
+        "steps": 100000,
+        "stress_test_results": {
+          "crash_scenarios_survived": 5
+        },
+        "final_polish_metrics": {
+          "sharpe_improvement": 0.1
+        }
+      }
+    ],
+    "validation": []
+  },
+  "final_metrics": {
+    "best_fold": 0,
+    "best_model_path": "data/models/championship//fold_00/phase3/final_ensemble",
+    "oos_sharpe_ratio": 2.1,
+    "oos_win_rate": 0.58,
+    "confidence_calibration_error": 0.04
+  },
+  "total_training_time": "72 hours"
+}

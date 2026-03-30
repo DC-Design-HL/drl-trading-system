@@ -1,0 +1,44 @@
+{
+  "config": {
+    "regime_weights": {
+      "trending_up": {
+        "qrdqn": 0.7,
+        "ppo": 0.3
+      },
+      "trending_down": {
+        "qrdqn": 0.7,
+        "ppo": 0.3
+      },
+      "ranging": {
+        "qrdqn": 0.3,
+        "ppo": 0.7
+      },
+      "volatile": {
+        "qrdqn": 0.6,
+        "ppo": 0.4
+      }
+    },
+    "base_position_size": 0.02,
+    "max_position_size": 0.05,
+    "min_position_size": 0.005,
+    "confidence_scaling": 0.5,
+    "regime_scaling": {
+      "trending_up": 1.2,
+      "trending_down": 1.2,
+      "ranging": 0.6,
+      "volatile": 0.8
+    },
+    "calibration_window": 1000,
+    "confidence_temperature": 1.5,
+    "min_confidence_threshold": 0.2,
+    "disagreement_threshold": 0.5
+  },
+  "training_steps": 150000,
+  "last_regime": "ranging",
+  "confidence_calibrator": {
+    "temperature": 3.0,
+    "platt_a": 1.0,
+    "platt_b": 0.0,
+    "is_fitted": true
+  }
+}
