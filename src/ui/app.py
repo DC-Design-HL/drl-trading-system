@@ -2172,8 +2172,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_usdt_dom = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "💵 USDT.D"
         ])
         
         with tab_chart:
@@ -3738,6 +3738,70 @@ def main():
                 if st.button("🚀 Run Backtest", key="run_backtest"):
                     st.info("To run backtest, execute in terminal:")
                     st.code("python train_advanced.py --evaluate ./data/models/advanced_agent.zip")
+
+        with tab_usdt_dom:
+            st.markdown("### 💵 USDT Dominance (USDT.D)")
+            st.markdown("USDT dominance shows the percentage of total crypto market cap held in Tether. "
+                        "**Rising USDT.D = bearish** (money flowing to stablecoins). "
+                        "**Falling USDT.D = bullish** (money flowing into crypto).")
+
+            # TradingView embedded chart — real candles, real data
+            usdt_d_timeframe = st.selectbox("Timeframe", ["1h", "4h", "1D", "1W", "1M"], index=2, key="usdt_d_tf")
+
+            # Map timeframes to TradingView format
+            tv_tf_map = {"1h": "60", "4h": "240", "1D": "D", "1W": "W", "1M": "M"}
+            tv_tf = tv_tf_map.get(usdt_d_timeframe, "D")
+
+            tradingview_widget = f"""
+            <div style="height: 600px;">
+                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                <script type="text/javascript">
+                new TradingView.widget({{
+                    "autosize": true,
+                    "symbol": "CRYPTOCAP:USDT.D",
+                    "interval": "{tv_tf}",
+                    "timezone": "Etc/UTC",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#131722",
+                    "enable_publishing": false,
+                    "hide_top_toolbar": false,
+                    "hide_legend": false,
+                    "save_image": true,
+                    "container_id": "tradingview_usdt_d",
+                    "width": "100%",
+                    "height": 580,
+                    "studies": [
+                        "MASimple@tv-basicstudies",
+                        "RSI@tv-basicstudies"
+                    ]
+                }});
+                </script>
+                <div id="tradingview_usdt_d" style="height: 580px;"></div>
+            </div>
+            """
+
+            import streamlit.components.v1 as components
+            components.html(tradingview_widget, height=620)
+
+            # Quick stats
+            try:
+                import requests as req
+                resp = req.get("https://api.coingecko.com/api/v3/global", timeout=5)
+                if resp.ok:
+                    gdata = resp.json()['data']
+                    usdt_d = gdata['market_cap_percentage'].get('usdt', 0)
+                    btc_d = gdata['market_cap_percentage'].get('btc', 0)
+                    eth_d = gdata['market_cap_percentage'].get('eth', 0)
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("USDT.D", f"{usdt_d:.2f}%")
+                    col2.metric("BTC.D", f"{btc_d:.1f}%")
+                    col3.metric("ETH.D", f"{eth_d:.1f}%")
+                    col4.metric("Others", f"{100 - usdt_d - btc_d - eth_d:.1f}%")
+            except Exception:
+                pass
 
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
