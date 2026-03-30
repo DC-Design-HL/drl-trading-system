@@ -665,6 +665,15 @@ class HTFLiveBot:
         except Exception as exc:
             logger.warning("Position sync failed: %s", exc)
 
+    def _get_real_balance(self) -> float:
+        """Fetch real USDT wallet balance from exchange. Falls back to internal balance."""
+        try:
+            if self.testnet_executor and not self.dry_run:
+                return self.testnet_executor.get_account_balance("USDT")
+        except Exception as exc:
+            logger.debug("Real balance fetch failed: %s", exc)
+        return self.balance
+
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
         self.trades.append(trade)
@@ -2052,11 +2061,11 @@ class HTFLiveBot:
             "confidence": confidence,
             "timestamp": datetime.now().isoformat(),
             "agent": "htf",
-            "balance_after": self.balance,
+            "balance_after": self._get_real_balance(),
             "realized_pnl_total": self.realized_pnl,
-            "initial_balance": self.initial_balance,
-            "balance_pnl_pct": ((self.balance - self.initial_balance) / self.initial_balance * 100)
-                if self.initial_balance > 0 else 0.0,
+            "initial_balance": 5000.0,  # Testnet starting deposit
+            "balance_pnl_pct": ((self._get_real_balance() - 5000.0) / 5000.0 * 100)
+                if True else 0.0,
         }
 
         logger.info(
