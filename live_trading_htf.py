@@ -95,6 +95,11 @@ ACTION_LABELS = {ACTION_HOLD: "HOLD", ACTION_LONG: "LONG", ACTION_SHORT: "SHORT"
 # Minimum confidence to act on a signal
 MIN_CONFIDENCE = 0.45
 
+# Per-symbol minimum confidence overrides (symbols with poor low-conf performance)
+SYMBOL_MIN_CONFIDENCE = {
+    "ETHUSDT": 0.80,  # ETH low-conf trades had 0% SHORT WR, -$396 PnL
+}
+
 # Ranging regime filter: raise confidence threshold when ADX is low
 RANGING_MIN_CONFIDENCE = 0.80  # Need higher conviction in ranging markets
 RANGING_ADX_THRESHOLD = 20.0   # ADX below this = ranging
@@ -1768,9 +1773,10 @@ class HTFLiveBot:
                 logger.info("Min hold: %.0fs remaining — HOLD", remaining)
                 return None
 
-        # ── Guard: confidence threshold ──
-        if action != ACTION_HOLD and confidence < MIN_CONFIDENCE:
-            logger.info("Low confidence %.2f < %.2f — HOLD", confidence, MIN_CONFIDENCE)
+        # ── Guard: confidence threshold (per-symbol or global) ──
+        min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
+        if action != ACTION_HOLD and confidence < min_conf:
+            logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
             return None
 
         # ── Guard: ranging regime filter ──
