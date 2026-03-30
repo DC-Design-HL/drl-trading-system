@@ -158,18 +158,28 @@ class MongoStorage(StorageInterface):
             logger.error(f"Failed to fetch trades from MongoDB: {e}")
             return []
 
+_storage_singleton: StorageInterface = None
+
+
 def get_storage() -> StorageInterface:
-    """Factory to get the configured storage backend."""
+    """Factory to get the configured storage backend (singleton)."""
+    global _storage_singleton
+    if _storage_singleton is not None:
+        return _storage_singleton
+
     storage_type = os.getenv("STORAGE_TYPE", "json").lower()
     
     if storage_type == "mongo":
         try:
             logger.info("💽 Attempting MongoDB Storage...")
-            return MongoStorage()
+            _storage_singleton = MongoStorage()
+            return _storage_singleton
         except Exception as e:
             logger.warning(f"⚠️ MongoDB connection failed: {e}")
             logger.info("📁 Falling back to Local JSON File Storage")
-            return JsonFileStorage()
+            _storage_singleton = JsonFileStorage()
+            return _storage_singleton
     else:
         logger.info("📁 Using Local JSON File Storage")
-        return JsonFileStorage()
+        _storage_singleton = JsonFileStorage()
+        return _storage_singleton
