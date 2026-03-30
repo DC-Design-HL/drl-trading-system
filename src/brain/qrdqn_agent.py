@@ -359,7 +359,7 @@ class HTFQRDQNAgent:
         self.model.learn(
             total_timesteps=total_timesteps,
             callback=callbacks,
-            progress_bar=True,
+            progress_bar=False,
             reset_num_timesteps=False,
         )
         
