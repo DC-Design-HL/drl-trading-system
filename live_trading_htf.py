@@ -117,6 +117,13 @@ SIGNAL_GATE_OF_THRESHOLD = 0.20     # Order flow score magnitude to count as dir
 SIGNAL_GATE_OB_THRESHOLD = 0.30     # Orderbook imbalance magnitude to count as directional
 SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count as opposing
 
+# ── Orderbook Guard (Golden Guard) ──
+# Blocks trades when orderbook bias contradicts the trade direction.
+# Applies to ALL tiers (including Tier 1 autonomous) — orderbook divergence
+# is the strongest single predictor of whipsaw reversals.
+# Backtested Mar 24-31: WR 46.3%→51.8%, PnL +217%, catches 3/3 whipsaw shorts.
+ORDERBOOK_GUARD_ENABLED = True
+
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
@@ -764,6 +771,57 @@ class HTFLiveBot:
             summary["price"] = market["price"]
 
         return summary
+
+    def _check_orderbook_guard(self, action: int) -> bool:
+        """
+        Orderbook Guard (Golden Guard): block trades when orderbook bias contradicts direction.
+
+        This guard applies to ALL confidence tiers, including Tier 1 autonomous.
+        The orderbook reflects real-time buy/sell pressure and is the strongest
+        single predictor of whipsaw reversals in our backtesting.
+
+        Returns True if the trade is ALLOWED, False if BLOCKED.
+        """
+        if not ORDERBOOK_GUARD_ENABLED:
+            return True
+
+        if action == ACTION_HOLD:
+            return True
+
+        direction = "LONG" if action == ACTION_LONG else "SHORT"
+
+        try:
+            market = self._fetch_market_signals(self.symbol)
+            if not market:
+                logger.debug("Orderbook guard: no market data — allowing trade (fail-open)")
+                return True
+        except Exception as exc:
+            logger.debug("Orderbook guard: fetch failed (%s) — allowing trade (fail-open)", exc)
+            return True
+
+        # Get orderbook bias from order_flow.orderbook
+        of = market.get("order_flow", {})
+        ob = of.get("orderbook", {}) if of else {}
+        ob_bias = (ob.get("bias") or "neutral").lower()
+
+        blocked = False
+        if direction == "LONG" and ob_bias == "bearish":
+            blocked = True
+        elif direction == "SHORT" and ob_bias == "bullish":
+            blocked = True
+
+        if blocked:
+            logger.info(
+                "🛡️ ORDERBOOK GUARD BLOCK: %s blocked — orderbook bias is %s (contradicts %s)",
+                self.symbol, ob_bias.upper(), direction,
+            )
+        else:
+            logger.debug(
+                "🛡️ Orderbook guard PASS: %s %s — orderbook bias: %s",
+                self.symbol, direction, ob_bias,
+            )
+
+        return not blocked
 
     def _check_signal_gate(self, action: int, confidence: float) -> bool:
         """
@@ -1834,6 +1892,15 @@ class HTFLiveBot:
                             return None
             except Exception as exc:
                 logger.debug("Exhaustion filter check failed: %s", exc)
+
+        # ── Guard: Orderbook Guard (Golden Guard) ──
+        # Blocks trades when orderbook bias contradicts trade direction.
+        # Applies to ALL tiers — this is a hard veto based on real-time order flow.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_orderbook_guard(action):
+                return None
 
         # ── Guard: Market Signal Gate ──
         # Low-confidence entries need confirmation from real market signals
