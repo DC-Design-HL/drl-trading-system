@@ -124,6 +124,29 @@ SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count
 # Backtested Mar 24-31: WR 46.3%→51.8%, PnL +217%, catches 3/3 whipsaw shorts.
 ORDERBOOK_GUARD_ENABLED = True
 
+# ── RSI Extreme Guard ──
+# Blocks trades at overbought/oversold extremes on the 15m timeframe.
+# Don't LONG when RSI > threshold (overbought), don't SHORT when RSI < threshold (oversold).
+# Backtested Mar 24-31: catches RSI=18 shorts and RSI=83 longs that hit SL within minutes.
+RSI_GUARD_ENABLED = True
+RSI_GUARD_OB_THRESHOLD = 70         # Don't LONG above this RSI (overbought)
+RSI_GUARD_OS_THRESHOLD = 30         # Don't SHORT below this RSI (oversold)
+
+# ── ADX Ranging Guard ──
+# Blocks trades when ADX is very low (no trend, choppy/ranging market).
+# In ranging markets, trend-following signals produce whipsaws.
+# Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
+ADX_GUARD_ENABLED = True
+ADX_GUARD_MIN = 15                  # Block all trades when ADX below this
+
+# ── Rescue Rule ──
+# Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.
+# This saves ~7 winning trades that would otherwise be blocked, while only letting through ~2 losses.
+# Backtested: $172→$227 PnL, 52.7%→56.2% WR.
+RESCUE_ENABLED = True
+RESCUE_MIN_CONFIDENCE = 0.90        # Model confidence threshold for rescue
+RESCUE_MIN_AGREES = 2               # Minimum signal agreements for rescue (out of 4: MTF, OF, whale, OB)
+
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
@@ -822,6 +845,125 @@ class HTFLiveBot:
             )
 
         return not blocked
+
+    def _check_rsi_adx_guard(self, action: int, confidence: float) -> bool:
+        """
+        RSI Extreme + ADX Ranging Guard with Rescue Override.
+
+        Blocks trades when:
+        1. RSI extreme: LONG with 15m RSI > 70 (overbought) or SHORT with RSI < 30 (oversold)
+        2. ADX too low: ADX < 15 means no trend (ranging/choppy market)
+
+        Rescue Override: If blocked by RSI or ADX, but model confidence >= 0.90
+        AND >= 2 market signals agree with the direction, ALLOW the trade anyway.
+
+        Returns True if ALLOWED, False if BLOCKED.
+        """
+        if action == ACTION_HOLD:
+            return True
+
+        if not RSI_GUARD_ENABLED and not ADX_GUARD_ENABLED:
+            return True
+
+        direction = "LONG" if action == ACTION_LONG else "SHORT"
+
+        try:
+            market = self._fetch_market_signals(self.symbol)
+            if not market:
+                return True  # Fail-open
+        except Exception:
+            return True  # Fail-open
+
+        # --- Check RSI ---
+        rsi_blocked = False
+        rsi_reason = ""
+        if RSI_GUARD_ENABLED:
+            mtf = market.get("mtf", {})
+            rsi_15m = mtf.get("signals", {}).get("15m", {}).get("rsi", 50)
+            if isinstance(rsi_15m, (int, float)):
+                if direction == "LONG" and rsi_15m > RSI_GUARD_OB_THRESHOLD:
+                    rsi_blocked = True
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} > {RSI_GUARD_OB_THRESHOLD} (overbought)"
+                elif direction == "SHORT" and rsi_15m < RSI_GUARD_OS_THRESHOLD:
+                    rsi_blocked = True
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} < {RSI_GUARD_OS_THRESHOLD} (oversold)"
+
+        # --- Check ADX ---
+        adx_blocked = False
+        adx_reason = ""
+        if ADX_GUARD_ENABLED:
+            regime = market.get("regime", {})
+            adx = regime.get("adx", 30) or 30
+            if isinstance(adx, (int, float)) and adx < ADX_GUARD_MIN:
+                adx_blocked = True
+                adx_reason = f"ADX={adx:.0f} < {ADX_GUARD_MIN} (ranging)"
+
+        if not rsi_blocked and not adx_blocked:
+            return True  # No block needed
+
+        # --- Rescue Override ---
+        if RESCUE_ENABLED and confidence >= RESCUE_MIN_CONFIDENCE:
+            # Count how many signals agree with the direction
+            agrees = 0
+
+            # 1. MTF alignment
+            mtf = market.get("mtf", {})
+            mtf_bias = (mtf.get("bias") or "NEUTRAL").upper()
+            mtf_aligned = mtf.get("aligned", False)
+            if direction == "LONG" and mtf_bias == "BULLISH" and mtf_aligned:
+                agrees += 1
+            elif direction == "SHORT" and mtf_bias == "BEARISH" and mtf_aligned:
+                agrees += 1
+
+            # 2. Order Flow
+            of = market.get("order_flow", {})
+            of_bias = (of.get("bias") or "neutral").lower()
+            if direction == "LONG" and of_bias == "bullish":
+                agrees += 1
+            elif direction == "SHORT" and of_bias == "bearish":
+                agrees += 1
+
+            # 3. Whale
+            whale = market.get("whale", {})
+            whale_dir = (whale.get("direction") or "NEUTRAL").upper()
+            if direction == "LONG" and whale_dir == "BULLISH":
+                agrees += 1
+            elif direction == "SHORT" and whale_dir == "BEARISH":
+                agrees += 1
+
+            # 4. Orderbook
+            ob = of.get("orderbook", {})
+            ob_bias = (ob.get("bias") or "neutral").lower()
+            if direction == "LONG" and ob_bias == "bullish":
+                agrees += 1
+            elif direction == "SHORT" and ob_bias == "bearish":
+                agrees += 1
+
+            if agrees >= RESCUE_MIN_AGREES:
+                reasons = []
+                if rsi_blocked:
+                    reasons.append(rsi_reason)
+                if adx_blocked:
+                    reasons.append(adx_reason)
+                logger.info(
+                    "🆘 RESCUE OVERRIDE: %s %s — blocked by [%s] but RESCUED "
+                    "(conf=%.2f >= %.2f, agrees=%d >= %d)",
+                    self.symbol, direction, " + ".join(reasons),
+                    confidence, RESCUE_MIN_CONFIDENCE, agrees, RESCUE_MIN_AGREES,
+                )
+                return True  # Rescued!
+
+        # --- Block ---
+        reasons = []
+        if rsi_blocked:
+            reasons.append(rsi_reason)
+        if adx_blocked:
+            reasons.append(adx_reason)
+        logger.info(
+            "🚫 RSI/ADX GUARD BLOCK: %s %s — %s (conf=%.2f, no rescue)",
+            self.symbol, direction, " + ".join(reasons), confidence,
+        )
+        return False
 
     def _check_signal_gate(self, action: int, confidence: float) -> bool:
         """
@@ -1900,6 +2042,15 @@ class HTFLiveBot:
             (self.position == 1 and action == ACTION_SHORT) or
             (self.position == -1 and action == ACTION_LONG)):
             if not self._check_orderbook_guard(action):
+                return None
+
+        # ── Guard: RSI Extreme + ADX Ranging (with Rescue Override) ──
+        # Blocks overbought/oversold entries and ranging-market entries.
+        # Rescue: if conf >= 0.90 AND >= 2 signals agree, override the block.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_rsi_adx_guard(action, confidence):
                 return None
 
         # ── Guard: Market Signal Gate ──
