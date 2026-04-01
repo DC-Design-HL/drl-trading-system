@@ -163,6 +163,40 @@ def _format_strategy(strategy: str) -> str:
     return mapping.get(strategy, strategy.title() if strategy else "Unknown")
 
 
+def _add_rsi_adx_line(lines: list, signals: dict) -> None:
+    """Add a dedicated RSI + ADX line to trade alerts for guard visibility."""
+    if not signals:
+        return
+
+    # RSI from MTF 15m signal
+    mtf = signals.get("mtf", {})
+    sigs = mtf.get("signals", {})
+    rsi_15m = sigs.get("15m", {}).get("rsi")
+
+    # ADX from regime
+    regime = signals.get("regime", {})
+    adx = regime.get("adx")
+
+    parts = []
+    if rsi_15m is not None and isinstance(rsi_15m, (int, float)):
+        # Flag extreme RSI
+        if rsi_15m > 70:
+            parts.append(f"RSI={rsi_15m:.0f} ⚠️OB")
+        elif rsi_15m < 30:
+            parts.append(f"RSI={rsi_15m:.0f} ⚠️OS")
+        else:
+            parts.append(f"RSI={rsi_15m:.0f}")
+
+    if adx is not None and isinstance(adx, (int, float)):
+        if adx < 15:
+            parts.append(f"ADX={adx:.0f} ⚠️RANGING")
+        else:
+            parts.append(f"ADX={adx:.0f}")
+
+    if parts:
+        lines.append(f"🔬 {' | '.join(parts)}")
+
+
 def format_open_trade(alert: dict) -> str:
     """Format an OPEN_LONG or OPEN_SHORT alert."""
     trade = alert.get("trade", {})
@@ -210,6 +244,10 @@ def format_open_trade(alert: dict) -> str:
         lines.append(f"⚡ Leverage: {leverage}x | Risk: ${dollar_risk:,.2f} | Margin: ${margin:,.2f}")
 
     lines.append(f"📊 Confidence: {confidence * 100:.0f}%")
+
+    # RSI + ADX values (key guard indicators)
+    _add_rsi_adx_line(lines, signals)
+
     lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
 
     # Market signals
