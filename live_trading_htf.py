@@ -78,9 +78,9 @@ TAKE_PROFIT_PCT = 0.030  # 3.0% take profit
 TRADING_FEE = 0.0004   # 0.04% taker fee
 
 # Trailing stop configuration
-TRAILING_BREAKEVEN_PCT = 0.01    # At +1% profit, activate trailing stop
+TRAILING_BREAKEVEN_PCT = 0.005   # At +0.5% profit, activate trailing stop
 TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit (legacy, kept for BOS overlay)
-TRAILING_DISTANCE_PCT = 0.005    # Trail 0.5% behind peak (continuous after breakeven)
+TRAILING_DISTANCE_PCT = 0.003    # Trail 0.3% behind peak (continuous after breakeven)
 
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
@@ -1749,10 +1749,10 @@ class HTFLiveBot:
 
         if profit_pct >= TRAILING_BREAKEVEN_PCT:
             # Continuous trailing stop: trail TRAILING_DISTANCE_PCT behind peak price
-            # At +1% profit → SL = peak - 0.5% distance (locks ~0.5% profit)
-            # At +1.5% profit → SL = peak - 0.5% (locks ~1% profit)
-            # At +2% profit → SL = peak - 0.5% (locks ~1.5% profit)
-            # This eliminates the gap between breakeven and profit lock
+            # At +0.5% profit → trailing activates, SL = peak - 0.3% (locks ~0.2%)
+            # At +1.0% profit → SL = peak - 0.3% (locks ~0.7%)
+            # At +1.5% profit → SL = peak - 0.3% (locks ~1.2%)
+            # Tighter trailing captures more of the typical 1-1.5% MFE moves
             if self.position == 1:
                 trailing_sl = self.peak_price * (1.0 - TRAILING_DISTANCE_PCT)
                 # Never let trailing SL go below entry (minimum breakeven)
