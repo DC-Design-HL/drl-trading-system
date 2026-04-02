@@ -137,13 +137,13 @@ RSI_GUARD_OS_THRESHOLD = 30         # Don't SHORT below this RSI (oversold)
 # In ranging markets, trend-following signals produce whipsaws.
 # Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
 ADX_GUARD_ENABLED = True
-ADX_GUARD_MIN = 15                  # Block all trades when ADX below this
+ADX_GUARD_MIN = 20                  # Block all trades when ADX below this
 
 # ── Rescue Rule ──
 # Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.
 # This saves ~7 winning trades that would otherwise be blocked, while only letting through ~2 losses.
 # Backtested: $172→$227 PnL, 52.7%→56.2% WR.
-RESCUE_ENABLED = True
+RESCUE_ENABLED = False
 RESCUE_MIN_CONFIDENCE = 0.90        # Model confidence threshold for rescue
 RESCUE_MIN_AGREES = 2               # Minimum signal agreements for rescue (out of 4: MTF, OF, whale, OB)
 
