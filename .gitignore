@@ -64,3 +64,4 @@ data/backtest_report.json
 data/trading.db
 rendered*.html
 rendered*.js
+data/trading.db
