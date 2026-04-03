@@ -68,14 +68,14 @@ NUM_INTENTS = 3
 
 # Hyperparameters
 SEQ_LENGTH = 20
-LSTM_HIDDEN = 64
+LSTM_HIDDEN = 128
 LSTM_LAYERS = 2
 DROPOUT = 0.3
 WALLET_EMBED_DIM = 16
 ACTION_EMBED_DIM = 8
 VALUE_EMBED_DIM = 4
 COUNTER_EMBED_DIM = 4
-CONTINUOUS_FEATURES = 3  # time_gap, direction, gas_ratio
+CONTINUOUS_FEATURES = 9  # time_gap, direction, gas_ratio, price_norm, price_roc_1h, price_roc_24h, price_volatility, value_usd_log, hour_sin
 
 
 # ── Dataset ───────────────────────────────────────────────────────────
@@ -178,7 +178,8 @@ class WhaleBehaviorLSTM(nn.Module):
 
         # Classification head
         fc_input_dim = lstm_out_dim + WALLET_EMBED_DIM
-        self.fc1 = nn.Linear(fc_input_dim, 128)
+        self.fc1 = nn.Linear(fc_input_dim, 256)
+        self.fc2 = nn.Linear(256, 128)
         self.dropout = nn.Dropout(DROPOUT)
 
         # Output heads
@@ -224,6 +225,8 @@ class WhaleBehaviorLSTM(nn.Module):
         # FC layers
         h = F.relu(self.fc1(combined))
         h = self.dropout(h)
+        h = F.relu(self.fc2(h))
+        h = self.dropout(h)
 
         # Output heads
         intent_logits = self.intent_head(h)
@@ -268,22 +271,69 @@ def load_labeled_data(label_window: str = "4h") -> Tuple[List, List]:
     return wallet_names, wallet_data
 
 
-def action_to_features(action: Dict) -> np.ndarray:
-    """Convert a single action dict to a feature vector."""
+def action_to_features(action: Dict, price_history: Optional[List[float]] = None) -> np.ndarray:
+    """Convert a single action dict to a feature vector.
+    
+    Features (12 total):
+      [0] action_type_idx (embedded)
+      [1] value_bucket_idx (embedded)
+      [2] counter_type_idx (embedded)
+      [3] time_gap_norm         - hours since last action, log-scaled
+      [4] direction              - 1.0=out, 0.0=in
+      [5] gas_ratio              - gas used relative to baseline
+      [6] price_norm             - ETH price log-scaled to ~0-1 range
+      [7] price_roc_1h           - 1h price rate of change (from previous action)
+      [8] price_roc_24h          - 24h price rate of change
+      [9] price_volatility       - rolling price volatility
+      [10] value_usd_log         - log of USD value (value_eth * price)
+      [11] hour_sin              - time-of-day cyclical encoding
+    """
     action_idx = ACTION_TO_IDX.get(action.get("action", "UNKNOWN"), ACTION_TO_IDX["UNKNOWN"])
     value_bucket = value_to_bucket(abs(action.get("value_eth", 0)))
     counter_idx = COUNTER_TO_IDX.get(action.get("to_type", "unknown"), COUNTER_TO_IDX["unknown"])
 
-    # Continuous features
+    # Original continuous features
     time_gap = action.get("_time_gap_hours", 0)
     time_gap_norm = min(math.log(1 + time_gap) / math.log(1 + 720), 1.0)
 
     direction = 1.0 if action.get("direction") == "out" else 0.0
 
-    gas_ratio = min(action.get("_gas_ratio", 1.0), 5.0) / 5.0  # Normalize to 0-1
+    gas_ratio = min(action.get("_gas_ratio", 1.0), 5.0) / 5.0
+
+    # === NEW: Price context features ===
+    price = action.get("price_at_action", 0) or 0
+    
+    # Price normalized via log scale (ETH range ~$80 to ~$5000)
+    # log(80)=4.38, log(5000)=8.52 → normalize to ~0-1
+    price_norm = (math.log(max(price, 1)) - 4.0) / 5.0 if price > 0 else 0.0
+    price_norm = max(0.0, min(1.0, price_norm))
+    
+    # Price rate of change (from _price_roc fields set during sequence building)
+    price_roc_1h = action.get("_price_roc_1h", 0.0)
+    price_roc_1h = max(-0.1, min(0.1, price_roc_1h)) / 0.1  # Normalize ±10% to ±1
+    
+    price_roc_24h = action.get("_price_roc_24h", 0.0)
+    price_roc_24h = max(-0.2, min(0.2, price_roc_24h)) / 0.2  # Normalize ±20% to ±1
+    
+    # Price volatility (from _price_vol field)
+    price_vol = action.get("_price_vol", 0.0)
+    price_vol = min(price_vol / 0.05, 1.0)  # Normalize: 5% vol = 1.0
+    
+    # USD value of transaction (price * ETH amount, log-scaled)
+    value_eth = abs(action.get("value_eth", 0))
+    value_usd = value_eth * price if price > 0 else 0
+    value_usd_log = math.log(1 + value_usd) / math.log(1 + 50_000_000)  # Normalize: $50M = 1.0
+    value_usd_log = min(value_usd_log, 1.0)
+    
+    # Time-of-day cyclical (hour as sin wave — captures market session patterns)
+    ts = action.get("timestamp", 0)
+    hour = (ts % 86400) / 3600.0  # Hour of day UTC
+    hour_sin = math.sin(2 * math.pi * hour / 24.0)
 
     return np.array([action_idx, value_bucket, counter_idx,
-                     time_gap_norm, direction, gas_ratio], dtype=np.float32)
+                     time_gap_norm, direction, gas_ratio,
+                     price_norm, price_roc_1h, price_roc_24h,
+                     price_vol, value_usd_log, hour_sin], dtype=np.float32)
 
 
 def build_sequences(
@@ -307,7 +357,9 @@ def build_sequences(
     change_key = f"price_change_{label_window}"
 
     for wallet_idx, (name, actions) in enumerate(zip(wallet_names, wallet_data)):
-        # Pre-compute time gaps and gas ratios
+        # Pre-compute time gaps, gas ratios, and price context
+        prices = [a.get("price_at_action", 0) or 0 for a in actions]
+        
         for i, action in enumerate(actions):
             if i > 0:
                 time_gap = (action["timestamp"] - actions[i - 1]["timestamp"]) / 3600.0
@@ -318,6 +370,39 @@ def build_sequences(
             # Gas ratio (relative to median — approximate)
             gas = action.get("gas_used", 21000) or 21000
             action["_gas_ratio"] = gas / 50000.0  # rough normalization
+            
+            # Price rate of change vs recent actions
+            cur_price = prices[i]
+            if cur_price > 0 and i > 0:
+                # Find action ~1h ago
+                roc_1h = 0.0
+                for j in range(i - 1, max(i - 20, -1), -1):
+                    if prices[j] > 0:
+                        roc_1h = (cur_price - prices[j]) / prices[j]
+                        break
+                action["_price_roc_1h"] = roc_1h
+                
+                # Find action ~24h ago (look further back)
+                roc_24h = 0.0
+                target_ts = action["timestamp"] - 86400
+                for j in range(i - 1, max(i - 500, -1), -1):
+                    if prices[j] > 0 and actions[j]["timestamp"] <= target_ts:
+                        roc_24h = (cur_price - prices[j]) / prices[j]
+                        break
+                action["_price_roc_24h"] = roc_24h
+                
+                # Price volatility (std of recent price changes)
+                recent_prices = [p for p in prices[max(0, i-20):i+1] if p > 0]
+                if len(recent_prices) >= 2:
+                    returns = [(recent_prices[k] - recent_prices[k-1]) / recent_prices[k-1] 
+                               for k in range(1, len(recent_prices)) if recent_prices[k-1] > 0]
+                    action["_price_vol"] = float(np.std(returns)) if returns else 0.0
+                else:
+                    action["_price_vol"] = 0.0
+            else:
+                action["_price_roc_1h"] = 0.0
+                action["_price_roc_24h"] = 0.0
+                action["_price_vol"] = 0.0
 
         # Sliding window
         for i in range(seq_length, len(actions)):

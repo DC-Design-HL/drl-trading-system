@@ -151,7 +151,8 @@ class WhaleIntentPredictor:
         if len(actions) < SEQ_LENGTH:
             return None
 
-        # Compute time gaps
+        # Compute time gaps and price context features
+        prices = [a.get("price_at_action", 0) or 0 for a in actions]
         for i, action in enumerate(actions):
             if i > 0:
                 time_gap = (action["timestamp"] - actions[i - 1]["timestamp"]) / 3600.0
@@ -160,6 +161,40 @@ class WhaleIntentPredictor:
                 action["_time_gap_hours"] = 0
             gas = action.get("gas_used", 21000) or 21000
             action["_gas_ratio"] = gas / 50000.0
+
+            # Price context (mirrors build_sequences logic)
+            cur_price = prices[i]
+            if cur_price > 0 and i > 0:
+                # Price ROC vs previous action
+                roc_1h = 0.0
+                for j in range(i - 1, max(i - 20, -1), -1):
+                    if prices[j] > 0:
+                        roc_1h = (cur_price - prices[j]) / prices[j]
+                        break
+                action["_price_roc_1h"] = roc_1h
+
+                # Price ROC ~24h ago
+                roc_24h = 0.0
+                target_ts = action["timestamp"] - 86400
+                for j in range(i - 1, max(i - 500, -1), -1):
+                    if prices[j] > 0 and actions[j]["timestamp"] <= target_ts:
+                        roc_24h = (cur_price - prices[j]) / prices[j]
+                        break
+                action["_price_roc_24h"] = roc_24h
+
+                # Rolling volatility
+                import numpy as _np
+                recent_prices = [p for p in prices[max(0, i-20):i+1] if p > 0]
+                if len(recent_prices) >= 2:
+                    returns = [(recent_prices[k] - recent_prices[k-1]) / recent_prices[k-1]
+                               for k in range(1, len(recent_prices)) if recent_prices[k-1] > 0]
+                    action["_price_vol"] = float(_np.std(returns)) if returns else 0.0
+                else:
+                    action["_price_vol"] = 0.0
+            else:
+                action["_price_roc_1h"] = 0.0
+                action["_price_roc_24h"] = 0.0
+                action["_price_vol"] = 0.0
 
         # Build feature sequence
         seq = np.array([action_to_features(a) for a in actions[-SEQ_LENGTH:]], dtype=np.float32)
