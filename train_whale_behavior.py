@@ -38,6 +38,7 @@ def main():
     parser.add_argument("--patience", type=int, default=10, help="Early stopping patience")
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps (effective batch = batch_size * accum_steps)")
     parser.add_argument("--seq-length", type=int, default=None, help="Sequence length (default: 20, increase on machines with more RAM)")
+    parser.add_argument("--behavioral", action="store_true", help="Use behavioral labels (ACCUMULATING/DISTRIBUTING) instead of price-based labels")
     args = parser.parse_args()
 
     logger.info("=" * 60)
@@ -49,6 +50,7 @@ def main():
     logger.info("  Accum steps: %d (effective batch: %d)", args.accum_steps, args.batch_size * args.accum_steps)
     if args.seq_length:
         logger.info("  Sequence length: %d", args.seq_length)
+    logger.info("  Label mode: %s", "BEHAVIORAL" if args.behavioral else "PRICE-BASED")
     logger.info("=" * 60)
 
     from src.whale_behavior.models.sequence_model import train_model
@@ -66,6 +68,7 @@ def main():
         label_window=args.window,
         patience=args.patience,
         accum_steps=args.accum_steps,
+        use_behavioral=args.behavioral,
     )
 
     if "error" in results:

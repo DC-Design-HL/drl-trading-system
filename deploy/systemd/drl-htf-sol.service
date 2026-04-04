@@ -1,0 +1,17 @@
+[Unit]
+Description=DRL Trading System - HTF Agent SOL (Testnet)
+After=network.target drl-trading-server.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/projects/drl-trading-system/repo
+EnvironmentFile=/root/.openclaw/projects/drl-trading-system/repo/.env
+ExecStart=/usr/bin/python3 /root/.openclaw/projects/drl-trading-system/repo/live_trading_htf.py --live --interval 15 --symbol SOLUSDT
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

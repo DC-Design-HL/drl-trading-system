@@ -1,0 +1,15 @@
+luigi-a9c232bb.botitout.com {
+    tls internal
+    handle /health {
+        respond "ok" 200
+    }
+    reverse_proxy localhost:37677
+}
+
+
+:80 {
+    handle /health {
+        respond "ok" 200
+    }
+    reverse_proxy localhost:8501
+}

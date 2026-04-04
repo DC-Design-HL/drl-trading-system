@@ -1,0 +1,17 @@
+[Unit]
+Description=DRL Trading System - Championship Shadow Comparator (BTC)
+After=network.target drl-trading-server.service drl-htf-agent.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/projects/drl-trading-system/repo
+EnvironmentFile=/root/.openclaw/projects/drl-trading-system/repo/.env
+ExecStart=/usr/bin/python3 /root/.openclaw/projects/drl-trading-system/repo/championship_shadow.py --symbol BTCUSDT --interval 15
+Restart=always
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

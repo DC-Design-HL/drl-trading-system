@@ -62,8 +62,9 @@ def value_to_bucket(value_eth: float) -> int:
 
 NUM_VALUE_BUCKETS = 6
 
-# Label mapping
+# Label mapping — supports both old (price-based) and new (behavioral) labels
 INTENT_LABELS = {"BUY_SIGNAL": 0, "SELL_SIGNAL": 1, "NEUTRAL": 2}
+BEHAVIORAL_LABELS = {"ACCUMULATING": 0, "DISTRIBUTING": 1, "NEUTRAL": 2}
 NUM_INTENTS = 3
 
 # Hyperparameters
@@ -238,9 +239,14 @@ class WhaleBehaviorLSTM(nn.Module):
 
 # ── Data Preparation ──────────────────────────────────────────────────
 
-def load_labeled_data(label_window: str = "4h") -> Tuple[List, List]:
+def load_labeled_data(label_window: str = "4h", use_behavioral: bool = False) -> Tuple[List, List]:
     """
     Load all labeled wallet timelines and build training data.
+
+    Args:
+        label_window: Price label window (only used when use_behavioral=False)
+        use_behavioral: If True, load behavioral labels from labeled_v2/
+                        (excludes exchange wallets, uses ACCUMULATING/DISTRIBUTING/NEUTRAL)
 
     Returns (wallet_names, wallet_data) where wallet_data[i] is a list of
     action dicts for wallet i.
@@ -248,25 +254,48 @@ def load_labeled_data(label_window: str = "4h") -> Tuple[List, List]:
     wallet_names = []
     wallet_data = []
 
-    for f in sorted(LABELED_DIR.glob("*_labeled.jsonl")):
-        actions = []
-        with open(f) as fh:
-            for line in fh:
-                try:
-                    rec = json.loads(line.strip())
-                    # Skip if no label for this window
-                    label_key = f"label_{label_window}"
-                    if rec.get(label_key) is None:
+    if use_behavioral:
+        behavioral_dir = Path("data/whale_behavior/labeled_v2")
+        if not behavioral_dir.exists():
+            logger.error("Behavioral labels not found at %s. Run behavioral_labeler first.", behavioral_dir)
+            return [], []
+        
+        for f in sorted(behavioral_dir.glob("*_behavioral.jsonl")):
+            actions = []
+            with open(f) as fh:
+                for line in fh:
+                    try:
+                        rec = json.loads(line.strip())
+                        if rec.get("behavioral_label") is None:
+                            continue
+                        actions.append(rec)
+                    except json.JSONDecodeError:
                         continue
-                    actions.append(rec)
-                except json.JSONDecodeError:
-                    continue
 
-        if len(actions) >= SEQ_LENGTH + 1:
-            name = f.stem.replace("_labeled", "")
-            wallet_names.append(name)
-            wallet_data.append(actions)
-            logger.info("Loaded %s: %d labeled actions", name, len(actions))
+            if len(actions) >= SEQ_LENGTH + 1:
+                name = f.stem.replace("_behavioral", "")
+                wallet_names.append(name)
+                wallet_data.append(actions)
+                logger.info("Loaded %s: %d behavioral-labeled actions", name, len(actions))
+    else:
+        for f in sorted(LABELED_DIR.glob("*_labeled.jsonl")):
+            actions = []
+            with open(f) as fh:
+                for line in fh:
+                    try:
+                        rec = json.loads(line.strip())
+                        label_key = f"label_{label_window}"
+                        if rec.get(label_key) is None:
+                            continue
+                        actions.append(rec)
+                    except json.JSONDecodeError:
+                        continue
+
+            if len(actions) >= SEQ_LENGTH + 1:
+                name = f.stem.replace("_labeled", "")
+                wallet_names.append(name)
+                wallet_data.append(actions)
+                logger.info("Loaded %s: %d labeled actions", name, len(actions))
 
     return wallet_names, wallet_data
 
@@ -341,6 +370,7 @@ def build_sequences(
     wallet_data: List[List[Dict]],
     label_window: str = "4h",
     seq_length: int = SEQ_LENGTH,
+    use_behavioral: bool = False,
 ) -> Tuple:
     """
     Build sliding-window sequences from wallet timelines.
@@ -409,21 +439,36 @@ def build_sequences(
             window = actions[i - seq_length: i]
             target = actions[i]
 
-            # Label
-            label_str = target.get(label_key)
-            if label_str not in INTENT_LABELS:
+            # Label — behavioral or price-based
+            if use_behavioral:
+                label_str = target.get("behavioral_label")
+                label_map = BEHAVIORAL_LABELS
+            else:
+                label_str = target.get(label_key)
+                label_map = INTENT_LABELS
+            
+            if label_str not in label_map:
                 continue
 
-            intent = INTENT_LABELS[label_str]
-            price_change = target.get(change_key, 0) or 0
-
-            # Direction: 1.0 = bullish (BUY_SIGNAL), 0.0 = bearish (SELL_SIGNAL)
-            if label_str == "BUY_SIGNAL":
-                direction = 1.0
-            elif label_str == "SELL_SIGNAL":
-                direction = 0.0
+            intent = label_map[label_str]
+            
+            if use_behavioral:
+                # For behavioral: direction based on behavioral label
+                if label_str == "ACCUMULATING":
+                    direction = 1.0  # bullish
+                elif label_str == "DISTRIBUTING":
+                    direction = 0.0  # bearish
+                else:
+                    direction = 0.5  # neutral
+                price_change = target.get("behavioral_confidence", 0) or 0
             else:
-                direction = 0.5  # neutral
+                price_change = target.get(change_key, 0) or 0
+                if label_str == "BUY_SIGNAL":
+                    direction = 1.0
+                elif label_str == "SELL_SIGNAL":
+                    direction = 0.0
+                else:
+                    direction = 0.5
 
             # Build feature sequence
             seq = np.array([action_to_features(a) for a in window], dtype=np.float32)
@@ -468,6 +513,28 @@ def time_split(
     return make_dataset(0, train_end), make_dataset(train_end, val_end), make_dataset(val_end, n)
 
 
+# ── Focal Loss ────────────────────────────────────────────────────────
+
+class FocalLoss(nn.Module):
+    """Focal Loss for handling class imbalance.
+    
+    Down-weights easy examples and focuses training on hard misclassifications.
+    Especially useful when NEUTRAL class dominates and model defaults to it.
+    """
+    def __init__(self, alpha: float = 1.0, gamma: float = 2.0, 
+                 weight: Optional[torch.Tensor] = None):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = weight
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss.mean()
+
+
 # ── Training ──────────────────────────────────────────────────────────
 
 def train_model(
@@ -477,10 +544,15 @@ def train_model(
     label_window: str = "4h",
     patience: int = 10,
     accum_steps: int = 1,
+    use_behavioral: bool = False,
 ) -> Dict:
     """
     Full training pipeline: load data → build sequences → train LSTM → save model.
 
+    Args:
+        use_behavioral: If True, use behavioral labels (ACCUMULATING/DISTRIBUTING/NEUTRAL)
+                        from labeled_v2/ directory instead of price-based labels.
+    
     Returns training results dict.
     """
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -494,8 +566,13 @@ def train_model(
         device = torch.device("cpu")
     logger.info("Training on device: %s", device)
 
+    if use_behavioral:
+        logger.info("Using BEHAVIORAL labels (ACCUMULATING/DISTRIBUTING/NEUTRAL)")
+    else:
+        logger.info("Using PRICE-BASED labels (BUY_SIGNAL/SELL_SIGNAL/NEUTRAL)")
+
     # Load data
-    wallet_names, wallet_data = load_labeled_data(label_window)
+    wallet_names, wallet_data = load_labeled_data(label_window, use_behavioral=use_behavioral)
     if not wallet_names:
         logger.error("No labeled data found!")
         return {"error": "No data"}
@@ -503,10 +580,9 @@ def train_model(
     logger.info("Loaded %d wallets", len(wallet_names))
 
     # Build sequences
-    # Free raw data before building sequences
     sequences, wallet_ids, labels_intent, labels_direction, labels_magnitude = \
-        build_sequences(wallet_names, wallet_data, label_window)
-    del wallet_data  # Free memory — no longer needed
+        build_sequences(wallet_names, wallet_data, label_window, use_behavioral=use_behavioral)
+    del wallet_data  # Free memory
     import gc; gc.collect()
 
     logger.info("Built %d sequences", len(sequences))
@@ -543,8 +619,8 @@ def train_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
 
-    # Loss functions
-    intent_loss_fn = nn.CrossEntropyLoss(weight=class_weights)
+    # Loss functions — Focal Loss for intent (handles class imbalance better)
+    intent_loss_fn = FocalLoss(alpha=1.0, gamma=2.0, weight=class_weights)
     direction_loss_fn = nn.BCELoss()
     magnitude_loss_fn = nn.MSELoss()
 

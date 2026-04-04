@@ -1,0 +1,16 @@
+[Unit]
+Description=DRL Trading System - Whale Behavior WebSocket Collector (Real-time)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/projects/drl-trading-system/repo
+EnvironmentFile=/root/.openclaw/projects/drl-trading-system/repo/.env
+ExecStart=/usr/bin/python3 -u whale_behavior_ws.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
