@@ -139,8 +139,8 @@ class TestStoragePersistence:
 
     @patch('pymongo.MongoClient')
     def test_storage_factory_fallback(self, mock_client):
-        """Test storage factory falls back to JSON when MongoDB fails."""
-        from src.data.storage import get_storage, JsonFileStorage
+        """Test storage factory falls back to SQLite when MongoDB fails."""
+        from src.data.storage import get_storage, SQLiteStorage
 
         # Make MongoDB fail
         mock_client.side_effect = Exception("Connection failed")
@@ -148,8 +148,8 @@ class TestStoragePersistence:
         with patch.dict('os.environ', {'STORAGE_TYPE': 'mongo'}):
             storage = get_storage()
 
-            # Should fallback to JSON
-            assert isinstance(storage, JsonFileStorage)
+            # Should fallback to SQLite
+            assert isinstance(storage, SQLiteStorage)
 
 
 @pytest.mark.integration

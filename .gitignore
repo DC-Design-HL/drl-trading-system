@@ -65,3 +65,6 @@ data/trading.db
 rendered*.html
 rendered*.js
 data/trading.db
+data/trading.db-shm
+data/trading.db-wal
+supervisor/supervisord.log
