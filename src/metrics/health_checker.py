@@ -136,24 +136,24 @@ def _check_local_api_server() -> tuple:
 
 
 def _check_trading_bots() -> dict:
-    """Check trading bot services."""
+    """Check trading bot processes via pgrep."""
     import subprocess
     bots = {
-        "htf-btc": "drl-htf-agent.service",
-        "htf-eth": "drl-htf-eth.service",
-        "htf-partial": "drl-htf-partial.service",
-        "htf-hybrid": "drl-htf-hybrid.service",
+        "htf-btc": "live_trading_htf.py.*BTCUSDT",
+        "htf-eth": "live_trading_htf.py.*ETHUSDT",
+        "htf-sol": "live_trading_htf.py.*SOLUSDT",
+        "htf-xrp": "live_trading_htf.py.*XRPUSDT",
     }
     results = {}
-    for name, service in bots.items():
+    for name, pattern in bots.items():
         t0 = time.time()
         try:
             result = subprocess.run(
-                ["systemctl", "is-active", service],
+                ["pgrep", "-f", pattern],
                 capture_output=True, text=True, timeout=5,
             )
             latency = (time.time() - t0) * 1000
-            status = "healthy" if result.stdout.strip() == "active" else "down"
+            status = "healthy" if result.returncode == 0 else "down"
             results[name] = (status, latency, "")
         except Exception as exc:
             results[name] = ("down", 0, str(exc))

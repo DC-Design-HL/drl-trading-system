@@ -1335,32 +1335,28 @@ def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd
 
 
 
-@st.fragment(run_every=60)
 def render_sidebar_metrics_fragment():
-    """Render sidebar portfolio metrics with auto-refresh."""
+    """Render sidebar portfolio metrics."""
     import requests
     import logging
     logger = logging.getLogger(__name__)
     try:
-        try:
-            state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
-            if state_resp.status_code == 200:
-                api_state = state_resp.json()
-                if 'balance' in api_state:
-                     st.session_state.portfolio_balance = api_state.get('balance', 0)
-                     st.session_state.total_pnl = api_state.get('total_pnl', 0)
+        state_resp = requests.get(f'{get_api_url()}/api/state', timeout=5)
+        if state_resp.status_code == 200:
+            api_state = state_resp.json()
+            if 'balance' in api_state:
+                st.session_state.portfolio_balance = api_state.get('balance', 0)
+                st.session_state.total_pnl = api_state.get('total_pnl', 0)
 
-            bal = st.session_state.get('portfolio_balance')
-            pnl = float(st.session_state.get('total_pnl') or 0)
-            bal_str = f"${bal:,.2f}" if bal is not None else "—"
-            st.markdown(
-                metric_card("Portfolio Value", bal_str, delta=pnl, icon="💰"),
-                unsafe_allow_html=True,
-            )
-        except Exception as e:
-            st.markdown(error_card("Connection Error", str(e)), unsafe_allow_html=True)
+        bal = st.session_state.get('portfolio_balance')
+        pnl = float(st.session_state.get('total_pnl') or 0)
+        bal_str = f"${bal:,.2f}" if bal is not None else "—"
+        pnl_color = "#48BB78" if pnl >= 0 else "#FC8181"
+        pnl_sign = "+" if pnl >= 0 else ""
+        st.metric("💰 Portfolio Value", bal_str, delta=f"{pnl_sign}${pnl:,.2f}")
     except Exception as e:
-        logger.error(f"Sidebar data fetch error: {e}")
+        logger.warning(f"Sidebar metrics unavailable: {e}")
+        st.caption("Portfolio data unavailable")
 
 @st.fragment(run_every=120)
 def render_market_analysis_fragment(symbol: str):
