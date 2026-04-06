@@ -3782,8 +3782,8 @@ def main():
             </div>
             """
 
-            import streamlit.components.v1 as components
-            components.html(tradingview_widget, height=620)
+            import streamlit.components.v1 as _components
+            _components.html(tradingview_widget, height=620)
 
             # Quick stats
             try:

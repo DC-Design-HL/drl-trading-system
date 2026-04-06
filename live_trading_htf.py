@@ -2316,13 +2316,15 @@ class HTFLiveBot:
         self.initial_position_units = 0.0
         self.position_entry_time = 0.0
 
+        # Always log the close (dry_run or live) — needed for learning from outcomes
+        self._log_trade(trade)
+
         if not self.dry_run:
-            self._log_trade(trade)
             self._mirror_testnet(trade)
             # Sync balance from exchange after closing position
             self._sync_balance_from_exchange()
         else:
-            logger.info("[DRY RUN] Close not recorded")
+            logger.info("[DRY RUN] Close logged but not executed on exchange")
 
         return trade
 
@@ -2458,6 +2460,22 @@ class HTFLiveBot:
                                 partial_units, self.partial_tp1_price, partial_pnl,
                                 self.sl_price, old_sl, self.position_units,
                             )
+                            self._log_trade({
+                                "action": "PARTIAL_CLOSE_LONG",
+                                "reason": "PARTIAL_TP1",
+                                "symbol": self.symbol,
+                                "entry_price": self.position_price,
+                                "exit_price": self.partial_tp1_price,
+                                "units": partial_units,
+                                "remaining_units": self.position_units,
+                                "original_units": self.initial_position_units,
+                                "pnl": partial_pnl,
+                                "partial_exit_num": 1,
+                                "old_sl": old_sl,
+                                "new_sl": self.sl_price,
+                                "timestamp": datetime.now().isoformat(),
+                                "agent": "htf",
+                            })
                             self._save_state()
                             # Sync updated SL to exchange
                             if not self.dry_run and self.testnet_executor:
@@ -2496,6 +2514,21 @@ class HTFLiveBot:
                                     partial_units, self.partial_tp2_price, partial_pnl,
                                     self.position_units,
                                 )
+                            self._log_trade({
+                                "action": "PARTIAL_CLOSE_LONG",
+                                "reason": "PARTIAL_TP2",
+                                "symbol": self.symbol,
+                                "entry_price": self.position_price,
+                                "exit_price": self.partial_tp2_price,
+                                "units": partial_units,
+                                "remaining_units": self.position_units,
+                                "original_units": self.initial_position_units,
+                                "pnl": partial_pnl,
+                                "partial_exit_num": 2,
+                                "new_sl": self.sl_price,
+                                "timestamp": datetime.now().isoformat(),
+                                "agent": "htf",
+                            })
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2523,6 +2556,22 @@ class HTFLiveBot:
                                 partial_units, self.partial_tp1_price, partial_pnl,
                                 self.sl_price, old_sl, self.position_units,
                             )
+                            self._log_trade({
+                                "action": "PARTIAL_CLOSE_SHORT",
+                                "reason": "PARTIAL_TP1",
+                                "symbol": self.symbol,
+                                "entry_price": self.position_price,
+                                "exit_price": self.partial_tp1_price,
+                                "units": partial_units,
+                                "remaining_units": self.position_units,
+                                "original_units": self.initial_position_units,
+                                "pnl": partial_pnl,
+                                "partial_exit_num": 1,
+                                "old_sl": old_sl,
+                                "new_sl": self.sl_price,
+                                "timestamp": datetime.now().isoformat(),
+                                "agent": "htf",
+                            })
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2560,6 +2609,21 @@ class HTFLiveBot:
                                     partial_units, self.partial_tp2_price, partial_pnl,
                                     self.position_units,
                                 )
+                            self._log_trade({
+                                "action": "PARTIAL_CLOSE_SHORT",
+                                "reason": "PARTIAL_TP2",
+                                "symbol": self.symbol,
+                                "entry_price": self.position_price,
+                                "exit_price": self.partial_tp2_price,
+                                "units": partial_units,
+                                "remaining_units": self.position_units,
+                                "original_units": self.initial_position_units,
+                                "pnl": partial_pnl,
+                                "partial_exit_num": 2,
+                                "new_sl": self.sl_price,
+                                "timestamp": datetime.now().isoformat(),
+                                "agent": "htf",
+                            })
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2775,28 +2839,35 @@ class HTFLiveBot:
                     "WS_RECONNECTED",
                     f"WebSocket reconnected after {ws_state['reconnect_count']} retries"
                 )
+            else:
+                _write_connectivity_alert(
+                    "WS_CONNECTED",
+                    f"WebSocket connected to {self.symbol} aggTrade stream"
+                )
             ws_state["connected"] = True
             ws_state["disconnect_alerted"] = False
             ws_state["last_tick_time"] = time.time()
 
         def _on_error(ws, error):
             logger.warning("WS price monitor error: %s", error)
-            if self.position != 0 and not ws_state["disconnect_alerted"]:
+            if not ws_state["disconnect_alerted"]:
+                pos_ctx = f"while {self.symbol} position is open" if self.position != 0 else f"({self.symbol} flat)"
                 _write_connectivity_alert(
                     "WS_ERROR",
-                    f"WebSocket error while {self.symbol} position is open: {error}"
+                    f"WebSocket error {pos_ctx}: {error}"
                 )
                 ws_state["disconnect_alerted"] = True
 
         def _on_close(ws, code, msg):
             logger.info("WS price monitor closed (code=%s)", code)
             ws_state["connected"] = False
-            if self.position != 0 and not ws_state["disconnect_alerted"]:
-                _write_connectivity_alert(
-                    "WS_DISCONNECTED",
-                    f"WebSocket disconnected (code={code}) while {self.symbol} position is open! "
-                    f"Exchange crashguard SL is active as backup."
-                )
+            if not ws_state["disconnect_alerted"]:
+                if self.position != 0:
+                    detail = (f"WebSocket disconnected (code={code}) while {self.symbol} position is open! "
+                              f"Exchange crashguard SL is active as backup.")
+                else:
+                    detail = f"WebSocket disconnected (code={code}) — {self.symbol} currently flat."
+                _write_connectivity_alert("WS_DISCONNECTED", detail)
                 ws_state["disconnect_alerted"] = True
 
         first_price_logged = [False]  # mutable container for nonlocal in Python 2-compat closure

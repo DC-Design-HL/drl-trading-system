@@ -49,6 +49,11 @@ TELEGRAM_EXTRA_CHAT_IDS = [
     if cid.strip()
 ]
 
+# @luigiAlertBot — dedicated bot for WebSocket failure alerts
+# Falls back to the standard alert bot token if no dedicated token is configured
+LUIGI_BOT_TOKEN = os.environ.get("LUIGI_ALERT_BOT_TOKEN", "") or TELEGRAM_BOT_TOKEN
+LUIGI_CHAT_ID = os.environ.get("LUIGI_ALERT_CHAT_ID", TELEGRAM_CHAT_ID)  # fallback to primary chat
+
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds between retries on network failure
 
@@ -107,6 +112,30 @@ def _send_to_chat(text: str, chat_id: str) -> bool:
         if attempt < MAX_RETRIES:
             time.sleep(RETRY_DELAY)
     return False
+
+
+def _send_luigi_alert(text: str) -> None:
+    """Send a WebSocket failure alert via @luigiAlertBot (best-effort)."""
+    if not LUIGI_BOT_TOKEN or not LUIGI_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{LUIGI_BOT_TOKEN}/sendMessage"
+    payload = json.dumps({
+        "chat_id": LUIGI_CHAT_ID,
+        "text": text.replace("*", "").replace("_", ""),
+        "disable_web_page_preview": True,
+    }).encode("utf-8")
+    try:
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            if resp.status == 200:
+                print("[alerter] ✅ luigiAlertBot: WS alert sent", flush=True)
+            else:
+                print(f"[alerter] luigiAlertBot returned {resp.status}", flush=True)
+    except Exception as e:
+        print(f"[alerter] luigiAlertBot send failed: {e}", flush=True)
 
 
 def send_telegram(text: str) -> bool:
@@ -694,6 +723,9 @@ def format_system_alert(alert: dict) -> str:
     elif alert_type == "WS_RECONNECTED":
         emoji = "🟢"
         label = "WebSocket Reconnected"
+    elif alert_type == "WS_CONNECTED":
+        emoji = "🟢"
+        label = "WebSocket Connected"
     elif alert_type == "REST_API_ERROR":
         emoji = "🔴"
         label = "REST API Error"
@@ -744,7 +776,7 @@ def format_alert(alert: dict) -> str:
         return format_liquidation_risk(alert)
 
     # Connectivity/system alerts
-    if trade.get("type") in ("WS_ERROR", "WS_DISCONNECTED", "WS_RECONNECTED", "REST_API_ERROR"):
+    if trade.get("type") in ("WS_ERROR", "WS_DISCONNECTED", "WS_RECONNECTED", "WS_CONNECTED", "REST_API_ERROR"):
         return format_system_alert(alert)
 
     # SL/TP update alerts
@@ -833,9 +865,15 @@ def main():
                     message = format_alert(alert)
                     if not message:
                         continue  # Skipped by cooldown or filter
+
+                    # Route WebSocket failure alerts via @luigiAlertBot in addition to normal path
+                    alert_type = alert.get("trade", {}).get("type", "")
+                    if alert_type in ("WS_ERROR", "WS_DISCONNECTED", "WS_RECONNECTED", "WS_CONNECTED"):
+                        _send_luigi_alert(message)
+
                     if send_telegram(message):
                         sent_count += 1
-                        action = alert.get("trade", {}).get("action", "?")
+                        action = alert.get("trade", {}).get("action", alert_type or "?")
                         symbol = alert.get("trade", {}).get("symbol", "?")
                         print(f"[alerter] ✅ Sent: {action} {symbol}", flush=True)
                     else:

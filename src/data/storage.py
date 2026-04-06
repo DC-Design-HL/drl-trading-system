@@ -127,6 +127,7 @@ class SQLiteStorage(StorageInterface):
                 price      REAL,
                 pnl        REAL,
                 confidence REAL,
+                reason     TEXT,
                 data       TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
@@ -134,6 +135,19 @@ class SQLiteStorage(StorageInterface):
             CREATE INDEX IF NOT EXISTS idx_trades_ts       ON trades(timestamp);
             CREATE INDEX IF NOT EXISTS idx_trades_action   ON trades(action);
         """)
+        # Migrate existing DB: add columns that may be missing from older schema
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
+        migrations = [
+            ("price",      "ALTER TABLE trades ADD COLUMN price REAL"),
+            ("pnl",        "ALTER TABLE trades ADD COLUMN pnl REAL"),
+            ("confidence", "ALTER TABLE trades ADD COLUMN confidence REAL"),
+            ("reason",     "ALTER TABLE trades ADD COLUMN reason TEXT"),
+            ("created_at", "ALTER TABLE trades ADD COLUMN created_at TEXT"),
+        ]
+        for col, sql in migrations:
+            if col not in existing:
+                conn.execute(sql)
+        conn.commit()
 
     def save_state(self, state: Dict):
         try:
@@ -161,16 +175,19 @@ class SQLiteStorage(StorageInterface):
     def log_trade(self, trade: Dict):
         try:
             conn = self._get_conn()
+            # Use exit_price for closes, price for opens
+            price = trade.get("price") or trade.get("exit_price") or trade.get("entry_price")
             conn.execute(
-                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, data)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, reason, data, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (
                     str(trade.get("timestamp", "")),
                     trade.get("symbol", ""),
                     trade.get("action", ""),
-                    trade.get("price"),
+                    price,
                     trade.get("pnl") or trade.get("realized_pnl"),
                     trade.get("confidence"),
+                    trade.get("reason"),
                     json.dumps(trade, default=str),
                 ),
             )
