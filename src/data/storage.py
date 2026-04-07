@@ -143,6 +143,7 @@ class SQLiteStorage(StorageInterface):
             ("confidence", "ALTER TABLE trades ADD COLUMN confidence REAL"),
             ("reason",     "ALTER TABLE trades ADD COLUMN reason TEXT"),
             ("created_at", "ALTER TABLE trades ADD COLUMN created_at TEXT"),
+            ("is_testnet", "ALTER TABLE trades ADD COLUMN is_testnet INTEGER DEFAULT 0"),
         ]
         for col, sql in migrations:
             if col not in existing:
@@ -173,13 +174,18 @@ class SQLiteStorage(StorageInterface):
             return {}
 
     def log_trade(self, trade: Dict):
+        # Only persist testnet trades — never save mainnet/live trades to DB
+        is_testnet = int(bool(trade.get("is_testnet", True)))
+        if not is_testnet:
+            logger.warning("Skipping non-testnet trade: %s %s", trade.get("symbol"), trade.get("action"))
+            return
         try:
             conn = self._get_conn()
             # Use exit_price for closes, price for opens
             price = trade.get("price") or trade.get("exit_price") or trade.get("entry_price")
             conn.execute(
-                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, reason, data, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, reason, data, is_testnet, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (
                     str(trade.get("timestamp", "")),
                     trade.get("symbol", ""),
@@ -189,6 +195,7 @@ class SQLiteStorage(StorageInterface):
                     trade.get("confidence"),
                     trade.get("reason"),
                     json.dumps(trade, default=str),
+                    is_testnet,
                 ),
             )
             conn.commit()

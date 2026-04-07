@@ -706,6 +706,8 @@ class HTFLiveBot:
 
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
+        # Always tag testnet trades — this bot only runs on Binance Futures testnet
+        trade["is_testnet"] = True
         self.trades.append(trade)
         try:
             with open(TRADES_FILE, "a") as f:
