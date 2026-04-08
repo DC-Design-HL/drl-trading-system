@@ -114,3 +114,12 @@ echo ""
 echo "[start_services] ✅ All services started"
 echo "[start_services] Dashboard: $TUNNEL_URL"
 echo "[start_services] PIDs saved to: $PIDS"
+
+# --- Notify Telegram with dashboard URL ---
+if [ -n "$TELEGRAM_ALERT_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_IDS" ]; then
+    _FIRST_CHAT=$(echo "$TELEGRAM_CHAT_IDS" | cut -d',' -f1)
+    _MSG="🚀 Services restarted%0ADashboard: $TUNNEL_URL"
+    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_ALERT_BOT_TOKEN}/sendMessage" \
+        -d "chat_id=${_FIRST_CHAT}&text=${_MSG}" > /dev/null 2>&1 || true
+    echo "[start_services] Dashboard URL sent to Telegram"
+fi
