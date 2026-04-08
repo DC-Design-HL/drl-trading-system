@@ -1,6 +1,6 @@
 """
 Sentiment scoring for news items.
-Primary: GPT-4o-mini via OpenAI API
+Primary: Groq API (free tier, llama-3.1-8b-instant) — 30 req/min, 14,400/day
 Fallback: keyword-based scorer (no external calls)
 """
 import json
@@ -56,34 +56,36 @@ def score_keyword(text: str) -> Dict:
 
 
 class GPTScorer:
-    """GPT-4o-mini sentiment scorer. One instance shared across the process."""
+    """
+    Groq-based sentiment scorer (free tier: 30 req/min, 14,400/day).
+    Uses llama-3.1-8b-instant — fast, accurate, free.
+    Falls back to keyword scorer on any failure.
+    """
 
-    MAX_ITEMS_PER_HOUR = 100
-    _call_count = 0
-    _window_start = 0.0
+    MAX_ITEMS_PER_MINUTE = 25   # stay under 30/min limit with headroom
+    _call_timestamps: list = []
 
     def __init__(self, api_key: Optional[str] = None):
-        self._api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self._api_key = api_key or os.getenv("GROQ_API_KEY", "")
         self._client = None
 
     def _get_client(self):
         if self._client is None:
             try:
-                from openai import OpenAI
-                self._client = OpenAI(api_key=self._api_key)
+                from groq import Groq
+                self._client = Groq(api_key=self._api_key)
             except ImportError:
-                logger.error("openai package not installed")
+                logger.error("groq package not installed — run: pip install groq")
                 raise
         return self._client
 
     def _within_rate_limit(self) -> bool:
         import time
         now = time.time()
-        if now - self._window_start > 3600:
-            GPTScorer._window_start = now
-            GPTScorer._call_count = 0
-        if GPTScorer._call_count >= self.MAX_ITEMS_PER_HOUR:
-            logger.warning("GPT rate limit reached (%d/hr) — falling back to keyword scorer", self.MAX_ITEMS_PER_HOUR)
+        # Keep only timestamps in the last 60s
+        GPTScorer._call_timestamps = [t for t in GPTScorer._call_timestamps if now - t < 60]
+        if len(GPTScorer._call_timestamps) >= self.MAX_ITEMS_PER_MINUTE:
+            logger.warning("Groq rate limit: %d calls in last 60s — falling back to keyword", len(GPTScorer._call_timestamps))
             return False
         return True
 
@@ -101,7 +103,7 @@ class GPTScorer:
                 user_msg += f"\nSOURCE: {source}"
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
@@ -110,7 +112,8 @@ class GPTScorer:
                 max_tokens=200,
                 timeout=10,
             )
-            GPTScorer._call_count += 1
+            import time
+            GPTScorer._call_timestamps.append(time.time())
 
             raw = response.choices[0].message.content.strip()
             # Strip markdown code fences if present
@@ -123,14 +126,14 @@ class GPTScorer:
                 "confidence": float(parsed.get("confidence", 0.5)),
                 "urgency": int(parsed.get("urgency", 1)),
                 "event_type": str(parsed.get("event_type", "other")),
-                "assets_gpt": parsed.get("assets", []),  # GPT's asset suggestion
+                "assets_gpt": parsed.get("assets", []),
                 "reasoning": str(parsed.get("reasoning", ""))[:200],
-                "scorer_method": "gpt",
+                "scorer_method": "groq",
             }
 
         except json.JSONDecodeError as e:
-            logger.warning("GPT returned non-JSON: %s — falling back", e)
+            logger.warning("Groq returned non-JSON: %s — falling back", e)
             return score_keyword(f"{title} {body_snippet}")
         except Exception as e:
-            logger.warning("GPT score failed: %s — falling back", e)
+            logger.warning("Groq score failed: %s — falling back", e)
             return score_keyword(f"{title} {body_snippet}")

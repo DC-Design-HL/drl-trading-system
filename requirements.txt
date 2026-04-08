@@ -35,7 +35,8 @@ textblob>=0.17.0
 requests>=2.31.0
 praw>=7.7.0          # Reddit API
 feedparser>=6.0.0    # RSS/Atom feed parsing
-openai>=1.0.0        # GPT-4o-mini sentiment scoring
+openai>=1.0.0        # OpenAI SDK (kept for compatibility)
+groq>=0.9.0          # Groq API — free tier LLM sentiment scoring (llama-3.1-8b)
 
 # Testing
 pytest>=7.4.0
