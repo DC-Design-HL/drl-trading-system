@@ -134,6 +134,32 @@ class SQLiteStorage(StorageInterface):
             CREATE INDEX IF NOT EXISTS idx_trades_symbol   ON trades(symbol);
             CREATE INDEX IF NOT EXISTS idx_trades_ts       ON trades(timestamp);
             CREATE INDEX IF NOT EXISTS idx_trades_action   ON trades(action);
+
+            CREATE TABLE IF NOT EXISTS news_events (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                url_hash        TEXT NOT NULL,
+                title_hash      TEXT NOT NULL,
+                source          TEXT NOT NULL,
+                title           TEXT NOT NULL,
+                body_snippet    TEXT,
+                published_at    TEXT NOT NULL,
+                fetched_at      TEXT NOT NULL,
+                processed_at    TEXT,
+                sentiment_score REAL,
+                confidence      REAL,
+                urgency         INTEGER DEFAULT 1,
+                event_type      TEXT,
+                assets          TEXT,
+                reasoning       TEXT,
+                alerted         INTEGER DEFAULT 0,
+                scorer_method   TEXT DEFAULT 'keyword',
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_news_fetched_at  ON news_events(fetched_at);
+            CREATE INDEX IF NOT EXISTS idx_news_urgency     ON news_events(urgency);
+            CREATE INDEX IF NOT EXISTS idx_news_assets      ON news_events(assets);
+            CREATE INDEX IF NOT EXISTS idx_news_url_hash    ON news_events(url_hash);
+            CREATE INDEX IF NOT EXISTS idx_news_title_hash  ON news_events(title_hash);
         """)
         # Migrate existing DB: add columns that may be missing from older schema
         existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
