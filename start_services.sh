@@ -19,7 +19,7 @@ set +a
 echo "[start_services] Starting DRL Trading System services..."
 
 # Kill existing instances gracefully
-for name in live_trading_htf trade_alerter start_local_server streamlit localtunnel; do
+for name in live_trading_htf trade_alerter start_local_server streamlit localtunnel news_sentinel news_alerter; do
     pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
 done
 sleep 3
@@ -53,6 +53,18 @@ setsid python3 "$REPO/trade_alerter.py" > "$LOG/alerter.log" 2>&1 &
 ALERTER_PID=$!
 echo "[start_services]   Alerter PID: $ALERTER_PID"
 
+# --- News Sentinel ---
+echo "[start_services] Starting news sentinel..."
+setsid python3 "$REPO/news_sentinel.py" > "$LOG/news_sentinel.log" 2>&1 &
+NEWS_SENTINEL_PID=$!
+echo "[start_services]   News Sentinel PID: $NEWS_SENTINEL_PID"
+
+# --- News Alerter ---
+echo "[start_services] Starting news alerter..."
+setsid python3 "$REPO/news_alerter.py" > "$LOG/news_alerter.log" 2>&1 &
+NEWS_ALERTER_PID=$!
+echo "[start_services]   News Alerter PID: $NEWS_ALERTER_PID"
+
 # --- Streamlit Dashboard ---
 echo "[start_services] Starting Streamlit dashboard..."
 setsid python3 -m streamlit run "$REPO/src/ui/app.py" \
@@ -84,10 +96,12 @@ cat > "$PIDS" << JSON
   "eth":     {"pid": $ETH_PID,     "log": "logs/eth_live.log",   "symbol": "ETHUSDT", "sharpe": 9.90},
   "sol":     {"pid": $SOL_PID,     "log": "logs/sol_live.log",   "symbol": "SOLUSDT", "sharpe": 6.79},
   "xrp":     {"pid": $XRP_PID,     "log": "logs/xrp_live.log",   "symbol": "XRPUSDT", "sharpe": 12.42},
-  "alerter": {"pid": $ALERTER_PID, "log": "logs/alerter.log"},
-  "api":     {"pid": $API_PID,     "log": "logs/api_server.log"},
-  "ui":      {"pid": $UI_PID,      "log": "logs/dashboard.log"},
-  "tunnel":  {"pid": $TUNNEL_PID,  "log": "logs/tunnel.log", "url": "$TUNNEL_URL"}
+  "alerter":       {"pid": $ALERTER_PID,       "log": "logs/alerter.log"},
+  "api":           {"pid": $API_PID,           "log": "logs/api_server.log"},
+  "ui":            {"pid": $UI_PID,            "log": "logs/dashboard.log"},
+  "tunnel":        {"pid": $TUNNEL_PID,        "log": "logs/tunnel.log", "url": "$TUNNEL_URL"},
+  "news_sentinel": {"pid": $NEWS_SENTINEL_PID, "log": "logs/news_sentinel.log"},
+  "news_alerter":  {"pid": $NEWS_ALERTER_PID,  "log": "logs/news_alerter.log"}
 }
 JSON
 
