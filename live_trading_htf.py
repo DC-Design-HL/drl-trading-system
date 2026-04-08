@@ -78,9 +78,9 @@ TAKE_PROFIT_PCT = 0.030  # 3.0% take profit
 TRADING_FEE = 0.0004   # 0.04% taker fee
 
 # Trailing stop configuration
-TRAILING_BREAKEVEN_PCT = 0.005   # At +0.5% profit, activate trailing stop
+TRAILING_BREAKEVEN_PCT = 0.008   # At +0.8% profit, activate trailing stop (was 0.5% — too tight)
 TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit (legacy, kept for BOS overlay)
-TRAILING_DISTANCE_PCT = 0.003    # Trail 0.3% behind peak (continuous after breakeven)
+TRAILING_DISTANCE_PCT = 0.005    # Trail 0.5% behind peak (was 0.3% — was cutting winners too early)
 
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
@@ -969,35 +969,59 @@ class HTFLiveBot:
 
     def _check_signal_gate(self, action: int, confidence: float) -> bool:
         """
-        Market Signal Gate: validate low-confidence trades against real market signals.
-        
+        Market Signal Gate: validate trades against real market signals.
+
         Returns True if the trade is ALLOWED, False if BLOCKED.
-        
-        Tier 1 (conf >= 0.80): model decides alone → always True
-        Tier 2 (conf < 0.80): needs at least 2/4 market signals to agree with direction
-        
+
+        Regime veto (ALL tiers): Hard block when trading against a strong trend (ADX 25-60).
+        Tier 1 (conf >= 0.80): autonomous after regime veto passes.
+        Tier 2 (conf < 0.80): needs at least 2/4 market signals to agree with direction.
+
         Signals checked:
           1. MTF Alignment — all timeframes agree with direction
           2. Order Flow Score — net buying/selling pressure matches direction
           3. Regime — not trading against a strong trend
           4. Orderbook Imbalance — bid/ask pressure matches direction
         """
-        if confidence >= SIGNAL_GATE_AUTONOMOUS:
-            self._last_signal_gate = {"result": "AUTONOMOUS", "tier": "Tier 1", "confirmations": 4, "details": "conf >= 0.80"}
-            return True  # Tier 1: autonomous
-
         if action == ACTION_HOLD:
             return True  # Not opening, no gate needed
 
         direction = "LONG" if action == ACTION_LONG else "SHORT"
 
+        # Fetch market signals once — used by both regime veto and Tier 2 checks
         try:
             market = self._fetch_market_signals(self.symbol)
             if not market:
                 logger.warning("Signal gate: no market data — allowing trade (fail-open)")
+                if confidence >= SIGNAL_GATE_AUTONOMOUS:
+                    self._last_signal_gate = {"result": "AUTONOMOUS", "tier": "Tier 1", "confirmations": 4, "details": "conf >= 0.80"}
+                    return True
                 return True
         except Exception as exc:
             logger.warning("Signal gate: fetch failed (%s) — allowing trade (fail-open)", exc)
+            if confidence >= SIGNAL_GATE_AUTONOMOUS:
+                self._last_signal_gate = {"result": "AUTONOMOUS", "tier": "Tier 1", "confirmations": 4, "details": "conf >= 0.80"}
+                return True
+            return True
+
+        # ── Regime hard-veto (applies to ALL tiers, including Tier 1) ──
+        # A confirmed strong trend against direction blocks the trade regardless of confidence
+        regime = market.get("regime", {})
+        regime_type = (regime.get("type") or "UNKNOWN").upper()
+        regime_adx = regime.get("adx", 0) or 0
+        if regime_adx >= SIGNAL_GATE_REGIME_ADX_MIN and regime_adx < 60:
+            if direction == 'LONG' and 'DOWN' in regime_type:
+                logger.info("🚫 Regime HARD-VETO: LONG vs %s ADX=%.0f (all tiers)", regime_type, regime_adx)
+                self._last_signal_gate = {"result": "REGIME_VETO", "tier": "ALL", "details": f"LONG vs {regime_type} ADX={regime_adx:.0f}"}
+                return False
+            elif direction == 'SHORT' and 'UP' in regime_type:
+                logger.info("🚫 Regime HARD-VETO: SHORT vs %s ADX=%.0f (all tiers)", regime_type, regime_adx)
+                self._last_signal_gate = {"result": "REGIME_VETO", "tier": "ALL", "details": f"SHORT vs {regime_type} ADX={regime_adx:.0f}"}
+                return False
+
+        # ── Tier 1: autonomous after regime veto ──
+        if confidence >= SIGNAL_GATE_AUTONOMOUS:
+            self._last_signal_gate = {"result": "AUTONOMOUS", "tier": "Tier 1", "confirmations": 4, "details": "conf >= 0.80"}
             return True
 
         confirmations = 0
@@ -1973,9 +1997,9 @@ class HTFLiveBot:
             (self.position == -1 and action == ACTION_LONG)
         )
         if self.position != 0 and (now - self.last_entry_time) < MIN_HOLD_SECONDS:
-            if is_reversal and confidence >= 0.70:
+            if is_reversal and confidence >= 0.82:
                 logger.info(
-                    "Min hold override: reversal %s→%s with conf=%.2f ≥ 0.70 — allowing flip",
+                    "Min hold override: reversal %s→%s with conf=%.2f ≥ 0.82 — allowing flip",
                     "LONG" if self.position == 1 else "SHORT",
                     ACTION_LABELS.get(action, "?"), confidence,
                 )
@@ -2062,6 +2086,11 @@ class HTFLiveBot:
             (self.position == 1 and action == ACTION_SHORT) or
             (self.position == -1 and action == ACTION_LONG)):
             if not self._check_signal_gate(action, confidence):
+                # For reversals: close the existing position flat (don't open opposite)
+                # This avoids double-loss from closing + immediately entering wrong direction
+                if is_reversal and self.position != 0:
+                    logger.info("Reversal gate BLOCKED — closing existing position flat, not flipping")
+                    return self._close_position(current_price, "REVERSAL_BLOCKED_CLOSE", confidence)
                 return None
 
         trade: Optional[Dict] = None

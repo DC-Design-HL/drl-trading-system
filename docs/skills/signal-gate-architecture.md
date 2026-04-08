@@ -3,7 +3,7 @@
 ## Overview
 The DRL trading system uses a multi-layer filtering architecture between the model's decision and actual trade execution. Each layer can block or modify the trade independently.
 
-## Current Architecture (as of 2026-03-31)
+## Current Architecture (as of 2026-04-08)
 
 ```
 Model Decision (LONG/SHORT/HOLD)
@@ -24,9 +24,11 @@ Model Decision (LONG/SHORT/HOLD)
            ▼
 ┌──────────────────────────┐
 │ Layer 2: SIGNAL GATE     │ ✅ LIVE  
-│ (Tier 1/2 system)        │ Tier 1 (conf≥0.80): autonomous
-│                          │ Tier 2 (conf<0.80): needs 2/4 confirmations
-│                          │ Signals: MTF, Order Flow, Regime, Orderbook Imbalance
+│                          │ Step 1: REGIME HARD-VETO (ALL tiers)
+│                          │   ADX 25-60 + counter-trend → BLOCK
+│                          │ Step 2: Tier 1 (conf≥0.80): autonomous
+│                          │ Step 3: Tier 2 (conf<0.80): needs 2/4 confirmations
+│                          │   Signals: MTF, Order Flow, Regime, Orderbook Imbalance
 └──────────┬───────────────┘
            │
            ▼
@@ -79,8 +81,17 @@ Model Decision
 
 ## Signal Gate Details (Layer 2)
 
+### Regime Hard-Veto (ALL tiers, including Tier 1)
+- Applied BEFORE the Tier 1 bypass — no confidence level exempts from this
+- Blocks when: ADX ≥ 25 AND ADX < 60 AND direction fights the trend
+  - LONG blocked when regime is TRENDING_DOWN
+  - SHORT blocked when regime is TRENDING_UP
+- ADX < 60 exclusion: exhaustion territory — trend may be reversing, don't hard-veto
+- Implemented: `_check_signal_gate()`, runs first before any tier logic
+- Fix applied: 2026-04-08 (root cause of 3 Tier 1 losing LONGs during TRENDING_DOWN)
+
 ### Tier 1: Autonomous (confidence ≥ 0.80)
-- Model decides alone
+- Model decides alone — after regime veto passes
 - Still subject to Layer 0 (exhaustion) and Layer 1 (orderbook guard)
 - Constant: `SIGNAL_GATE_AUTONOMOUS = 0.80`
 
