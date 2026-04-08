@@ -14,6 +14,11 @@ mkdir -p "$LOG"
 set -a
 source "$REPO/.env"
 export TESTNET_MIRROR=true
+# Limit PyTorch/OpenBLAS thread pools — 4 bots on 2 CPUs, 1 thread each saves ~150-200MB
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 set +a
 
 echo "[start_services] Starting DRL Trading System services..."

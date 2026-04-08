@@ -35,6 +35,15 @@ except ImportError:
 
 import numpy as np
 import pandas as pd
+
+# Limit PyTorch thread pools — 4 bots on 2 CPUs, 1 thread each reduces RAM and CPU contention
+try:
+    import torch
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
