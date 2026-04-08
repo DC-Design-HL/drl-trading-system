@@ -34,7 +34,11 @@ ALERTS_FILE = Path("logs/news_pending_alerts.jsonl")
 POLL_INTERVAL = 5  # seconds
 
 BOT_TOKEN = os.getenv("TELEGRAM_ALERT_BOT_TOKEN", "")
-CHAT_IDS_RAW = os.getenv("TELEGRAM_CHAT_IDS", os.getenv("TELEGRAM_CHAT_ID", ""))
+# News alerts go to dedicated news channel only (NEWS_TELEGRAM_CHAT_IDS)
+# Falls back to main chat IDs if not set
+_news_ids = os.getenv("NEWS_TELEGRAM_CHAT_IDS", "")
+_main_ids = os.getenv("TELEGRAM_CHAT_IDS", os.getenv("TELEGRAM_CHAT_ID", ""))
+CHAT_IDS_RAW = _news_ids if _news_ids else _main_ids
 CHAT_IDS = [cid.strip() for cid in CHAT_IDS_RAW.split(",") if cid.strip()]
 
 
