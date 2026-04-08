@@ -1314,6 +1314,44 @@ def metrics_trades():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/news/latest')
+def get_news_latest():
+    """Return recent news events for the dashboard."""
+    try:
+        from src.news.storage import NewsStorage
+        ns = NewsStorage()
+        hours = int(request.args.get('hours', 24))
+        min_urgency = int(request.args.get('min_urgency', 1))
+        limit = int(request.args.get('limit', 50))
+        events = ns.get_recent(hours=hours, min_urgency=min_urgency, limit=limit)
+        return jsonify({'events': events, 'count': len(events)})
+    except Exception as e:
+        logger.error("GET /api/news/latest error: %s", e)
+        return jsonify({'error': str(e), 'events': [], 'count': 0}), 500
+
+
+@app.route('/api/news/stats')
+def get_news_stats():
+    """Return rolling sentiment stats for the signal gate (Phase 2 hook)."""
+    try:
+        from src.news.storage import NewsStorage
+        ns = NewsStorage()
+        hours = int(request.args.get('hours', 4))
+        sentiment = ns.get_rolling_sentiment(hours=hours)
+        recent = ns.get_recent(hours=1, min_urgency=2, limit=5)
+        return jsonify({
+            **sentiment,
+            'last_events': [
+                {'title': e['title'][:80], 'urgency': e['urgency'],
+                 'sentiment_score': e['sentiment_score'], 'event_type': e['event_type']}
+                for e in recent
+            ]
+        })
+    except Exception as e:
+        logger.error("GET /api/news/stats error: %s", e)
+        return jsonify({'score': 0.0, 'confidence': 0.0, 'urgency_max': 1, 'event_count': 0}), 500
+
+
 # Start background health checker when API server starts
 try:
     from src.metrics.health_checker import start_health_checker

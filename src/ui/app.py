@@ -2168,8 +2168,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_usdt_dom = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "💵 USDT.D"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_usdt_dom, tab_news = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "💵 USDT.D", "📰 News"
         ])
         
         with tab_chart:
@@ -3798,6 +3798,69 @@ def main():
                     col4.metric("Others", f"{100 - usdt_d - btc_d - eth_d:.1f}%")
             except Exception:
                 pass
+
+        with tab_news:
+            st.markdown("### 📰 News Sentinel")
+            st.caption("Real-time crypto news scored by Groq (llama-3.1-8b). Phase 1: monitor only.")
+
+            try:
+                import requests as _req
+
+                # ── Rolling sentiment stats ──
+                stats_resp = _req.get("http://127.0.0.1:5001/api/news/stats?hours=4", timeout=5)
+                if stats_resp.ok:
+                    stats = stats_resp.json()
+                    score = stats.get('score', 0.0)
+                    conf = stats.get('confidence', 0.0)
+                    count = stats.get('event_count', 0)
+                    urgency_max = stats.get('urgency_max', 1)
+
+                    score_color = "#00c853" if score > 0.2 else ("#f44336" if score < -0.2 else "#9e9e9e")
+                    score_label = "BULLISH" if score > 0.2 else ("BEARISH" if score < -0.2 else "NEUTRAL")
+                    urgency_labels = {1: "🟢 Low", 2: "🟡 Notable", 3: "🔴 Flash"}
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("4h Sentiment", f"{score:+.2f}", f"{score_label}")
+                    col2.metric("Avg Confidence", f"{conf:.0%}")
+                    col3.metric("Events (4h)", str(count))
+                    col4.metric("Max Urgency", urgency_labels.get(urgency_max, "🟢 Low"))
+
+                # ── Recent events table ──
+                st.markdown("---")
+                hours_filter = st.selectbox("Show last", [4, 12, 24, 48], index=1, key="news_hours", format_func=lambda x: f"{x}h")
+                urgency_filter = st.selectbox("Min urgency", [1, 2, 3], index=0, key="news_urgency", format_func=lambda x: {1: "All", 2: "Notable+", 3: "Flash only"}[x])
+
+                events_resp = _req.get(
+                    f"http://127.0.0.1:5001/api/news/latest?hours={hours_filter}&min_urgency={urgency_filter}&limit=50",
+                    timeout=5
+                )
+                if events_resp.ok:
+                    events = events_resp.json().get('events', [])
+                    if not events:
+                        st.info("No news events in this window yet.")
+                    else:
+                        st.caption(f"{len(events)} events")
+                        for ev in reversed(events):  # newest first
+                            score_val = ev.get('sentiment_score') or 0.0
+                            urg = ev.get('urgency', 1)
+                            etype = (ev.get('event_type') or 'other').upper()[:8]
+                            src = (ev.get('source') or '').replace('rss:', '')
+                            fetched = (ev.get('fetched_at') or '')[:16].replace('T', ' ')
+                            method = ev.get('scorer_method', 'keyword')
+                            method_icon = "🤖" if method == "groq" else "🔑"
+                            urg_icon = {1: "⚪", 2: "🟡", 3: "🔴"}.get(urg, "⚪")
+
+                            score_str = f"{score_val:+.2f}" if score_val is not None else "n/a"
+                            title = ev.get('title', '')[:100]
+
+                            st.markdown(
+                                f"{urg_icon} `[{etype}]` **{title}**  \n"
+                                f"<small>{src} · {fetched} · score {score_str} · {method_icon}</small>",
+                                unsafe_allow_html=True
+                            )
+
+            except Exception as _news_err:
+                st.warning(f"News data unavailable: {_news_err}")
 
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
