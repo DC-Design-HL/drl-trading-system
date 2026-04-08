@@ -88,7 +88,7 @@ sleep 8
 
 # --- Localtunnel ---
 echo "[start_services] Starting localtunnel..."
-setsid /home/claude/.npm/_npx/75ac80b86e83d4a2/node_modules/.bin/lt --port 8501 > "$LOG/tunnel.log" 2>&1 &
+setsid /home/claude/.npm/_npx/75ac80b86e83d4a2/node_modules/.bin/lt --port 8501 --subdomain drl-trading-chen > "$LOG/tunnel.log" 2>&1 &
 TUNNEL_PID=$!
 sleep 4
 TUNNEL_URL=$(grep -m1 "your url is:" "$LOG/tunnel.log" 2>/dev/null | awk '{print $NF}' || echo "check logs/tunnel.log")
