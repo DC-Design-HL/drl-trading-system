@@ -3676,7 +3676,7 @@ def main():
                         return ''
 
                     st.dataframe(
-                        df_trades.style.applymap(_color_pnl, subset=['PnL']),
+                        df_trades.style.map(_color_pnl, subset=['PnL']),
                         use_container_width=True,
                         hide_index=True,
                     )
@@ -3807,7 +3807,7 @@ def main():
                 import requests as _req
 
                 # ── Rolling sentiment stats ──
-                stats_resp = _req.get("http://127.0.0.1:5001/api/news/stats?hours=4", timeout=5)
+                stats_resp = _req.get(f"{get_api_url()}/api/news/stats?hours=4", timeout=5)
                 if stats_resp.ok:
                     stats = stats_resp.json()
                     score = stats.get('score', 0.0)
@@ -3831,7 +3831,7 @@ def main():
                 urgency_filter = st.selectbox("Min urgency", [1, 2, 3], index=0, key="news_urgency", format_func=lambda x: {1: "All", 2: "Notable+", 3: "Flash only"}[x])
 
                 events_resp = _req.get(
-                    f"http://127.0.0.1:5001/api/news/latest?hours={hours_filter}&min_urgency={urgency_filter}&limit=50",
+                    f"{get_api_url()}/api/news/latest?hours={hours_filter}&min_urgency={urgency_filter}&limit=50",
                     timeout=5
                 )
                 if events_resp.ok:
