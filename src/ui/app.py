@@ -1335,6 +1335,7 @@ def load_real_market_data(symbol: str = 'BTC/USDT', timeframe: str = '1h') -> pd
 
 
 
+@st.fragment(run_every=30)
 def render_sidebar_metrics_fragment():
     """Render sidebar portfolio metrics."""
     import requests
@@ -1358,7 +1359,7 @@ def render_sidebar_metrics_fragment():
         logger.warning(f"Sidebar metrics unavailable: {e}")
         st.caption("Portfolio data unavailable")
 
-@st.fragment(run_every=120)
+@st.fragment(run_every=30)
 def render_market_analysis_fragment(symbol: str):
     """Render market analysis panel with auto-refresh."""
     import requests
@@ -1571,7 +1572,7 @@ def render_market_analysis_fragment(symbol: str):
             f'{progress_bar(conf_pct, 100, c_color)}'
         ), unsafe_allow_html=True)
 
-@st.fragment(run_every=30)
+@st.fragment(run_every=15)
 def render_position_fragment(symbol: str):
     """Render current position and portfolio status with auto-refresh."""
     import requests
@@ -1675,7 +1676,7 @@ def render_position_fragment(symbol: str):
     render_trade_history(trades)
 
 
-@st.fragment(run_every=60)
+@st.fragment(run_every=30)
 def render_agent_status_fragment():
     """Render active agent status and model info with auto-refresh."""
     import requests
@@ -1979,10 +1980,6 @@ def main():
     state_preview = get_trading_state()
     available_assets = state_preview.get('available_assets', ['BTCUSDT'])
     
-    # Initialize session state for auto-refresh (kept for toggle state only)
-    if 'auto_refresh' not in st.session_state:
-        st.session_state.auto_refresh = True
-    
     # Sidebar
     with st.sidebar:
         st.markdown("### ⚙️ Settings")
@@ -1999,139 +1996,20 @@ def main():
             st.markdown(f"**Asset:** {st.session_state.selected_asset}")
             
         st.divider()
-        
-        st.markdown("### 🐞 Debug")
-        if st.checkbox("Show Crash Log"):
-            log_path = project_root / "crash.log"
-            if log_path.exists():
-                st.error("⚠️ Crash Log Found")
-                with open(log_path, "r") as f:
-                    st.text_area("Log Content", f.read(), height=300)
-            else:
-                st.success("✅ No crash log found")
-                
-        if st.checkbox("Show Process Log (Stdout/Stderr)"):
-            proc_log = project_root / "process.log"
-            if proc_log.exists():
-                with open(proc_log, "r") as f:
-                    st.text_area("Process Output", f.read(), height=300)
-            else:
-                st.warning("⚠️ process.log not found (yet)")
-
-        if st.checkbox("Show API Server Log"):
-            api_log = project_root / "api_server.log"
-            if api_log.exists():
-                with open(api_log, "r") as f:
-                    st.text_area("API Server Output", f.read(), height=300)
-            else:
-                st.warning("⚠️ api_server.log not found (yet)")
-                
-        # Storage path is server-side only; omitted from client UI
-                
-        # Database Reset (Dev Only)
-        env = os.getenv("ENVIRONMENT", "production").lower()
-        if env in ["dev", "development"]:
-            st.divider()
-            st.markdown(f'<div class="ds-card-label" style="margin-top:8px;">🔄 Database Reset</div>', unsafe_allow_html=True)
-            st.markdown(card_container(
-                f'<div style="color:{DANGER};font-size:12px;font-weight:600;">⚠️ This will clear all trades and positions!</div>'
-            ), unsafe_allow_html=True)
-
-            if st.button("🗑️ Reset All Trades", type="primary"):
-                try:
-                    import subprocess
-                    reset_script = project_root / "reset_all_storage.py"
-                    if reset_script.exists():
-                        result = subprocess.run(
-                            [sys.executable, str(reset_script)],
-                            capture_output=True,
-                            text=True,
-                            cwd=str(project_root)
-                        )
-                        if result.returncode == 0:
-                            st.success("✅ Database reset successful!")
-                            st.code(result.stdout)
-                            st.info("🔄 Refresh the page to see changes")
-                        else:
-                            st.error(f"❌ Reset failed: {result.stderr}")
-                    else:
-                        st.error(f"❌ Reset script not found at {reset_script}")
-                except Exception as e:
-                    st.error(f"❌ Error running reset: {e}")
-
-        if st.checkbox("Show System Inspector"):
-            st.markdown("#### 🕵️ System Inspector")
-            
-            if st.button("List Processes (ps aux)"):
-                try:
-                    import subprocess
-                    # Use 'ps aux' for more details, or 'ps -ef'
-                    res = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-                    st.code(res.stdout if res.returncode == 0 else res.stderr)
-                except Exception as e:
-                    st.error(f"Failed to run ps: {e}")
-            
-            if st.button("List Files (ls -R)"):
-                try:
-                    import subprocess
-                    res = subprocess.run(['ls', '-R'], capture_output=True, text=True)
-                    st.code(res.stdout if res.returncode == 0 else res.stderr)
-                except Exception as e:
-                    st.error(f"Failed to run ls: {e}")
-            
-            if st.button("Check Connectivity (ping google.com)"):
-                try:
-                    import subprocess
-                    res = subprocess.run(['ping', '-c', '3', 'google.com'], capture_output=True, text=True)
-                    st.code(res.stdout if res.returncode == 0 else res.stderr)
-                except Exception as e:
-                    st.error(f"Ping failed: {e}")
-
-        st.markdown(f'<div class="ds-card-label" style="margin-top:16px;">🔑 API Status</div>', unsafe_allow_html=True)
-        eth_key = os.environ.get("ETHERSCAN_API_KEY")
-        sol_key = os.environ.get("SOLSCAN_API_KEY")
-        xrp_key = os.environ.get("XRPSCAN_API_KEY")
-        
-        api_status_html = (
-            f'<div style="display:flex;flex-direction:column;gap:6px;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:{TEXT_MUTED};font-size:12px;">ETH</span>'
-            f'{status_badge("SET", SUCCESS) if eth_key else status_badge("MISSING", DANGER)}'
-            f'</div>'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:{TEXT_MUTED};font-size:12px;">SOL</span>'
-            f'{status_badge("SET", SUCCESS) if sol_key else status_badge("MISSING", DANGER)}'
-            f'</div>'
-            f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-            f'<span style="color:{TEXT_MUTED};font-size:12px;">XRP</span>'
-            f'{status_badge("SET", SUCCESS) if xrp_key else status_badge("OPTIONAL", TEXT_MUTED)}'
-            f'</div>'
-            f'</div>'
-        )
-        st.markdown(card_container(api_status_html), unsafe_allow_html=True)
 
         
     # Header
-    col1, col2, col3 = st.columns([3, 1, 1])
-    
+    col1, col2 = st.columns([4, 1])
+
     with col1:
-        st.markdown(f"# 🤖 DRL Trading System - {st.session_state.selected_asset}")
-    
+        st.markdown(f"# 🤖 DRL Trading System — {st.session_state.selected_asset}")
+
     with col2:
-        refresh_status = "🔄 Auto (10s)" if st.session_state.auto_refresh else "⏸️ Paused"
         st.markdown(f"""
-        <div style="text-align: right; padding-top: 10px;">
-            <span style="color: {SUCCESS}; font-size: 14px;">🟢 Connected</span><br>
-            <span style="color: {TEXT_MUTED}; font-size: 12px;">{refresh_status}</span>
+        <div style="text-align: right; padding-top: 14px;">
+            <span style="color: {SUCCESS}; font-size: 14px;">🟢 Live</span>
         </div>
         """, unsafe_allow_html=True)
-    
-    with col3:
-        # Auto-refresh toggle
-        st.session_state.auto_refresh = st.toggle("Auto Refresh", value=st.session_state.auto_refresh)
-    
-    # Data fetching is now handled inside fragments (render_sidebar_metrics_fragment, render_market_analysis_fragment)
-    pass
     
     # Render Sidebar Metrics using Fragment
     with st.sidebar:
@@ -2226,141 +2104,8 @@ def main():
                 _n_bos = len(_ms_data.get('bos_signals', []))
                 _n_choch = len(_ms_data.get('choch_signals', []))
                 _ms_trend = _ms_data.get('trend', 'ranging')
-                _ms_info = f" | 🏗 Structure: {_n_sh}H/{_n_sl}L swings, {_n_bos} BOS, {_n_choch} CHOCH, trend={_ms_trend}"
-            st.caption(f"📍 {num_opens} entries + {num_closes} exits on chart • 🟢 LONG ▲ • 🔴 SHORT ▼ • EXIT(SL) ■ • EXIT(TP) ■ • EXIT ●{_ms_info}")
-            
-            # Trading Controls Section
-            st.markdown("---")
-            st.markdown("### 🎮 Trading Controls")
-
-            if IS_CLIENT_MODE:
-                st.info("🌐 **Client Mode** — Trading bot is managed on the remote server. Use the server dashboard to start/stop the bot or place manual trades.")
-                if st.button("🔄 Refresh Data", key="refresh_data", use_container_width=True):
-                    st.rerun()
-            else:
-                # Bot status check (server-side only)
-                import subprocess
-                bot_running = False
-                try:
-                    result = subprocess.run(['pgrep', '-f', 'live_trading'], capture_output=True, text=True)
-                    bot_running = result.returncode == 0
-                except Exception:
-                    pass
-
-                if bot_running:
-                    st.success("🟢 **Trading Bot is RUNNING** (Multi-Asset Mode)")
-                else:
-                    st.warning("🟠 **Trading Bot is STOPPED**")
-
-                ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns(4)
-
-                with ctrl_col1:
-                    if not bot_running:
-                        if st.button("▶️ Start Trading", key="start_trading", use_container_width=True, type="primary"):
-                            try:
-                                with open(project_root / "process.log", "a") as log_file:
-                                    subprocess.Popen(
-                                        ['./venv/bin/python', '-u', 'live_trading_multi.py',
-                                         '--assets', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT',
-                                         '--balance', '5000'],
-                                        cwd=str(project_root),
-                                        stdout=log_file,
-                                        stderr=log_file,
-                                    )
-                                st.success("✓ Multi-Asset Bot started!")
-                                time.sleep(2)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to start: {e}")
-                    else:
-                        if st.button("⏹️ Stop Trading", key="stop_trading", use_container_width=True, type="secondary"):
-                            try:
-                                subprocess.run(['pkill', '-f', 'live_trading'], check=False)
-                                st.info("✓ Trading bot stopped")
-                                time.sleep(1)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Failed to stop: {e}")
-
-                with ctrl_col2:
-                    if st.button("📈 Open Long", key="open_long", use_container_width=True):
-                        trade = {
-                            'timestamp': datetime.now().isoformat(),
-                            'action': 'OPEN_LONG',
-                            'price': current_price,
-                            'pnl': 0,
-                            'balance': state.get('balance'),
-                            'position': 1,
-                            'reason': 'manual',
-                            'symbol': st.session_state.selected_asset,
-                            'asset': st.session_state.selected_asset,
-                        }
-                        storage.log_trade(trade)
-                        st.success(f"✓ Opened LONG @ ${current_price:,.2f}")
-                        time.sleep(0.5)
-                        st.rerun()
-
-                with ctrl_col3:
-                    if st.button("📉 Open Short", key="open_short", use_container_width=True):
-                        trade = {
-                            'timestamp': datetime.now().isoformat(),
-                            'action': 'OPEN_SHORT',
-                            'price': current_price,
-                            'pnl': 0,
-                            'balance': state.get('balance'),
-                            'position': -1,
-                            'reason': 'manual',
-                            'symbol': st.session_state.selected_asset,
-                            'asset': st.session_state.selected_asset,
-                        }
-                        storage.log_trade(trade)
-                        st.success(f"✓ Opened SHORT @ ${current_price:,.2f}")
-                        time.sleep(0.5)
-                        st.rerun()
-
-                with ctrl_col4:
-                    if st.button("🚪 Close Position", key="close_position", use_container_width=True):
-                        position = state.get('position', 0)
-                        if position != 0:
-                            action = 'CLOSE_LONG' if position == 1 else 'CLOSE_SHORT'
-                            trade = {
-                                'timestamp': datetime.now().isoformat(),
-                                'action': action,
-                                'price': current_price,
-                                'pnl': 0,
-                                'balance': state.get('balance'),
-                                'position': 0,
-                                'reason': 'manual',
-                                'symbol': st.session_state.selected_asset,
-                                'asset': st.session_state.selected_asset,
-                            }
-                            storage.log_trade(trade)
-                            st.success(f"✓ Closed position @ ${current_price:,.2f}")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.info("No position to close")
-
-                st.markdown("")
-                action_col1, action_col2 = st.columns(2)
-
-                with action_col1:
-                    if st.button("🔄 Refresh Data", key="refresh_data", use_container_width=True):
-                        st.rerun()
-
-                with action_col2:
-                    if st.button("🗑️ Clear Trade Log", key="clear_log", use_container_width=True):
-                        try:
-                            log_file = project_root / 'logs' / 'trading_log.json'
-                            state_file = project_root / 'logs' / 'trading_state.json'
-                            log_file.write_text('')
-                            if state_file.exists():
-                                state_file.unlink()
-                            st.success("✓ Trade log cleared")
-                            time.sleep(0.5)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Failed to clear log: {e}")
+                _ms_info = f" | Structure: {_n_sh}H/{_n_sl}L swings, {_n_bos} BOS, {_n_choch} CHOCH, trend={_ms_trend}"
+            st.caption(f"📍 {num_opens} entries + {num_closes} exits · 🟢 LONG ▲ · 🔴 SHORT ▼ · EXIT(SL) ■ · EXIT(TP) ■{_ms_info}")
         
         with tab_live_portfolio:
             # ─── Compute portfolio metrics from trade data ───
@@ -2702,7 +2447,7 @@ def main():
             # Footer
             st.markdown(
                 f'<div style="text-align:center;color:{TEXT_MUTED};font-size:11px;margin-top:16px;">'
-                f'DRL Trading System · Signals from PPO + Composite Scoring · Connected to OKX</div>',
+                f'DRL Trading System · PPO + Composite Scoring · Binance Futures Testnet</div>',
                 unsafe_allow_html=True,
             )
 
@@ -3468,99 +3213,8 @@ def main():
                 except Exception as _oe:
                     st.warning(f"Could not fetch open orders: {_oe}")
 
-                # ── Manual Trading Controls ────────────────────────────────
                 st.markdown("---")
-                st.markdown("### 🎮 Manual Trading Controls")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    trade_symbol = st.selectbox(
-                        "Select Pair", ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT'],
-                        key="testnet_symbol"
-                    )
-                with col2:
-                    trade_amount = st.number_input(
-                        "Amount (USDT)", min_value=10.0,
-                        max_value=float(usdt_balance) if usdt_balance > 10 else 10000.0,
-                        value=100.0, step=10.0, key="testnet_amount"
-                    )
-
-                btn_cols = st.columns(3)
-
-                if btn_cols[0].button("🟢 BUY (Market)", key="testnet_buy", use_container_width=True):
-                    try:
-                        order_resp = _tn_requests.post(
-                            f'{_api}/api/testnet/order',
-                            json={'symbol': trade_symbol, 'side': 'buy', 'amount_usdt': trade_amount},
-                            timeout=20
-                        )
-                        result = order_resp.json()
-                        if result.get('success'):
-                            _amt = float(result.get('amount', 0) or 0)
-                            _pr = float(result.get('price', 0) or 0)
-                            st.success(f"✅ BUY: {_amt:.6f} {trade_symbol.split('/')[0]} @ ${_pr:,.2f}")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Order failed: {result.get('error', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"❌ Order failed: {e}")
-
-                if btn_cols[1].button("🔴 SELL (Market)", key="testnet_sell", use_container_width=True):
-                    try:
-                        order_resp = _tn_requests.post(
-                            f'{_api}/api/testnet/order',
-                            json={'symbol': trade_symbol, 'side': 'sell', 'amount_usdt': 0},
-                            timeout=20
-                        )
-                        result = order_resp.json()
-                        if result.get('success'):
-                            _amt = float(result.get('amount', 0) or 0)
-                            _sym = trade_symbol.split('/')[0]
-                            st.success(f"✅ SELL: {_amt:.6f} {_sym}")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Order failed: {result.get('error', 'Unknown error')}")
-                    except Exception as e:
-                        st.error(f"❌ Order failed: {e}")
-
-                if btn_cols[2].button("🧪 Mirror Bot Trade", key="testnet_mirror_btn", use_container_width=True):
-                    try:
-                        _sym_raw = trade_symbol.replace('/', '')
-                        exec_resp = _tn_requests.post(
-                            f'{_api}/api/testnet/execute',
-                            json={'action': 'OPEN_LONG_SPLIT', 'symbol': f"{_sym_raw}USDT" if 'USDT' not in _sym_raw else _sym_raw, 'confidence': 0.65},
-                            timeout=25
-                        )
-                        result = exec_resp.json()
-                        if result.get('success'):
-                            t = result.get('trade', {}) or {}
-                            _pr = float(t.get('price', 0) or 0)
-                            st.success(f"✅ Testnet mirror executed: OPEN_LONG @ ${_pr:,.2f}")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Mirror failed: {result.get('error', 'Unknown')}")
-                    except Exception as e:
-                        st.error(f"❌ Mirror failed: {e}")
-
-                st.markdown("---")
-                _ic1, _ic2 = st.columns(2)
-                with _ic1:
-                    st.info("""
-                    **Bot Auto-Mirror (TESTNET_MIRROR=true):**
-                    - Set env var to enable real-time mirroring
-                    - Every bot decision → real testnet order
-                    - LONG = real BUY order (50% market + 50% limit)
-                    - SHORT = conceptual (spot testnet only)
-                    - Trades logged to `logs/testnet_trades.json`
-                    """)
-                with _ic2:
-                    st.warning("""
-                    **Testnet Notes:**
-                    - Zero real money risk (testnet.binance.vision)
-                    - Testnet funds reset periodically
-                    - SHORT positions tracked conceptually (spot exchange)
-                    - SL/TP managed by bot logic (no exchange OCO orders)
-                    """)
+                st.info("Bot auto-mirrors all decisions to Binance Testnet (TESTNET_MIRROR=true). Trades appear above automatically.")
 
         with tab_htf:
             st.markdown("### 🔮 HTF Agent — Hierarchical Multi-Timeframe Trader")
@@ -3840,7 +3494,7 @@ def main():
                         st.info("No news events in this window yet.")
                     else:
                         st.caption(f"{len(events)} events")
-                        for ev in reversed(events):  # newest first
+                        for ev in events:  # newest first (API returns ORDER BY id DESC)
                             score_val = ev.get('sentiment_score') or 0.0
                             urg = ev.get('urgency', 1)
                             etype = (ev.get('event_type') or 'other').upper()[:8]
@@ -3883,9 +3537,8 @@ def main():
     st.markdown("---")
     st.markdown(f"""
     <div style="text-align: center; color: {TEXT_MUTED}; font-size: 12px;">
-        DRL Trading System v2.1 | Advanced PPO Agent |
-        <span style="color: {SUCCESS};">●</span> WebSocket Live Data |
-        Deployed: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC
+        DRL Trading System v2.1 · PPO Agent · Binance Futures Testnet ·
+        <span style="color: {SUCCESS};">●</span> Live
     </div>
     """, unsafe_allow_html=True)
 

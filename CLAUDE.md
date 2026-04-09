@@ -66,6 +66,7 @@ Note: localtunnel assigns a random subdomain each run — check `logs/tunnel.log
 6. **After ANY code change**: run `./start_services.sh` to restart all services.
 7. **Git workflow**: always work on `dev`, push to `origin dev`.
 8. **Testnet-only trades in DB** — all trades saved to SQLite must have `is_testnet=True`. The bot tags every trade in `_log_trade()`. The storage layer rejects any trade without `is_testnet=True`. When analyzing trades, always filter on `is_testnet=1`. Never save mainnet/simulated/mock trades.
+9. **ALWAYS reply on Telegram after completing a task** — use `mcp__plugin_telegram_telegram__reply` to the originating chat_id. Never finish work silently. Chen has no way to know if a task is done unless told. See `docs/skills/telegram-response-protocol.md`.
 
 ## Documentation
 

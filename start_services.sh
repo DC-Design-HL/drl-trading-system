@@ -2,6 +2,7 @@
 # start_services.sh — Start all DRL trading system processes detached from any session.
 # Uses setsid so processes survive shell/SSH/Claude Code session termination.
 # Safe to run multiple times: kills existing instances before relaunching.
+# Dashboard available at http://116.203.196.107 (Caddy proxies port 80 → Streamlit).
 
 set -e
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +46,7 @@ except Exception as e:
 PYEOF
 
 # Kill existing instances gracefully
-for name in live_trading_htf trade_alerter start_local_server streamlit localtunnel news_sentinel news_alerter; do
+for name in live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter; do
     pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
 done
 sleep 3
@@ -104,43 +105,30 @@ setsid python3 -m streamlit run "$REPO/src/ui/app.py" \
 UI_PID=$!
 echo "[start_services]   Streamlit PID: $UI_PID"
 
-# Give Streamlit time to start before tunnel
-sleep 8
-
-# --- Localtunnel ---
-echo "[start_services] Starting localtunnel..."
-setsid /home/claude/.npm/_npx/75ac80b86e83d4a2/node_modules/.bin/lt --port 8501 -s drl-trading-chen > "$LOG/tunnel.log" 2>&1 &
-TUNNEL_PID=$!
-sleep 4
-TUNNEL_URL=$(grep -m1 "your url is:" "$LOG/tunnel.log" 2>/dev/null | awk '{print $NF}' || echo "check logs/tunnel.log")
-echo "[start_services]   Tunnel PID: $TUNNEL_PID — $TUNNEL_URL"
-
 # --- Save PIDs ---
 cat > "$PIDS" << JSON
 {
-  "btc":     {"pid": $BTC_PID,     "log": "logs/btc_live.log",   "symbol": "BTCUSDT", "sharpe": 7.92},
-  "eth":     {"pid": $ETH_PID,     "log": "logs/eth_live.log",   "symbol": "ETHUSDT", "sharpe": 9.90},
-  "sol":     {"pid": $SOL_PID,     "log": "logs/sol_live.log",   "symbol": "SOLUSDT", "sharpe": 6.79},
-  "xrp":     {"pid": $XRP_PID,     "log": "logs/xrp_live.log",   "symbol": "XRPUSDT", "sharpe": 12.42},
-  "alerter":       {"pid": $ALERTER_PID,       "log": "logs/alerter.log"},
-  "api":           {"pid": $API_PID,           "log": "logs/api_server.log"},
-  "ui":            {"pid": $UI_PID,            "log": "logs/dashboard.log"},
-  "tunnel":        {"pid": $TUNNEL_PID,        "log": "logs/tunnel.log", "url": "$TUNNEL_URL"},
-  "news_sentinel": {"pid": $NEWS_SENTINEL_PID, "log": "logs/news_sentinel.log"},
-  "news_alerter":  {"pid": $NEWS_ALERTER_PID,  "log": "logs/news_alerter.log"}
+  "btc":          {"pid": $BTC_PID,          "log": "logs/btc_live.log",       "symbol": "BTCUSDT", "sharpe": 7.92},
+  "eth":          {"pid": $ETH_PID,          "log": "logs/eth_live.log",       "symbol": "ETHUSDT", "sharpe": 9.90},
+  "sol":          {"pid": $SOL_PID,          "log": "logs/sol_live.log",       "symbol": "SOLUSDT", "sharpe": 6.79},
+  "xrp":          {"pid": $XRP_PID,          "log": "logs/xrp_live.log",       "symbol": "XRPUSDT", "sharpe": 12.42},
+  "alerter":      {"pid": $ALERTER_PID,      "log": "logs/alerter.log"},
+  "api":          {"pid": $API_PID,          "log": "logs/api_server.log"},
+  "ui":           {"pid": $UI_PID,           "log": "logs/dashboard.log"},
+  "news_sentinel":{"pid": $NEWS_SENTINEL_PID,"log": "logs/news_sentinel.log"},
+  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"}
 }
 JSON
 
 echo ""
 echo "[start_services] ✅ All services started"
-echo "[start_services] Dashboard: $TUNNEL_URL"
+echo "[start_services] Dashboard: http://116.203.196.107"
 echo "[start_services] PIDs saved to: $PIDS"
 
-# --- Notify Telegram with dashboard URL ---
+# --- Notify Telegram ---
 if [ -n "$TELEGRAM_ALERT_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_IDS" ]; then
     _FIRST_CHAT=$(echo "$TELEGRAM_CHAT_IDS" | cut -d',' -f1)
-    _MSG="🚀 Services restarted%0ADashboard: $TUNNEL_URL"
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_ALERT_BOT_TOKEN}/sendMessage" \
-        -d "chat_id=${_FIRST_CHAT}&text=${_MSG}" > /dev/null 2>&1 || true
-    echo "[start_services] Dashboard URL sent to Telegram"
+        -d "chat_id=${_FIRST_CHAT}&text=🚀 Services restarted%0ADashboard: http://116.203.196.107" > /dev/null 2>&1 || true
+    echo "[start_services] Notification sent to Telegram"
 fi
