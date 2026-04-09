@@ -109,6 +109,12 @@ SYMBOL_MIN_CONFIDENCE = {
     "ETHUSDT": 0.80,  # ETH low-conf trades had 0% SHORT WR, -$396 PnL
 }
 
+# Per-symbol directional confidence floors (temporary, until regime veto validated over 100+ trades)
+# ETH LONGs: 43% WR, -$22.89 in Apr 7 analysis — require higher conviction for longs
+SYMBOL_DIRECTIONAL_CONF: dict = {
+    "ETHUSDT": {"LONG": 0.95},
+}
+
 # Ranging regime filter: raise confidence threshold when ADX is low
 RANGING_MIN_CONFIDENCE = 0.80  # Need higher conviction in ranging markets
 RANGING_ADX_THRESHOLD = 20.0   # ADX below this = ranging
@@ -2022,6 +2028,14 @@ class HTFLiveBot:
         if action != ACTION_HOLD and confidence < min_conf:
             logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
             return None
+
+        # ── Guard: per-symbol directional confidence floor ──
+        if action != ACTION_HOLD:
+            direction_str = "LONG" if action == ACTION_LONG else "SHORT"
+            dir_floor = SYMBOL_DIRECTIONAL_CONF.get(self.symbol, {}).get(direction_str)
+            if dir_floor is not None and confidence < dir_floor:
+                logger.info("🚫 Directional floor: %s %s conf=%.2f < %.2f — HOLD", self.symbol, direction_str, confidence, dir_floor)
+                return None
 
         # ── Guard: ranging regime filter ──
         # In ranging markets (low ADX), require higher confidence to enter
