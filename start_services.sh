@@ -23,6 +23,27 @@ set +a
 
 echo "[start_services] Starting DRL Trading System services..."
 
+# --- Apply Caddy reverse proxy config (port 80 → Streamlit) via admin API ---
+python3 - << 'PYEOF'
+import urllib.request, json, time
+new_srv1 = {
+    "listen": [":80"],
+    "routes": [
+        {"match": [{"path": ["/health"]}], "handle": [{"handler": "static_response", "body": "OK", "status_code": 200}]},
+        {"match": [{"path": ["/api/*"]}], "handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:5001"}]}]},
+        {"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": "localhost:8501"}],
+            "transport": {"protocol": "http", "versions": ["1.1", "2"]}}]}
+    ]
+}
+req = urllib.request.Request("http://localhost:2019/config/apps/http/servers/srv1",
+    data=json.dumps(new_srv1).encode(), headers={"Content-Type": "application/json"}, method="PATCH")
+try:
+    with urllib.request.urlopen(req, timeout=5) as r:
+        print("[start_services] Caddy port 80 → Streamlit configured")
+except Exception as e:
+    print(f"[start_services] Caddy config warning: {e}")
+PYEOF
+
 # Kill existing instances gracefully
 for name in live_trading_htf trade_alerter start_local_server streamlit localtunnel news_sentinel news_alerter; do
     pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
