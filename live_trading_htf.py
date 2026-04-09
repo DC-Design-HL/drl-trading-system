@@ -278,8 +278,9 @@ class HTFLiveBot:
         dry_run: bool = True,
         initial_balance: float = 5_000.0,
         interval_minutes: int = 15,
+        symbol: str = None,
     ):
-        self.symbol = SYMBOL
+        self.symbol = symbol or SYMBOL
         self.dry_run = dry_run
         self.initial_balance = initial_balance
         self.interval_minutes = interval_minutes
