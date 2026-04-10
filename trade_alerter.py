@@ -39,6 +39,29 @@ def _get_whale_signal() -> dict:
         print(f"[alerter] Whale behavior signal unavailable: {e}", flush=True)
         return {}
 
+# Futures testnet executor — used to fetch REAL wallet balance from Binance
+# (CLAUDE.md rule #4: all balance data must come from the exchange, not local state)
+_futures_executor = None
+
+def _get_testnet_balance() -> float:
+    """
+    Fetch live wallet balance directly from Binance Futures testnet.
+    Returns total_margin_balance (wallet + unrealized PnL) — the "net worth"
+    Chen sees on his Binance testnet dashboard.
+    Returns 0.0 on failure so the caller can fall back.
+    """
+    global _futures_executor
+    try:
+        if _futures_executor is None:
+            from src.api.futures_executor import FuturesTestnetExecutor
+            _futures_executor = FuturesTestnetExecutor()
+        portfolio = _futures_executor.get_portfolio()
+        # total_margin_balance = wallet + unrealized — matches what Binance UI shows
+        return float(portfolio.get("total_margin_balance", 0))
+    except Exception as e:
+        print(f"[alerter] Testnet balance fetch failed: {e}", flush=True)
+        return 0.0
+
 # Use dedicated alert bot token (separate from AI bot), fallback to main token
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -338,7 +361,12 @@ def format_close_trade(alert: dict) -> str:
     lines.append(f"{pnl_emoji} Trade PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
 
     # Total balance PnL (wallet balance vs $5,000 initial deposit)
-    balance_after = trade.get("balance_after", 0)
+    # Fetch REAL balance from Binance testnet (not bot's internal state).
+    # CLAUDE.md rule #4: all financial data must come from the exchange.
+    balance_after = _get_testnet_balance()
+    if balance_after <= 0:
+        # Fallback to bot's internal state only if exchange fetch failed
+        balance_after = trade.get("balance_after", 0)
     initial_balance = 5000.0  # Binance testnet starting balance
     if balance_after:
         total_pnl = balance_after - initial_balance
