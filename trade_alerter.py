@@ -360,9 +360,10 @@ def format_close_trade(alert: dict) -> str:
     pnl_emoji = "📈" if pnl >= 0 else "📉"
     lines.append(f"{pnl_emoji} Trade PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
 
-    # Total balance PnL (wallet balance vs $5,000 initial deposit)
-    # Fetch REAL balance from Binance testnet (not bot's internal state).
+    # Wallet balance (from Binance testnet — not bot's internal state).
     # CLAUDE.md rule #4: all financial data must come from the exchange.
+    # The parenthetical shows LIFETIME PnL vs $5,000 starting deposit, clearly
+    # labeled so it's not confused with the per-trade PnL above.
     balance_after = _get_testnet_balance()
     if balance_after <= 0:
         # Fallback to bot's internal state only if exchange fetch failed
@@ -374,7 +375,7 @@ def format_close_trade(alert: dict) -> str:
         bal_emoji = "🟢" if total_pnl >= 0 else "🔴"
         lines.append(
             f"{bal_emoji} Balance: ${balance_after:,.2f} "
-            f"({'+'if total_pnl >= 0 else ''}${total_pnl:,.2f} / "
+            f"(lifetime: {'+'if total_pnl >= 0 else ''}${total_pnl:,.2f} / "
             f"{'+'if pct >= 0 else ''}{pct:.2f}%)"
         )
 
