@@ -111,8 +111,10 @@ SYMBOL_MIN_CONFIDENCE = {
 
 # Per-symbol directional confidence floors (temporary, until regime veto validated over 100+ trades)
 # ETH LONGs: 43% WR, -$22.89 in Apr 7 analysis — require higher conviction for longs
+# SOL LONGs (Apr 9-10): 1/3 wins, -$20.06 net — losers were conf 0.82/0.91, winner was 0.987
 SYMBOL_DIRECTIONAL_CONF: dict = {
     "ETHUSDT": {"LONG": 0.95},
+    "SOLUSDT": {"LONG": 0.95},
 }
 
 # Ranging regime filter: raise confidence threshold when ADX is low
@@ -1850,12 +1852,13 @@ class HTFLiveBot:
                         adjustment_reason = f"CHOCH_bearish(conf={confidence:.2f})"
 
                 # Fake BOS bearish → explicitly ignore (hold position)
+                # Logged at DEBUG — fires every tick, would spam INFO logs
                 if sig.get("fake_bos") and sig.get("bos_bearish"):
-                    logger.info("⚠️ Fake BOS bearish detected — ignoring, holding LONG")
+                    logger.debug("⚠️ Fake BOS bearish detected — ignoring, holding LONG")
 
                 # Fake CHOCH bullish → ignore (don't over-tighten)
                 if sig.get("fake_choch") and sig.get("choch_bullish"):
-                    logger.info("⚠️ Fake CHOCH bullish detected — ignoring")
+                    logger.debug("⚠️ Fake CHOCH bullish detected — ignoring")
 
             elif self.position == -1:  # ── SHORT ──
                 # BOS bearish (continuation) → trail SL to swing high
@@ -1888,12 +1891,13 @@ class HTFLiveBot:
                         adjustment_reason = f"CHOCH_bullish(conf={confidence:.2f})"
 
                 # Fake BOS bullish → ignore
+                # Logged at DEBUG — fires every tick, would spam INFO logs
                 if sig.get("fake_bos") and sig.get("bos_bullish"):
-                    logger.info("⚠️ Fake BOS bullish detected — ignoring, holding SHORT")
+                    logger.debug("⚠️ Fake BOS bullish detected — ignoring, holding SHORT")
 
                 # Fake CHOCH bearish → ignore
                 if sig.get("fake_choch") and sig.get("choch_bearish"):
-                    logger.info("⚠️ Fake CHOCH bearish detected — ignoring")
+                    logger.debug("⚠️ Fake CHOCH bearish detected — ignoring")
 
         # --- Safety: SL must never move to a worse position ---
         # Bot-side SL is updated on every tick for precision (WS monitor checks
