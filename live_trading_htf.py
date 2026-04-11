@@ -156,6 +156,16 @@ ORDERBOOK_GUARD_ENABLED = True
 RSI_GUARD_ENABLED = True
 RSI_GUARD_OB_THRESHOLD = 70         # Don't LONG above this RSI (overbought)
 RSI_GUARD_OS_THRESHOLD = 30         # Don't SHORT below this RSI (oversold)
+# Regime-aware loosened thresholds (added 2026-04-11): in confirmed strong
+# trends (regime detector reports TRENDING_UP/DOWN with ADX >= TREND_ADX_MIN),
+# RSI > 70 / < 30 is normal trend behavior, not exhaustion. The base 70/30
+# ceiling was over-applying in trends and blocking high-conviction longs
+# during the bull leg on 2026-04-11. Loosen the band only when the regime
+# detector confirms we are NOT in a range. ADX >= 30 = "strong trend" per
+# Wilder's classification; we already have ADX < 20 as the ranging block.
+RSI_GUARD_OB_TREND = 80             # LONG ceiling when TRENDING_UP + ADX >= TREND_ADX_MIN
+RSI_GUARD_OS_TREND = 20             # SHORT floor when TRENDING_DOWN + ADX >= TREND_ADX_MIN
+RSI_GUARD_TREND_ADX_MIN = 30        # ADX threshold to qualify as "strong directional trend"
 
 # ── ADX Ranging Guard ──
 # Blocks trades when ADX is very low (no trend, choppy/ranging market).
@@ -908,13 +918,27 @@ class HTFLiveBot:
         if RSI_GUARD_ENABLED:
             mtf = market.get("mtf", {})
             rsi_15m = mtf.get("signals", {}).get("15m", {}).get("rsi", 50)
+            # Regime-aware threshold: when the regime detector reports a
+            # confirmed strong trend in the SAME direction we're trading,
+            # loosen the RSI band so we stop fighting the regime detector.
+            # In ranges or mismatched regimes, fall back to the strict 70/30.
+            regime_for_rsi = market.get("regime", {}) or {}
+            regime_type_rsi = (regime_for_rsi.get("type") or "UNKNOWN").upper()
+            regime_adx_rsi = regime_for_rsi.get("adx", 0) or 0
+            ob_threshold = RSI_GUARD_OB_THRESHOLD
+            os_threshold = RSI_GUARD_OS_THRESHOLD
+            if isinstance(regime_adx_rsi, (int, float)) and regime_adx_rsi >= RSI_GUARD_TREND_ADX_MIN:
+                if direction == "LONG" and regime_type_rsi == "TRENDING_UP":
+                    ob_threshold = RSI_GUARD_OB_TREND
+                elif direction == "SHORT" and regime_type_rsi == "TRENDING_DOWN":
+                    os_threshold = RSI_GUARD_OS_TREND
             if isinstance(rsi_15m, (int, float)):
-                if direction == "LONG" and rsi_15m > RSI_GUARD_OB_THRESHOLD:
+                if direction == "LONG" and rsi_15m > ob_threshold:
                     rsi_blocked = True
-                    rsi_reason = f"RSI 15m={rsi_15m:.0f} > {RSI_GUARD_OB_THRESHOLD} (overbought)"
-                elif direction == "SHORT" and rsi_15m < RSI_GUARD_OS_THRESHOLD:
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} > {ob_threshold} (overbought)"
+                elif direction == "SHORT" and rsi_15m < os_threshold:
                     rsi_blocked = True
-                    rsi_reason = f"RSI 15m={rsi_15m:.0f} < {RSI_GUARD_OS_THRESHOLD} (oversold)"
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} < {os_threshold} (oversold)"
 
         # --- Check ADX ---
         adx_blocked = False
