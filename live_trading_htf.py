@@ -165,7 +165,7 @@ RSI_GUARD_OS_THRESHOLD = 30         # Don't SHORT below this RSI (oversold)
 # Wilder's classification; we already have ADX < 20 as the ranging block.
 RSI_GUARD_OB_TREND = 80             # LONG ceiling when TRENDING_UP + ADX >= TREND_ADX_MIN
 RSI_GUARD_OS_TREND = 20             # SHORT floor when TRENDING_DOWN + ADX >= TREND_ADX_MIN
-RSI_GUARD_TREND_ADX_MIN = 30        # ADX threshold to qualify as "strong directional trend"
+RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = real trend, not noise)
 
 # ── ADX Ranging Guard ──
 # Blocks trades when ADX is very low (no trend, choppy/ranging market).
