@@ -55,8 +55,22 @@ except Exception as e:
     print(f"[start_services] Caddy config warning: {e}")
 PYEOF
 
-# Consolidated mode: one python process runs all 4 bots as threads, saving ~1.2 GB RAM.
-# Triggered by CONSOLIDATED_BOTS=1 env var (set by start_consolidated.sh wrapper).
+# Consolidated mode: one python process runs all 4 bots as threads, saving ~2.2 GB RAM.
+# Can be triggered three ways, in priority order:
+#   1. CONSOLIDATED_BOTS=1 env var (set by start_consolidated.sh wrapper)
+#   2. Auto-detect from existing running_services.json — if the last PID file
+#      had a "bots" key, we were running consolidated, so auto-recover in
+#      consolidated mode. This is essential: when watchdog.sh fires after a
+#      crash, it invokes start_services.sh with no env, and without this
+#      sticky detection we would silently revert to 4-process mode on every
+#      auto-recovery, defeating the whole point of the rollout.
+#   3. Default: 4-process mode (safe fallback, rollback path is `rm $PIDS`).
+if [ -z "${CONSOLIDATED_BOTS:-}" ] && [ -f "$PIDS" ]; then
+    if python3 -c "import json,sys; sys.exit(0 if 'bots' in json.load(open('$PIDS')) else 1)" 2>/dev/null; then
+        CONSOLIDATED_BOTS=1
+        echo "[start_services] Auto-detected consolidated mode from $PIDS"
+    fi
+fi
 CONSOLIDATED_BOTS="${CONSOLIDATED_BOTS:-0}"
 
 # Kill existing instances gracefully. The bot-process kill list is mode-aware:
