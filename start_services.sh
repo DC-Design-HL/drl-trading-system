@@ -45,11 +45,17 @@ except Exception as e:
     print(f"[start_services] Caddy config warning: {e}")
 PYEOF
 
-# Kill existing instances gracefully
-for name in live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter; do
+# Kill existing instances gracefully.
+# Includes BOTH per-symbol (live_trading_htf) and consolidated (live_trading_all)
+# so cutover between modes is always clean regardless of which one was running.
+for name in live_trading_all live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter; do
     pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
 done
 sleep 3
+
+# Consolidated mode: one python process runs all 4 bots as threads, saving ~1.2 GB RAM.
+# Triggered by CONSOLIDATED_BOTS=1 env var (set by start_consolidated.sh wrapper).
+CONSOLIDATED_BOTS="${CONSOLIDATED_BOTS:-0}"
 
 # --- API Server ---
 echo "[start_services] Starting API server..."
@@ -59,20 +65,27 @@ echo "[start_services]   API server PID: $API_PID"
 sleep 3
 
 # --- Trading Bots ---
-echo "[start_services] Starting trading bots..."
-setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol BTCUSDT > "$LOG/btc_live.log" 2>&1 &
-BTC_PID=$!
+if [ "$CONSOLIDATED_BOTS" = "1" ]; then
+    echo "[start_services] Starting CONSOLIDATED trading bot (1 process, all 4 symbols as threads)..."
+    setsid python3 "$REPO/live_trading_all.py" --live --interval 15 > "$LOG/bots_live.log" 2>&1 &
+    BOTS_PID=$!
+    echo "[start_services]   Consolidated bots PID: $BOTS_PID"
+else
+    echo "[start_services] Starting trading bots (4 separate processes)..."
+    setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol BTCUSDT > "$LOG/btc_live.log" 2>&1 &
+    BTC_PID=$!
 
-setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol ETHUSDT > "$LOG/eth_live.log" 2>&1 &
-ETH_PID=$!
+    setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol ETHUSDT > "$LOG/eth_live.log" 2>&1 &
+    ETH_PID=$!
 
-setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol SOLUSDT > "$LOG/sol_live.log" 2>&1 &
-SOL_PID=$!
+    setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol SOLUSDT > "$LOG/sol_live.log" 2>&1 &
+    SOL_PID=$!
 
-setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol XRPUSDT > "$LOG/xrp_live.log" 2>&1 &
-XRP_PID=$!
+    setsid python3 "$REPO/live_trading_htf.py" --live --interval 15 --symbol XRPUSDT > "$LOG/xrp_live.log" 2>&1 &
+    XRP_PID=$!
 
-echo "[start_services]   BTC=$BTC_PID ETH=$ETH_PID SOL=$SOL_PID XRP=$XRP_PID"
+    echo "[start_services]   BTC=$BTC_PID ETH=$ETH_PID SOL=$SOL_PID XRP=$XRP_PID"
+fi
 
 # --- Trade Alerter ---
 echo "[start_services] Starting trade alerter..."
@@ -106,6 +119,21 @@ UI_PID=$!
 echo "[start_services]   Streamlit PID: $UI_PID"
 
 # --- Save PIDs ---
+# In consolidated mode, a single "bots" entry replaces btc/eth/sol/xrp.
+# watchdog.sh is data-driven (just kill -0's every PID in this file), so the
+# new shape is automatically picked up without code changes there.
+if [ "$CONSOLIDATED_BOTS" = "1" ]; then
+cat > "$PIDS" << JSON
+{
+  "bots":         {"pid": $BOTS_PID,         "log": "logs/bots_live.log",      "mode": "consolidated", "symbols": ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]},
+  "alerter":      {"pid": $ALERTER_PID,      "log": "logs/alerter.log"},
+  "api":          {"pid": $API_PID,          "log": "logs/api_server.log"},
+  "ui":           {"pid": $UI_PID,           "log": "logs/dashboard.log"},
+  "news_sentinel":{"pid": $NEWS_SENTINEL_PID,"log": "logs/news_sentinel.log"},
+  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"}
+}
+JSON
+else
 cat > "$PIDS" << JSON
 {
   "btc":          {"pid": $BTC_PID,          "log": "logs/btc_live.log",       "symbol": "BTCUSDT", "sharpe": 7.92},
@@ -119,6 +147,7 @@ cat > "$PIDS" << JSON
   "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"}
 }
 JSON
+fi
 
 echo ""
 echo "[start_services] ✅ All services started"

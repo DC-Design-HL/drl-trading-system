@@ -67,8 +67,16 @@ TRADES_FILE = Path("logs/htf_trades.json")
 
 
 def _get_state_file(symbol: str = None) -> Path:
-    """Return symbol-specific state file path."""
+    """Return symbol-specific state file path.
+
+    Honors DRL_STATE_DIR env var so a dry-run consolidated process can
+    isolate its state from the live 4-bot deployment writing the same
+    symbol files.
+    """
     sym = symbol or SYMBOL
+    state_dir = os.environ.get("DRL_STATE_DIR")
+    if state_dir:
+        return Path(state_dir) / f"htf_trading_state_{sym}.json"
     if sym == "BTCUSDT":
         return Path("logs/htf_trading_state.json")  # backwards compat
     return Path(f"logs/htf_trading_state_{sym}.json")
