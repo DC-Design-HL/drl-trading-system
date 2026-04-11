@@ -45,17 +45,27 @@ except Exception as e:
     print(f"[start_services] Caddy config warning: {e}")
 PYEOF
 
-# Kill existing instances gracefully.
-# Includes BOTH per-symbol (live_trading_htf) and consolidated (live_trading_all)
-# so cutover between modes is always clean regardless of which one was running.
-for name in live_trading_all live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter; do
-    pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
-done
-sleep 3
-
 # Consolidated mode: one python process runs all 4 bots as threads, saving ~1.2 GB RAM.
 # Triggered by CONSOLIDATED_BOTS=1 env var (set by start_consolidated.sh wrapper).
 CONSOLIDATED_BOTS="${CONSOLIDATED_BOTS:-0}"
+
+# Kill existing instances gracefully. The bot-process kill list is mode-aware:
+#   - Consolidated mode: kill BOTH live_trading_htf and live_trading_all so
+#     we can cut over cleanly from either layout.
+#   - Default mode: kill ONLY live_trading_htf. We deliberately leave
+#     live_trading_all processes alone because they are typically parallel
+#     dry-run observers (started by hand with dry_run=True + DRL_STATE_DIR
+#     pointing at an isolated state dir). Killing them on every watchdog
+#     restart would defeat the 24h dry-run validation.
+if [ "$CONSOLIDATED_BOTS" = "1" ]; then
+    KILL_NAMES="live_trading_all live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter"
+else
+    KILL_NAMES="live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter"
+fi
+for name in $KILL_NAMES; do
+    pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
+done
+sleep 3
 
 # --- API Server ---
 echo "[start_services] Starting API server..."
