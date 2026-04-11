@@ -11,6 +11,16 @@ PIDS="$REPO/logs/running_services.json"
 
 mkdir -p "$LOG"
 
+# Drop any inherited watchdog lock fd before spawning children.
+# watchdog.sh opens fd 200 on logs/watchdog.lock and flock()s it, then
+# invokes this script. Without this close, every setsid child we spawn
+# below (bots, alerter, API, UI, etc.) inherits fd 200 and the lock,
+# keeping the lock held for as long as ANY service stays alive. The next
+# watchdog cron tick then fails flock -n and exits silently, leaving the
+# cluster unsupervised. Closing fd 200 here confines the lock to the
+# watchdog.sh process only. No-op when start_services.sh is run directly.
+exec 200>&- 2>/dev/null || true
+
 # Load env
 set -a
 source "$REPO/.env"
