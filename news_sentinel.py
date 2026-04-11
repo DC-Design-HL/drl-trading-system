@@ -41,12 +41,19 @@ from src.news.sentiment import GPTScorer, score_keyword
 from src.news.classifier import classify
 from src.news.storage import NewsStorage
 
+# Absolute paths anchored to this file, so the service works regardless
+# of the caller's CWD. (cron / watchdog invoke us with CWD=$HOME, which
+# previously caused FileNotFoundError: '/home/claude/logs/news_sentinel.log'.)
+_REPO_DIR = Path(__file__).parent
+_LOG_DIR = _REPO_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [NEWS] %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("logs/news_sentinel.log", mode="a"),
+        logging.FileHandler(str(_LOG_DIR / "news_sentinel.log"), mode="a"),
     ],
 )
 logger = logging.getLogger(__name__)
@@ -58,7 +65,7 @@ DB_CLEANUP_INTERVAL  = 3600  # seconds between DB cleanup runs
 DB_CLEANUP_DAYS      = 7     # days to retain events
 
 # ── Alert output ──
-ALERTS_FILE = Path("logs/news_pending_alerts.jsonl")
+ALERTS_FILE = _LOG_DIR / "news_pending_alerts.jsonl"
 
 
 class NewsSentinel:
