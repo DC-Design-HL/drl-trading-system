@@ -185,6 +185,23 @@ RESCUE_MIN_AGREES = 2               # Minimum signal agreements for rescue (out 
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
+# ── Structure-First Mode ──
+# When True, BOS/CHOCH signals are the PRIMARY entry trigger.
+# The DRL model is NOT used for entry decisions (only for exit management).
+# Backtested over 31 days: 41.0% WR, +$7,146 vs model-first 27.2% WR, -$7,075.
+STRUCTURE_FIRST_MODE = True
+
+# Per-symbol structure config:
+# "S1" = struct only (BOS/CHOCH triggers entry, no OB filter, no model)
+# "S5" = struct + OB proximity + RSI + ADX directional confirmation
+STRUCTURE_SYMBOL_CONFIG = {
+    "BTCUSDT": "S1",   # 47.8% WR, +$3,798 in backtest
+    "ETHUSDT": "S5",   # 43.5% WR, +$1,217 with extra filters
+    "SOLUSDT": "S1",   # 37.0% WR, +$770
+    "XRPUSDT": "S1",   # 44.4% WR, +$2,336
+}
+STRUCTURE_OB_PROXIMITY_PCT = 0.010  # 1% proximity for OB check (S5 mode)
+
 # How many 15M bars to fetch (10 days = ~960 bars)
 FETCH_DAYS = 12
 
@@ -1616,8 +1633,14 @@ class HTFLiveBot:
                     logger.warning("BOS/CHOCH: no 5m data available — skipping")
                     self._last_structure_signals = {}
                 else:
-                    self._last_structure_signals = self.market_structure.get_signals(
+                    _struct_result = self.market_structure.get_signals(
                         df_5m, df_1h=df_1h, df_4h=df_4h,
+                    )
+                    # Convert to dict for .get() access throughout the codebase
+                    self._last_structure_signals = (
+                        _struct_result.to_dict()
+                        if hasattr(_struct_result, 'to_dict')
+                        else _struct_result
                     )
                     # Log BOS/CHOCH signal state every iteration at INFO level
                     sig = self._last_structure_signals
@@ -1640,6 +1663,112 @@ class HTFLiveBot:
                 logger.warning("BOS/CHOCH signal computation failed: %s", exc)
                 self._last_structure_signals = {}
         return self._last_structure_signals
+
+    def _get_structure_direction(self, current_price: float, df_15m: pd.DataFrame) -> Optional[int]:
+        """
+        Structure-first entry: derive trade direction from BOS/CHOCH signals.
+        Returns ACTION_LONG, ACTION_SHORT, or None (no entry).
+
+        Per-symbol config controls which extra filters apply:
+          S1: BOS/CHOCH only (no OB, no ADX directional check)
+          S5: BOS/CHOCH + OB proximity + RSI guard + ADX directional confirmation
+        """
+        sig = self._last_structure_signals
+        if not sig:
+            return None
+
+        bos_bull = sig.get("bos_bullish", False)
+        bos_bear = sig.get("bos_bearish", False)
+        choch_bull = sig.get("choch_bullish", False)
+        choch_bear = sig.get("choch_bearish", False)
+        fake_bos = sig.get("fake_bos", False)
+        fake_choch = sig.get("fake_choch", False)
+
+        # Determine direction from structure
+        struct_long = (bos_bull or choch_bull) and not fake_bos and not fake_choch
+        struct_short = (bos_bear or choch_bear) and not fake_bos and not fake_choch
+
+        if not struct_long and not struct_short:
+            return None
+
+        # If both signals present, skip (conflicting)
+        if struct_long and struct_short:
+            logger.debug("Structure-first: conflicting BOS signals, skipping")
+            return None
+
+        direction = ACTION_LONG if struct_long else ACTION_SHORT
+
+        # Per-symbol config
+        sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(self.symbol, "S1")
+
+        if sym_cfg == "S5":
+            # Extra filter: Order Block proximity
+            if df_15m is not None and len(df_15m) >= 40:
+                ob_window = df_15m.tail(40)
+                opn = ob_window["open"].values
+                close = ob_window["close"].values
+                high = ob_window["high"].values
+                low = ob_window["low"].values
+                n = len(close)
+                bull_obs, bear_obs = [], []
+                atr_proxy = np.mean(high - low) + 1e-10
+                for idx in range(max(0, n - 30), n - 2):
+                    body_i = close[idx] - opn[idx]
+                    body_i1 = close[idx + 1] - opn[idx + 1]
+                    move = abs(close[idx + 2] - close[idx + 1]) if (idx + 2) < n else 0.0
+                    if body_i < 0 and body_i1 > 0 and move > atr_proxy * 0.5:
+                        bull_obs.append((high[idx] + low[idx]) / 2.0)
+                    if body_i > 0 and body_i1 < 0 and move > atr_proxy * 0.5:
+                        bear_obs.append((high[idx] + low[idx]) / 2.0)
+
+                ob_levels = bull_obs if direction == ACTION_LONG else bear_obs
+                near_ob = any(
+                    abs(current_price - lvl) / (lvl + 1e-10) < STRUCTURE_OB_PROXIMITY_PCT
+                    for lvl in ob_levels
+                )
+                if not near_ob:
+                    logger.info("Structure-first S5: blocked by OB proximity (no nearby %s OB)",
+                                "bullish" if direction == ACTION_LONG else "bearish")
+                    return None
+
+            # Extra filter: ADX directional confirmation (from 15m candles)
+            if df_15m is not None and len(df_15m) >= 30:
+                try:
+                    _close = df_15m["close"].values
+                    _high = df_15m["high"].values
+                    _low = df_15m["low"].values
+                    _period = 14
+                    # Quick ADX/DI from last 30 bars
+                    _plus_dm = np.diff(_high[-30:])
+                    _minus_dm = -np.diff(_low[-30:])
+                    _plus_dm = np.where((_plus_dm > _minus_dm) & (_plus_dm > 0), _plus_dm, 0)
+                    _minus_dm = np.where((_minus_dm > _plus_dm) & (_minus_dm > 0), _minus_dm, 0)
+                    _tr = np.maximum(_high[-29:] - _low[-29:],
+                                     np.maximum(np.abs(_high[-29:] - _close[-30:-1]),
+                                                np.abs(_low[-29:] - _close[-30:-1])))
+                    _atr = np.mean(_tr[-_period:])
+                    if _atr > 0:
+                        _plus_di = 100 * np.mean(_plus_dm[-_period:]) / _atr
+                        _minus_di = 100 * np.mean(_minus_dm[-_period:]) / _atr
+                        _adx_val = 100 * abs(_plus_di - _minus_di) / (_plus_di + _minus_di + 1e-10)
+                        if _adx_val >= ADX_GUARD_MIN:
+                            if direction == ACTION_LONG and _minus_di > _plus_di:
+                                logger.info("Structure-first S5: ADX directional block (LONG but -DI > +DI, ADX=%.1f)", _adx_val)
+                                return None
+                            if direction == ACTION_SHORT and _plus_di > _minus_di:
+                                logger.info("Structure-first S5: ADX directional block (SHORT but +DI > -DI, ADX=%.1f)", _adx_val)
+                                return None
+                except Exception as exc:
+                    logger.debug("Structure-first S5 ADX check failed: %s", exc)
+
+        logger.info(
+            "Structure-first %s: %s signal from %s | bos_bull=%s bos_bear=%s choch_bull=%s choch_bear=%s",
+            sym_cfg,
+            "LONG" if direction == ACTION_LONG else "SHORT",
+            "BOS" if (bos_bull or bos_bear) else "CHOCH",
+            bos_bull, bos_bear, choch_bull, choch_bear,
+        )
+        return direction
 
     # ------------------------------------------------------------------
     # Liquidation price safety check
@@ -2049,11 +2178,13 @@ class HTFLiveBot:
             (self.position == -1 and action == ACTION_LONG)
         )
         if self.position != 0 and (now - self.last_entry_time) < MIN_HOLD_SECONDS:
-            if is_reversal and confidence >= 0.82:
+            # In structure-first mode, allow reversal if BOS/CHOCH confidence >= 0.65
+            reversal_conf_threshold = 0.65 if STRUCTURE_FIRST_MODE else 0.82
+            if is_reversal and confidence >= reversal_conf_threshold:
                 logger.info(
-                    "Min hold override: reversal %s→%s with conf=%.2f ≥ 0.82 — allowing flip",
+                    "Min hold override: reversal %s→%s with conf=%.2f ≥ %.2f — allowing flip",
                     "LONG" if self.position == 1 else "SHORT",
-                    ACTION_LABELS.get(action, "?"), confidence,
+                    ACTION_LABELS.get(action, "?"), confidence, reversal_conf_threshold,
                 )
             else:
                 remaining = MIN_HOLD_SECONDS - (now - self.last_entry_time)
@@ -2061,27 +2192,39 @@ class HTFLiveBot:
                 return None
 
         # ── Guard: confidence threshold (per-symbol or global) ──
-        min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
-        if action != ACTION_HOLD and confidence < min_conf:
-            logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
-            return None
-
-        # ── Guard: per-symbol directional confidence floor ──
-        if action != ACTION_HOLD:
-            direction_str = "LONG" if action == ACTION_LONG else "SHORT"
-            dir_floor = SYMBOL_DIRECTIONAL_CONF.get(self.symbol, {}).get(direction_str)
-            if dir_floor is not None and confidence < dir_floor:
-                logger.info("🚫 Directional floor: %s %s conf=%.2f < %.2f — HOLD", self.symbol, direction_str, confidence, dir_floor)
+        # SKIP in structure-first mode — BOS confidence != model confidence
+        if not STRUCTURE_FIRST_MODE:
+            min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
+            if action != ACTION_HOLD and confidence < min_conf:
+                logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
                 return None
 
+        # ── Guard: per-symbol directional confidence floor ──
+        # SKIP in structure-first mode — these are model-confidence calibrated
+        if not STRUCTURE_FIRST_MODE:
+            if action != ACTION_HOLD:
+                direction_str = "LONG" if action == ACTION_LONG else "SHORT"
+                dir_floor = SYMBOL_DIRECTIONAL_CONF.get(self.symbol, {}).get(direction_str)
+                if dir_floor is not None and confidence < dir_floor:
+                    logger.info("🚫 Directional floor: %s %s conf=%.2f < %.2f — HOLD", self.symbol, direction_str, confidence, dir_floor)
+                    return None
+
         # ── Guard: ranging regime filter ──
-        # In ranging markets (low ADX), require higher confidence to enter
+        # In structure-first mode, use ADX as hard block (no confidence comparison)
         if action != ACTION_HOLD and self.position == 0 and self.regime_detector is not None and self._last_df is not None:
             try:
                 regime_info = self.regime_detector.detect_regime(self._last_df)
                 regime_name = regime_info.regime.value
                 adx_val = getattr(regime_info, 'trend_strength', None) or 0.0
-                if adx_val < RANGING_ADX_THRESHOLD and confidence < RANGING_MIN_CONFIDENCE:
+                if STRUCTURE_FIRST_MODE:
+                    # In structure-first mode, just block on very low ADX
+                    if adx_val < ADX_GUARD_MIN:
+                        logger.info(
+                            "🚫 Structure-first ADX block: ADX=%.1f < %.1f — SKIP entry",
+                            adx_val, ADX_GUARD_MIN,
+                        )
+                        return None
+                elif adx_val < RANGING_ADX_THRESHOLD and confidence < RANGING_MIN_CONFIDENCE:
                     logger.info(
                         "🚫 Ranging regime filter: ADX=%.1f < %.1f, conf=%.2f < %.2f — SKIP entry",
                         adx_val, RANGING_ADX_THRESHOLD, confidence, RANGING_MIN_CONFIDENCE,
@@ -2141,17 +2284,18 @@ class HTFLiveBot:
 
         # ── Guard: Market Signal Gate ──
         # Low-confidence entries need confirmation from real market signals
-        # Applies to new entries AND reversals (close existing + open opposite)
-        if action != ACTION_HOLD and (self.position == 0 or
-            (self.position == 1 and action == ACTION_SHORT) or
-            (self.position == -1 and action == ACTION_LONG)):
-            if not self._check_signal_gate(action, confidence):
-                # For reversals: close the existing position flat (don't open opposite)
-                # This avoids double-loss from closing + immediately entering wrong direction
-                if is_reversal and self.position != 0:
-                    logger.info("Reversal gate BLOCKED — closing existing position flat, not flipping")
-                    return self._close_position(current_price, "REVERSAL_BLOCKED_CLOSE", confidence)
-                return None
+        # SKIP in structure-first mode — structure IS the primary signal, no confidence tiers
+        if not STRUCTURE_FIRST_MODE:
+            if action != ACTION_HOLD and (self.position == 0 or
+                (self.position == 1 and action == ACTION_SHORT) or
+                (self.position == -1 and action == ACTION_LONG)):
+                if not self._check_signal_gate(action, confidence):
+                    # For reversals: close the existing position flat (don't open opposite)
+                    # This avoids double-loss from closing + immediately entering wrong direction
+                    if is_reversal and self.position != 0:
+                        logger.info("Reversal gate BLOCKED — closing existing position flat, not flipping")
+                        return self._close_position(current_price, "REVERSAL_BLOCKED_CLOSE", confidence)
+                    return None
 
         trade: Optional[Dict] = None
 
@@ -2842,23 +2986,36 @@ class HTFLiveBot:
                             status["realized_pnl"] = self.realized_pnl
                             return status
 
-            # 3. Compute observation
-            obs = self.compute_observation(df_15m)
-            if obs is None:
-                status["error"] = "Observation failed"
-                return status
+            # 3. Determine action — structure-first or model-first
+            if STRUCTURE_FIRST_MODE:
+                # Structure-first: BOS/CHOCH signals drive entry direction
+                struct_action = self._get_structure_direction(current_price, df_15m)
+                if struct_action is None:
+                    action = ACTION_HOLD
+                    confidence = 0.0
+                else:
+                    action = struct_action
+                    # Use BOS/CHOCH confidence from the structure signal
+                    sig = self._last_structure_signals or {}
+                    confidence = sig.get("confidence", 0.5)
+            else:
+                # Model-first (legacy): PPO model drives entry direction
+                obs = self.compute_observation(df_15m)
+                if obs is None:
+                    status["error"] = "Observation failed"
+                    return status
+                action, confidence = self.get_action(obs)
 
-            # 4. Get action from model
-            action, confidence = self.get_action(obs)
             status["action"] = ACTION_LABELS[action]
             status["confidence"] = confidence
 
             logger.info(
-                "Step: price=$%.2f action=%s conf=%.2f pos=%d bal=$%.2f",
+                "Step: price=$%.2f action=%s conf=%.2f pos=%d bal=$%.2f mode=%s",
                 current_price, ACTION_LABELS[action], confidence, self.position, self.balance,
+                "STRUCT" if STRUCTURE_FIRST_MODE else "MODEL",
             )
 
-            # 5. Execute trade
+            # 4. Execute trade (guards still apply: RSI, ADX, orderbook, exhaustion)
             trade = self.execute_trade(action, confidence, current_price)
             if trade:
                 status["action"] = trade.get("action", ACTION_LABELS[action])
