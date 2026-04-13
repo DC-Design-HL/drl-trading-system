@@ -303,8 +303,11 @@ class WhaleWebSocketCollector:
     def run(self):
         """Main loop with auto-reconnect."""
         if not ALCHEMY_API_KEY:
-            logger.error("ALCHEMY_API_KEY not set")
-            sys.exit(1)
+            logger.warning("ALCHEMY_API_KEY not set — sleeping until configured. "
+                           "Add ALCHEMY_API_KEY to .env and restart services.")
+            while not os.environ.get("ALCHEMY_API_KEY"):
+                time.sleep(300)  # Check every 5 minutes
+            return
 
         logger.info("🐋 Whale Behavior WebSocket Collector starting")
         logger.info("   Tracking %d wallets", len(self.wallet_addresses))
