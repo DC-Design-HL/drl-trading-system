@@ -82,9 +82,9 @@ CONSOLIDATED_BOTS="${CONSOLIDATED_BOTS:-0}"
 #     pointing at an isolated state dir). Killing them on every watchdog
 #     restart would defeat the 24h dry-run validation.
 if [ "$CONSOLIDATED_BOTS" = "1" ]; then
-    KILL_NAMES="live_trading_all live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter"
+    KILL_NAMES="live_trading_all live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter whale_behavior_ws"
 else
-    KILL_NAMES="live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter"
+    KILL_NAMES="live_trading_htf trade_alerter start_local_server streamlit news_sentinel news_alerter whale_behavior_ws"
 fi
 for name in $KILL_NAMES; do
     pids=$(pgrep -f "$name" 2>/dev/null) && echo "[start_services] Stopping $name (PIDs: $pids)" && kill $pids 2>/dev/null || true
@@ -139,6 +139,12 @@ setsid python3 "$REPO/news_alerter.py" > "$LOG/news_alerter.log" 2>&1 &
 NEWS_ALERTER_PID=$!
 echo "[start_services]   News Alerter PID: $NEWS_ALERTER_PID"
 
+# --- Whale Behavior WebSocket ---
+echo "[start_services] Starting whale behavior tracker..."
+setsid python3 "$REPO/whale_behavior_ws.py" > "$LOG/whale_ws.log" 2>&1 &
+WHALE_PID=$!
+echo "[start_services]   Whale WS PID: $WHALE_PID"
+
 # --- Streamlit Dashboard ---
 echo "[start_services] Starting Streamlit dashboard..."
 setsid python3 -m streamlit run "$REPO/src/ui/app.py" \
@@ -164,7 +170,8 @@ cat > "$PIDS" << JSON
   "api":          {"pid": $API_PID,          "log": "logs/api_server.log"},
   "ui":           {"pid": $UI_PID,           "log": "logs/dashboard.log"},
   "news_sentinel":{"pid": $NEWS_SENTINEL_PID,"log": "logs/news_sentinel.log"},
-  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"}
+  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"},
+  "whale_ws":     {"pid": $WHALE_PID,        "log": "logs/whale_ws.log"}
 }
 JSON
 else
@@ -178,7 +185,8 @@ cat > "$PIDS" << JSON
   "api":          {"pid": $API_PID,          "log": "logs/api_server.log"},
   "ui":           {"pid": $UI_PID,           "log": "logs/dashboard.log"},
   "news_sentinel":{"pid": $NEWS_SENTINEL_PID,"log": "logs/news_sentinel.log"},
-  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"}
+  "news_alerter": {"pid": $NEWS_ALERTER_PID, "log": "logs/news_alerter.log"},
+  "whale_ws":     {"pid": $WHALE_PID,        "log": "logs/whale_ws.log"}
 }
 JSON
 fi
