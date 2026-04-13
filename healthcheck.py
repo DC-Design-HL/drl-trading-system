@@ -80,6 +80,47 @@ def check_log_recency() -> dict:
     return recency
 
 
+def check_trade_staleness() -> dict:
+    """Check if any symbol has gone too long without opening a trade."""
+    STALE_HOURS = 24
+    stale = {}
+    bot_log = REPO / "logs" / "bots_live.log"
+    if not bot_log.exists():
+        return stale
+
+    # Scan log for last OPEN_LONG / OPEN_SHORT per symbol
+    symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+    last_trade_ts = {s: None for s in symbols}
+
+    try:
+        with open(bot_log) as f:
+            for line in f:
+                if "OPEN_LONG" in line or "OPEN_SHORT" in line:
+                    # Extract timestamp from log line: "2026-04-13 10:07:36,576 ..."
+                    ts_str = line[:23].replace(",", ".")
+                    for sym in symbols:
+                        if sym in line:
+                            try:
+                                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S.%f")
+                                ts = ts.replace(tzinfo=timezone.utc)
+                                last_trade_ts[sym] = ts
+                            except ValueError:
+                                pass
+
+        now = datetime.now(timezone.utc)
+        for sym, ts in last_trade_ts.items():
+            if ts is None:
+                stale[sym] = "no trades found in log"
+            else:
+                hours_ago = (now - ts).total_seconds() / 3600
+                if hours_ago > STALE_HOURS:
+                    stale[sym] = f"last trade {hours_ago:.0f}h ago"
+    except Exception as e:
+        stale["_error"] = str(e)
+
+    return stale
+
+
 def main():
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
@@ -97,8 +138,12 @@ def main():
     # 3. Log recency
     recency = check_log_recency()
 
+    # 4. Trade staleness
+    stale_trades = check_trade_staleness()
+
     # Build message
-    status_icon = "\u2705" if all_alive else "\u26a0\ufe0f"
+    has_stale = bool(stale_trades and any(k != "_error" for k in stale_trades))
+    status_icon = "\u2705" if (all_alive and not has_stale) else "\u26a0\ufe0f"
     lines = [
         f"{status_icon} <b>Hourly Health Check</b> — {now}",
         f"Services: {alive_count}/{total_count} alive",
@@ -136,6 +181,14 @@ def main():
         lines.append("")
         for log_name, age in recency.items():
             lines.append(f"Last log: {age}")
+
+    # Trade staleness alert
+    if stale_trades:
+        lines.append("")
+        lines.append("\u26a0\ufe0f <b>STALE TRADES (no entry in 24h+):</b>")
+        for sym, reason in stale_trades.items():
+            if sym != "_error":
+                lines.append(f"  \u274c {sym}: {reason}")
 
     lines.append("\nMode: STRUCTURE-FIRST (BOS/CHOCH)")
 
