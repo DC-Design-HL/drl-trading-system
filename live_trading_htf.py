@@ -1681,22 +1681,20 @@ class HTFLiveBot:
         bos_bear = sig.get("bos_bearish", False)
         choch_bull = sig.get("choch_bullish", False)
         choch_bear = sig.get("choch_bearish", False)
-        fake_bos = sig.get("fake_bos", False)
-        fake_choch = sig.get("fake_choch", False)
+        trend = sig.get("trend", "ranging")
 
-        # Determine direction from structure
-        struct_long = (bos_bull or choch_bull) and not fake_bos and not fake_choch
-        struct_short = (bos_bear or choch_bear) and not fake_bos and not fake_choch
-
-        if not struct_long and not struct_short:
+        # Use the overall trend direction as the PRIMARY signal.
+        # The aggregate booleans (bos_bull, bos_bear etc.) cover the entire lookback
+        # window so both sides are often True simultaneously — not useful for direction.
+        # The trend field reflects the CURRENT structure (HH/HL = bullish, LH/LL = bearish).
+        # Require at least one real BOS/CHOCH signal to confirm the trend is active.
+        if trend == "bullish" and (bos_bull or choch_bull):
+            direction = ACTION_LONG
+        elif trend == "bearish" and (bos_bear or choch_bear):
+            direction = ACTION_SHORT
+        else:
+            # Ranging or no confirming signal — skip
             return None
-
-        # If both signals present, skip (conflicting)
-        if struct_long and struct_short:
-            logger.debug("Structure-first: conflicting BOS signals, skipping")
-            return None
-
-        direction = ACTION_LONG if struct_long else ACTION_SHORT
 
         # Per-symbol config
         sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(self.symbol, "S1")
