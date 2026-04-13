@@ -36,7 +36,7 @@ KLINE_COLUMNS = [
     "close_time", "quote_volume", "trades",
     "taker_buy_base", "taker_buy_quote", "ignore",
 ]
-OUTPUT_COLUMNS = ["timestamp", "open", "high", "low", "close", "volume"]
+OUTPUT_COLUMNS = ["open_time", "open", "high", "low", "close", "volume"]
 
 DEFAULT_ASSETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
@@ -108,8 +108,8 @@ def fetch_full_history(
         return pd.DataFrame()
 
     df = pd.DataFrame(all_klines, columns=KLINE_COLUMNS)
-    df["timestamp"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
-    df = df.sort_values("timestamp").drop_duplicates(subset=["timestamp"])
+    df["open_time"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    df = df.sort_values("open_time").drop_duplicates(subset=["open_time"])
 
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = df[col].astype(float)
@@ -128,18 +128,18 @@ def validate_data(df: pd.DataFrame, symbol: str, interval: str) -> dict:
         return {"ok": False, "issues": ["Empty dataframe"], "stats": {}}
 
     # Expected candle gap in minutes
-    interval_minutes = {"1h": 60, "4h": 240, "1d": 1440}.get(interval, 60)
+    interval_minutes = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}.get(interval, 60)
     expected_gap = pd.Timedelta(minutes=interval_minutes)
 
     # Timestamp diffs
-    diffs = df["timestamp"].diff().dropna()
+    diffs = df["open_time"].diff().dropna()
     gap_threshold = expected_gap * 1.5  # Allow up to 1.5x before flagging
     large_gaps = diffs[diffs > gap_threshold]
     if len(large_gaps) > 0:
         issues.append(f"{len(large_gaps)} gaps > {gap_threshold} (largest: {large_gaps.max()})")
 
     # Expected rows
-    total_hours = (df["timestamp"].iloc[-1] - df["timestamp"].iloc[0]).total_seconds() / 3600
+    total_hours = (df["open_time"].iloc[-1] - df["open_time"].iloc[0]).total_seconds() / 3600
     expected_rows = int(total_hours / interval_minutes * 60)
     actual_rows = len(df)
     completeness = actual_rows / max(expected_rows, 1) * 100
@@ -164,8 +164,8 @@ def validate_data(df: pd.DataFrame, symbol: str, interval: str) -> dict:
 
     stats = {
         "rows": actual_rows,
-        "start": str(df["timestamp"].iloc[0].date()),
-        "end": str(df["timestamp"].iloc[-1].date()),
+        "start": str(df["open_time"].iloc[0].date()),
+        "end": str(df["open_time"].iloc[-1].date()),
         "completeness_pct": round(completeness, 1),
         "gap_count": len(large_gaps),
         "price_range": f"${df['close'].min():,.0f} – ${df['close'].max():,.0f}",
@@ -186,7 +186,7 @@ def download_asset(
     csv_path = output_dir / f"{symbol}_{interval}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}.csv"
 
     if csv_path.exists():
-        existing = pd.read_csv(csv_path, parse_dates=["timestamp"])
+        existing = pd.read_csv(csv_path, parse_dates=["open_time"])
         logger.info(f"  Cache hit: {csv_path.name} ({len(existing):,} rows). Skipping download.")
         return csv_path
 
@@ -214,8 +214,8 @@ def main():
     parser.add_argument("--years", type=int, default=3, help="Years of history to download (default: 3)")
     parser.add_argument("--assets", nargs="+", default=DEFAULT_ASSETS,
                         help="Asset symbols to download")
-    parser.add_argument("--interval", type=str, default="1h",
-                        help="Candle interval (default: 1h)")
+    parser.add_argument("--interval", type=str, default="15m",
+                        help="Candle interval (default: 15m)")
     parser.add_argument("--output-dir", type=str, default="data/historical",
                         help="Output directory for CSV files")
     args = parser.parse_args()
@@ -251,7 +251,7 @@ def main():
         if results.get(symbol, {}).get("status") != "ok":
             continue
         path = results[symbol]["path"]
-        df = pd.read_csv(path, parse_dates=["timestamp"])
+        df = pd.read_csv(path, parse_dates=["open_time"])
         result = validate_data(df, symbol, args.interval)
         status_str = "PASS" if result["ok"] else "WARN"
         logger.info(f"  {symbol}: {status_str} | {result['stats']}")

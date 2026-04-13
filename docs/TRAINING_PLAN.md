@@ -1,9 +1,27 @@
-# DRL Trading System — Comprehensive Retraining Plan v3
+# DRL Trading System — Comprehensive Retraining Plan v4 (FINAL)
 
-**Date:** 2026-04-12
+**Date:** 2026-04-12 (updated after expert review)
 **Target:** 50%+ win rate per symbol (BTC, ETH, SOL, XRP)
 **Training hardware:** Mac M3 Pro (NEVER on the server)
-**Current live env:** HTFTradingEnv, 117-dim observation, PPO, 15m candles, Binance Futures testnet
+**New paradigm:** Structure-Gated Filter (model ACCEPTS/REJECTS BOS/CHOCH signals, does NOT make entry decisions)
+
+> **v3 → v4 changes:** Incorporates critical findings from DRL research review
+> (see `docs/TRAINING_PLAN_REVIEW.md`). Key changes:
+> 1. Model role changed from entry decision → signal filter (binary ACCEPT/REJECT)
+> 2. Reward changed from rolling win-rate bonus → Differential Sharpe Ratio
+> 3. Features reduced from 140 → ~51 (information-dense, no redundancy)
+> 4. Val/test overlap FIXED with strict 3-way split + 48h embargo
+> 5. Added curriculum learning, early stopping, action masking, LR schedule
+>
+> **How to train (one command per symbol):**
+> ```bash
+> pip install -r requirements-training.txt  # first time only
+> python download_historical_data.py --assets BTCUSDT ETHUSDT SOLUSDT XRPUSDT
+> python train_model.py --symbol BTCUSDT
+> python train_model.py --symbol ETHUSDT
+> python train_model.py --symbol SOLUSDT
+> python train_model.py --symbol XRPUSDT
+> ```
 
 ---
 
@@ -23,15 +41,20 @@ The current models deliver 34-40% win rates because of five compounding failures
 
 5. **No per-symbol specialization.** All 4 models train with identical hyperparameters despite BTC (low vol, mean-reverting micro), SOL (high vol, momentum-driven), and XRP (news-driven, sparse liquidity) having fundamentally different dynamics.
 
-### What will change
+### What will change (v4 — post-review)
 
-- New **win-rate-aware reward function** that directly incentivizes profitable trade selection
-- **Expanded 140-dim observation** adding BOS/CHOCH, funding rate, open interest delta, liquidation heatmap, and stablecoin flow signals
-- **Environment v2** matching live: ATR-based SL/TP, partial TP, trailing stops, realistic slippage model, funding rate deductions
-- **Per-symbol hyperparameter tuning** with different network sizes and entropy coefficients
-- **RecurrentPPO (LSTM)** as primary algorithm (temporal memory crucial for regime shifts)
-- **Walk-forward with 6-month train / 2-month val / 2-month test** windows and strict anti-overfitting gates
-- **Ensemble of top-3 folds** per symbol for deployment
+- **Model role REDEFINED:** BOS/CHOCH signals generate candidate entries → model only decides ACCEPT/REJECT (binary action space). This leverages the proven structure-first edge (41% WR, +$7,146) while letting the model learn WHICH signals are high quality
+- **Differential Sharpe Ratio reward** (Moody & Saffell 2001) — single-step, Markovian reward that optimizes risk-adjusted returns. No rolling windows, no non-stationarity
+- **Reduced 51-dim observation** — high-information features only: price (13), structure (8), multi-TF (12), cross-asset (4), vol regime (4), temporal (5), order block (2), position (3). Eliminates redundant compact features and low-signal categoricals
+- **Environment: StructureFilterEnv** — pre-computes BOS/CHOCH for all bars, presents signals to model with action masking, SL/TP matching live (1.5%/3%)
+- **Strict walk-forward with 48h embargo** — no val/train overlap, no autocorrelation leakage
+- **Curriculum learning** — Stage 1: trending only (ADX>30, 100K steps) → Stage 2: add ranging (ADX>15, 200K) → Stage 3: all data (200K)
+- **Per-symbol hyperparameter tuning** with smaller networks (~8-14K params vs old ~500K)
+- **RecurrentPPO (LSTM)** from sb3-contrib, linear LR schedule, max_grad_norm=0.3
+- **Multi-seed training** — 3 seeds per fold, best selected on val Sharpe
+- **Early stopping** — eval every 50K steps, stop after 3 consecutive val Sharpe drops
+- **S1 baseline comparison** — model must BEAT structure-only performance to deploy
+- **Ensemble of top-3 folds** per symbol with disagreement-based abstention
 
 ---
 
