@@ -98,10 +98,16 @@ TRADING_FEE = 0.0004   # 0.04% taker fee
 TRAILING_BREAKEVEN_PCT = 0.008   # At +0.8% profit, activate trailing stop (was 0.5% — too tight)
 TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit (legacy, kept for BOS overlay)
 TRAILING_DISTANCE_PCT = 0.005    # Trail 0.5% behind peak (was 0.3% — was cutting winners too early)
+TRAILING_DISTANCE_POST_TP1 = 0.008  # Trail 0.8% behind peak after TP1 hit — backtested +$181 (Apr 6-14)
 
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
 MIN_HOLD_SECONDS = 3600   # 1 hour minimum hold (HTF signal is slower)
+
+# Anti-whipsaw: block quick losing reversals (Strategy E from backtest_whipsaw.py)
+# If previous trade was opposite direction, closed <2h ago, AND lost money → skip.
+# Backtested +$75.92 improvement; reverse-close pattern is 1W/12L.
+WHIPSAW_COOLDOWN_HOURS = 2.0
 
 # Actions from PPO (must match HTFTradingEnv)
 ACTION_HOLD = 0
@@ -211,7 +217,32 @@ FETCH_DAYS = 12
 # ---------------------------------------------------------------------------
 
 def _find_best_fold_model(wf_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
-    """Find the best model (highest OOS Sharpe) in a walk-forward directory."""
+    """Find the best model (highest OOS Sharpe) in a walk-forward directory.
+
+    Checks two formats:
+      1. v3 ensemble: top3_models.json + final_model_X.zip (preferred)
+      2. Legacy: fold_XX/best_model.zip + fold_XX/fold_result.json
+    """
+    # --- v3 ensemble format (from train_model.py) ---
+    top3_file = wf_dir / "top3_models.json"
+    if top3_file.exists():
+        try:
+            top3 = json.loads(top3_file.read_text())
+            best = top3["top_folds"][0]  # rank 0 = best
+            rank = best["rank"]
+            model_zip = wf_dir / f"final_model_{rank}.zip"
+            vecnorm = wf_dir / f"final_vecnorm_{rank}.pkl"
+            if model_zip.exists():
+                sharpe = best.get("val_sharpe", 0)
+                logger.info(
+                    "HTF model: v3 ensemble rank 0 (val Sharpe %.2f) → %s",
+                    sharpe, model_zip,
+                )
+                return model_zip, vecnorm if vecnorm.exists() else None
+        except Exception:
+            pass
+
+    # --- Legacy fold format ---
     best_sharpe = -999.0
     best_model_path: Optional[Path] = None
     best_vecnorm_path: Optional[Path] = None
@@ -354,6 +385,11 @@ class HTFLiveBot:
         # Anti-overtrading
         self.last_loss_time = 0.0
         self.last_entry_time = 0.0
+
+        # Anti-whipsaw: track last closed trade for Strategy E filter
+        self.last_close_direction = 0    # 1=was LONG, -1=was SHORT
+        self.last_close_pnl = 0.0        # PnL of last closed trade
+        self.last_close_time = 0.0       # epoch time of last close
 
         # Bookkeeping
         self.trades: List[Dict] = []
@@ -510,6 +546,9 @@ class HTFLiveBot:
             "partial_tp1_price": self.partial_tp1_price,
             "partial_tp2_price": self.partial_tp2_price,
             "position_entry_time": self.position_entry_time,
+            "last_close_direction": self.last_close_direction,
+            "last_close_pnl": self.last_close_pnl,
+            "last_close_time": self.last_close_time,
             "updated_at": datetime.now().isoformat(),
         }
         # Save to local HTF state file
@@ -576,6 +615,9 @@ class HTFLiveBot:
             self.partial_tp1_price = float(state.get("partial_tp1_price", 0.0))
             self.partial_tp2_price = float(state.get("partial_tp2_price", 0.0))
             self.position_entry_time = float(state.get("position_entry_time", 0.0))
+            self.last_close_direction = int(state.get("last_close_direction", 0))
+            self.last_close_pnl = float(state.get("last_close_pnl", 0.0))
+            self.last_close_time = float(state.get("last_close_time", 0.0))
             logger.info(
                 "State restored: pos=%d price=%.2f balance=%.2f",
                 self.position, self.position_price, self.balance,
@@ -1951,20 +1993,18 @@ class HTFLiveBot:
         adjustment_reason = ""
 
         if profit_pct >= TRAILING_BREAKEVEN_PCT:
-            # Continuous trailing stop: trail TRAILING_DISTANCE_PCT behind peak price
-            # At +0.5% profit → trailing activates, SL = peak - 0.3% (locks ~0.2%)
-            # At +1.0% profit → SL = peak - 0.3% (locks ~0.7%)
-            # At +1.5% profit → SL = peak - 0.3% (locks ~1.2%)
-            # Tighter trailing captures more of the typical 1-1.5% MFE moves
+            # After TP1, widen trailing distance to let winners run longer.
+            # Backtested Apr 6-14: 0.5%→0.8% post-TP1 added +$181 across 120 trades.
+            trail_dist = TRAILING_DISTANCE_POST_TP1 if self.partial_tp_level >= 1 else TRAILING_DISTANCE_PCT
             if self.position == 1:
-                trailing_sl = self.peak_price * (1.0 - TRAILING_DISTANCE_PCT)
+                trailing_sl = self.peak_price * (1.0 - trail_dist)
                 # Never let trailing SL go below entry (minimum breakeven)
                 trailing_sl = max(trailing_sl, entry)
                 if trailing_sl > new_sl:
                     new_sl = trailing_sl
                     adjustment_reason = "trailing_continuous"
             else:
-                trailing_sl = self.peak_price * (1.0 + TRAILING_DISTANCE_PCT)
+                trailing_sl = self.peak_price * (1.0 + trail_dist)
                 # Never let trailing SL go above entry (minimum breakeven)
                 trailing_sl = min(trailing_sl, entry)
                 if new_sl <= 0 or trailing_sl < new_sl:
@@ -2167,6 +2207,25 @@ class HTFLiveBot:
             remaining = COOLDOWN_SECONDS - (now - self.last_loss_time)
             logger.info("Cooldown active: %.0fs remaining — HOLD", remaining)
             return None
+
+        # ── Guard: anti-whipsaw (block quick losing reversals) ──
+        # If the last trade was in the opposite direction, lost money, and closed
+        # less than WHIPSAW_COOLDOWN_HOURS ago, skip this entry.
+        if action != ACTION_HOLD and self.position == 0 and self.last_close_direction != 0:
+            is_opposite = (
+                (self.last_close_direction == 1 and action == ACTION_SHORT) or
+                (self.last_close_direction == -1 and action == ACTION_LONG)
+            )
+            hours_since_close = (now - self.last_close_time) / 3600.0
+            if is_opposite and self.last_close_pnl < 0 and hours_since_close < WHIPSAW_COOLDOWN_HOURS:
+                logger.info(
+                    "🚫 Anti-whipsaw: last %s lost $%.2f, closed %.1fh ago — blocking %s reversal",
+                    "LONG" if self.last_close_direction == 1 else "SHORT",
+                    self.last_close_pnl,
+                    hours_since_close,
+                    ACTION_LABELS.get(action, "?"),
+                )
+                return None
 
         # ── Guard: minimum hold time ──
         # Exception: if the model wants to REVERSE direction (e.g. SHORT→LONG)
@@ -2500,6 +2559,11 @@ class HTFLiveBot:
         # Track loss time for cooldown
         if net_pnl < 0:
             self.last_loss_time = time.time()
+
+        # Track last close for anti-whipsaw filter
+        self.last_close_direction = self.position  # 1=LONG, -1=SHORT
+        self.last_close_pnl = net_pnl
+        self.last_close_time = time.time()
 
         trade = {
             "action": action_str,
