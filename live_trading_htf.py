@@ -2209,23 +2209,37 @@ class HTFLiveBot:
             return None
 
         # ── Guard: anti-whipsaw (block quick losing reversals) ──
-        # If the last trade was in the opposite direction, lost money, and closed
-        # less than WHIPSAW_COOLDOWN_HOURS ago, skip this entry.
-        if action != ACTION_HOLD and self.position == 0 and self.last_close_direction != 0:
-            is_opposite = (
+        # Case 1: Flat and last trade was opposite direction, lost, closed <2h ago.
+        # Case 2: In position and model wants to REVERSE — check if current position
+        #         was itself a reversal from a recent loss (whipsaw chain).
+        if action != ACTION_HOLD and self.last_close_direction != 0:
+            # Determine if this action would be opposite to the last closed direction
+            would_reverse_last_close = (
                 (self.last_close_direction == 1 and action == ACTION_SHORT) or
                 (self.last_close_direction == -1 and action == ACTION_LONG)
             )
-            hours_since_close = (now - self.last_close_time) / 3600.0
-            if is_opposite and self.last_close_pnl < 0 and hours_since_close < WHIPSAW_COOLDOWN_HOURS:
-                logger.info(
-                    "🚫 Anti-whipsaw: last %s lost $%.2f, closed %.1fh ago — blocking %s reversal",
-                    "LONG" if self.last_close_direction == 1 else "SHORT",
-                    self.last_close_pnl,
-                    hours_since_close,
-                    ACTION_LABELS.get(action, "?"),
-                )
-                return None
+            # Also catch same-iteration reversals: bot is LONG and model says SHORT
+            # (the close hasn't happened yet, but we know the new entry would be
+            # opposite to the CURRENT position which is the last close's direction)
+            is_live_reversal = (
+                (self.position == 1 and action == ACTION_SHORT) or
+                (self.position == -1 and action == ACTION_LONG)
+            )
+            check_whipsaw = (
+                (self.position == 0 and would_reverse_last_close) or
+                (is_live_reversal and self.last_close_pnl < 0)
+            )
+            if check_whipsaw:
+                hours_since_close = (now - self.last_close_time) / 3600.0 if self.last_close_time > 0 else 999
+                if self.last_close_pnl < 0 and hours_since_close < WHIPSAW_COOLDOWN_HOURS:
+                    logger.info(
+                        "🚫 Anti-whipsaw: last %s lost $%.2f, closed %.1fh ago — blocking %s reversal",
+                        "LONG" if self.last_close_direction == 1 else "SHORT",
+                        self.last_close_pnl,
+                        hours_since_close,
+                        ACTION_LABELS.get(action, "?"),
+                    )
+                    return None
 
         # ── Guard: minimum hold time ──
         # Exception: if the model wants to REVERSE direction (e.g. SHORT→LONG)
