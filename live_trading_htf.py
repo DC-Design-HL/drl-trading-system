@@ -1855,11 +1855,10 @@ class HTFLiveBot:
                     logger.debug("Structure-first S5 ADX check failed: %s", exc)
 
         logger.info(
-            "Structure-first %s: %s signal from %s | bos_bull=%s bos_bear=%s choch_bull=%s choch_bear=%s",
+            "Structure-first %s: %s | trend=%s last_signal=%s",
             sym_cfg,
             "LONG" if direction == ACTION_LONG else "SHORT",
-            "BOS" if (bos_bull or bos_bear) else "CHOCH",
-            bos_bull, bos_bear, choch_bull, choch_bear,
+            trend, last_dir,
         )
         return direction
 
