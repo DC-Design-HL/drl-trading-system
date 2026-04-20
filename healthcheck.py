@@ -69,6 +69,19 @@ def check_api_state() -> dict:
         return {}
 
 
+def get_real_balance() -> float:
+    """Fetch real wallet balance from Binance Futures testnet.
+    Returns total_margin_balance (wallet + unrealized PnL), or 0 on failure."""
+    try:
+        from src.api.futures_executor import FuturesTestnetExecutor
+        executor = FuturesTestnetExecutor()
+        portfolio = executor.get_portfolio()
+        return float(portfolio.get("total_margin_balance", 0))
+    except Exception as e:
+        print(f"[healthcheck] Real balance fetch failed: {e}")
+        return 0.0
+
+
 def check_log_recency() -> dict:
     """Check how recent each bot's last log entry is."""
     recency = {}
@@ -133,7 +146,11 @@ def main():
     # 2. API state
     state = check_api_state()
     assets = state.get("assets", {})
-    balance = state.get("total_balance", 0)
+    # Fetch real balance from Binance (CLAUDE.md rule #4: all data from exchange)
+    balance = get_real_balance()
+    if balance <= 0:
+        # Fallback to API state only if exchange fetch failed
+        balance = state.get("total_balance", 0)
 
     # 3. Log recency
     recency = check_log_recency()
@@ -154,7 +171,10 @@ def main():
     if dead:
         lines.append(f"\u274c DEAD: {', '.join(dead)}")
 
-    lines.append(f"Balance: ${balance:,.2f}")
+    initial_balance = 5000.0
+    lifetime_pnl = balance - initial_balance
+    pnl_pct = (lifetime_pnl / initial_balance) * 100 if initial_balance else 0
+    lines.append(f"Balance: ${balance:,.2f} (lifetime: {'+'if lifetime_pnl >= 0 else ''}${lifetime_pnl:,.2f} / {'+'if pnl_pct >= 0 else ''}{pnl_pct:.2f}%)")
     lines.append("")
 
     # Positions

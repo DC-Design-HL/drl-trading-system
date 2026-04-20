@@ -70,6 +70,11 @@ class StructureSignal:
     origin_index: int = -1       # bar index of the swing point (Candle A)
     origin_price: float = 0.0    # wick price of Candle A (swing high or low)
     break_body_price: float = 0.0  # body price of Candle B (open or close that broke)
+    # ── Enhanced quality fields (P1/P2 improvements) ──
+    has_displacement: bool = False   # FVG formed at break (3-candle imbalance)
+    break_distance_atr: float = 0.0  # how far beyond swing in ATR multiples
+    is_confirmed: bool = False       # CHOCH: follow-up BOS in same direction?
+    quality: str = "normal"          # "strong" | "normal" | "weak" | "fake"
 
 
 @dataclass
@@ -87,19 +92,27 @@ class MarketStructureResult:
     confidence: float = 0.5
     signals: List[StructureSignal] = field(default_factory=list)
     swing_points: List[SwingPoint] = field(default_factory=list)
+    # ── Enhanced fields (P1/P2 improvements) ──
+    strict_trend: str = "ranging"        # requires BOTH HH+HL or LH+LL
+    is_chop: bool = False                # swing range < 2x ATR
+    last_signal_direction: str = "none"  # most-recent-signal-wins
 
     def to_dict(self) -> Dict:
         return {
-            "bos_bullish": self.bos_bullish,
-            "bos_bearish": self.bos_bearish,
-            "choch_bullish": self.choch_bullish,
-            "choch_bearish": self.choch_bearish,
-            "fake_bos": self.fake_bos,
-            "fake_choch": self.fake_choch,
-            "last_swing_high": self.last_swing_high,
-            "last_swing_low": self.last_swing_low,
-            "trend": self.trend,
-            "confidence": self.confidence,
+            "bos_bullish": bool(self.bos_bullish),
+            "bos_bearish": bool(self.bos_bearish),
+            "choch_bullish": bool(self.choch_bullish),
+            "choch_bearish": bool(self.choch_bearish),
+            "fake_bos": bool(self.fake_bos),
+            "fake_choch": bool(self.fake_choch),
+            "last_swing_high": float(self.last_swing_high),
+            "last_swing_low": float(self.last_swing_low),
+            "trend": str(self.trend),
+            "confidence": float(self.confidence),
+            # Enhanced fields — visible in API/UI but NOT used by decision logic
+            "strict_trend": str(self.strict_trend),
+            "is_chop": bool(self.is_chop),
+            "last_signal_direction": str(self.last_signal_direction),
         }
 
 
@@ -526,6 +539,122 @@ class MarketStructure:
         return False
 
     # ------------------------------------------------------------------
+    # Enhanced quality checks (P1/P2 improvements)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def check_displacement(df: pd.DataFrame, signal: StructureSignal) -> bool:
+        """
+        Check if a Fair Value Gap (FVG) formed at the break — sign of displacement.
+        Bullish FVG: candle[i-1].high < candle[i+1].low (gap up)
+        Bearish FVG: candle[i-1].low > candle[i+1].high (gap down)
+        """
+        idx = signal.bar_index
+        if idx < 1 or idx + 1 >= len(df):
+            return False
+        highs = df["high"].values
+        lows = df["low"].values
+        if signal.direction == "bullish":
+            return lows[idx + 1] > highs[idx - 1]  # gap up
+        else:
+            return highs[idx + 1] < lows[idx - 1]  # gap down
+
+    @staticmethod
+    def calc_break_distance_atr(df: pd.DataFrame, signal: StructureSignal, atr_period: int = 14) -> float:
+        """
+        How far the break candle closed beyond the swing level, in ATR multiples.
+        """
+        idx = signal.bar_index
+        if idx >= len(df) or idx < atr_period:
+            return 0.0
+        highs = df["high"].values
+        lows = df["low"].values
+        closes = df["close"].values
+        tr_vals = highs[idx - atr_period:idx] - lows[idx - atr_period:idx]
+        atr = np.mean(tr_vals)
+        if atr <= 0:
+            return 0.0
+        distance = abs(closes[idx] - signal.level)
+        return distance / atr
+
+    @staticmethod
+    def detect_chop(df: pd.DataFrame, swings: List[SwingPoint], atr_period: int = 14, chop_multiplier: float = 2.0) -> bool:
+        """
+        If the swing range (highest - lowest of recent swings) < chop_multiplier * ATR,
+        market is in chop/consolidation.
+        """
+        if len(swings) < 4 or len(df) < atr_period:
+            return False
+        recent = swings[-6:] if len(swings) >= 6 else swings
+        swing_prices = [s.price for s in recent]
+        swing_range = max(swing_prices) - min(swing_prices)
+        highs = df["high"].values
+        lows = df["low"].values
+        tr_vals = highs[-atr_period:] - lows[-atr_period:]
+        atr = np.mean(tr_vals)
+        if atr <= 0:
+            return False
+        return swing_range < chop_multiplier * atr
+
+    @staticmethod
+    def determine_strict_trend(swing_points: List[SwingPoint]) -> str:
+        """
+        Strict trend: requires BOTH HH+HL for bullish, BOTH LH+LL for bearish.
+        No partial leaning — anything else is ranging.
+        """
+        if len(swing_points) < 4:
+            return "ranging"
+        recent_highs = [p for p in swing_points if p.kind == "high"][-2:]
+        recent_lows = [p for p in swing_points if p.kind == "low"][-2:]
+        if len(recent_highs) < 2 or len(recent_lows) < 2:
+            return "ranging"
+        hh = recent_highs[-1].label == "HH"
+        hl = recent_lows[-1].label == "HL"
+        lh = recent_highs[-1].label == "LH"
+        ll = recent_lows[-1].label == "LL"
+        if hh and hl:
+            return "bullish"
+        if lh and ll:
+            return "bearish"
+        return "ranging"
+
+    def check_choch_confirmation(self, choch_signals: List[StructureSignal], bos_signals: List[StructureSignal], max_bars: int = 20) -> None:
+        """
+        Mark CHOCH signals as confirmed if a follow-up BOS in the same direction
+        occurred within max_bars.
+        """
+        for choch in choch_signals:
+            for bos in bos_signals:
+                if (bos.direction == choch.direction
+                        and bos.bar_index > choch.bar_index
+                        and bos.bar_index - choch.bar_index <= max_bars):
+                    choch.is_confirmed = True
+                    break
+
+    def rate_signal_quality(self, df: pd.DataFrame, signal: StructureSignal) -> str:
+        """
+        Rate signal quality as strong/normal/weak/fake based on all checks.
+        """
+        if signal.is_fake:
+            return "fake"
+        score = 0
+        if signal.has_displacement:
+            score += 2
+        if signal.break_distance_atr >= 0.1:
+            score += 1
+        if signal.break_distance_atr >= 0.2:
+            score += 1
+        if signal.kind == "choch" and signal.is_confirmed:
+            score += 2
+        if signal.kind == "choch" and not signal.is_confirmed:
+            score -= 1
+        if score >= 3:
+            return "strong"
+        elif score <= 0:
+            return "weak"
+        return "normal"
+
+    # ------------------------------------------------------------------
     # Backward-compatible API
     # ------------------------------------------------------------------
 
@@ -564,8 +693,12 @@ class MarketStructure:
         swings = self.label_swings(swings)
         result.swing_points = swings
 
-        # 2. Determine trend from swing sequence
+        # 2. Determine trend from swing sequence (original + strict)
         result.trend = self.determine_trend(swings)
+        result.strict_trend = self.determine_strict_trend(swings)
+
+        # 3. Chop detection
+        result.is_chop = self.detect_chop(df, swings)
 
         # Last swing levels
         highs = [p for p in swings if p.kind == "high"]
@@ -575,12 +708,18 @@ class MarketStructure:
         if lows:
             result.last_swing_low = lows[-1].price
 
-        # 3. Detect ALL structure breaks
+        # 4. Detect ALL structure breaks
         bos_signals, choch_signals = self.detect_all_structure_breaks(df, swings)
 
-        # 4. Check for fakes
+        # 5. CHOCH confirmation check (does a BOS follow the CHOCH?)
+        self.check_choch_confirmation(choch_signals, bos_signals)
+
+        # 6. Check for fakes + enhanced quality on each signal
         for sig in bos_signals:
             sig.is_fake = self.is_fake_breakout(df, sig)
+            sig.has_displacement = self.check_displacement(df, sig)
+            sig.break_distance_atr = self.calc_break_distance_atr(df, sig)
+            sig.quality = self.rate_signal_quality(df, sig)
             if not sig.is_fake:
                 if sig.direction == "bullish":
                     result.bos_bullish = True
@@ -592,6 +731,9 @@ class MarketStructure:
 
         for sig in choch_signals:
             sig.is_fake = self.is_fake_breakout(df, sig)
+            sig.has_displacement = self.check_displacement(df, sig)
+            sig.break_distance_atr = self.calc_break_distance_atr(df, sig)
+            sig.quality = self.rate_signal_quality(df, sig)
             if not sig.is_fake:
                 if sig.direction == "bullish":
                     result.choch_bullish = True
@@ -600,6 +742,12 @@ class MarketStructure:
             else:
                 result.fake_choch = True
             result.signals.append(sig)
+
+        # 7. Most-recent-signal-wins
+        all_real = [s for s in result.signals if not s.is_fake]
+        if all_real:
+            last_sig = max(all_real, key=lambda s: s.bar_index)
+            result.last_signal_direction = last_sig.direction
 
         return result
 
@@ -635,6 +783,10 @@ class MarketStructure:
             confidence=0.5,
             signals=list(r5m.signals),
             swing_points=list(r5m.swing_points),
+            # Enhanced fields
+            strict_trend=r5m.strict_trend,
+            is_chop=r5m.is_chop,
+            last_signal_direction=r5m.last_signal_direction,
         )
 
         # HTF confirmation
@@ -667,18 +819,23 @@ class MarketStructure:
         result.confidence = float(np.clip(result.confidence, 0.0, 1.0))
 
         logger.info(
-            "MarketStructure signals: trend=%s bos_bull=%s bos_bear=%s "
-            "choch_bull=%s choch_bear=%s fake_bos=%s fake_choch=%s "
-            "swing_high=%.2f swing_low=%.2f conf=%.2f (bos=%d choch=%d swings=%d)",
-            result.trend,
+            "MarketStructure signals: trend=%s strict=%s chop=%s last_dir=%s "
+            "bos_bull=%s bos_bear=%s choch_bull=%s choch_bear=%s "
+            "fake_bos=%s fake_choch=%s conf=%.2f (bos=%d choch=%d swings=%d "
+            "strong=%d normal=%d weak=%d fake=%d)",
+            result.trend, result.strict_trend, result.is_chop,
+            result.last_signal_direction,
             result.bos_bullish, result.bos_bearish,
             result.choch_bullish, result.choch_bearish,
             result.fake_bos, result.fake_choch,
-            result.last_swing_high, result.last_swing_low,
             result.confidence,
             len([s for s in result.signals if s.kind == "bos"]),
             len([s for s in result.signals if s.kind == "choch"]),
             len(result.swing_points),
+            len([s for s in result.signals if s.quality == "strong"]),
+            len([s for s in result.signals if s.quality == "normal"]),
+            len([s for s in result.signals if s.quality == "weak"]),
+            len([s for s in result.signals if s.quality == "fake"]),
         )
 
         return result.to_dict()

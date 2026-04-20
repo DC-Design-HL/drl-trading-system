@@ -43,6 +43,34 @@ def _get_whale_signal() -> dict:
 # (CLAUDE.md rule #4: all balance data must come from the exchange, not local state)
 _futures_executor = None
 
+def _get_recent_commission(symbol: str, limit: int = 10) -> float:
+    """
+    Fetch the real trading commission from Binance Futures testnet for the
+    most recent close fills. Returns total commission in USDT, or 0.0 on failure.
+    """
+    global _futures_executor
+    try:
+        if _futures_executor is None:
+            from src.api.futures_executor import FuturesTestnetExecutor
+            _futures_executor = FuturesTestnetExecutor()
+        trades = _futures_executor.connector.get_trade_history(symbol, limit=limit)
+        if not trades:
+            return 0.0
+        # Sum commission from the most recent fills that share the same orderId
+        # (a single market close can have multiple fills)
+        latest_order_id = trades[-1].get("orderId")
+        total_commission = 0.0
+        for t in reversed(trades):
+            if t.get("orderId") == latest_order_id:
+                total_commission += float(t.get("commission", 0))
+            else:
+                break
+        return total_commission
+    except Exception as e:
+        print(f"[alerter] Commission fetch failed for {symbol}: {e}", flush=True)
+        return 0.0
+
+
 def _get_testnet_balance() -> float:
     """
     Fetch live wallet balance directly from Binance Futures testnet.
@@ -360,6 +388,11 @@ def format_close_trade(alert: dict) -> str:
     pnl_emoji = "📈" if pnl >= 0 else "📉"
     lines.append(f"{pnl_emoji} Trade PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}")
 
+    # Real commission from Binance (CLAUDE.md rule #4: all data from exchange)
+    commission = _get_recent_commission(symbol)
+    if commission > 0:
+        lines.append(f"💸 Fee: ${commission:,.4f}")
+
     # Wallet balance (from Binance testnet — not bot's internal state).
     # CLAUDE.md rule #4: all financial data must come from the exchange.
     # The parenthetical shows LIFETIME PnL vs $5,000 starting deposit, clearly
@@ -445,6 +478,11 @@ def format_partial_close(alert: dict) -> str:
         f"{pnl_emoji} PnL: {'+'if pnl >= 0 else ''}${pnl:,.2f}",
         f"📦 Remaining: {remaining_pct:.0f}% of position",
     ]
+
+    # Real commission from Binance
+    commission = _get_recent_commission(symbol)
+    if commission > 0:
+        lines.append(f"💸 Fee: ${commission:,.4f}")
 
     # Position size in USDT (closed portion)
     closed_units = trade.get("units", 0)

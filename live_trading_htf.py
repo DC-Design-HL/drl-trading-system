@@ -353,6 +353,7 @@ class HTFLiveBot:
 
         # Portfolio state
         self.balance = initial_balance
+        self._last_exchange_balance = initial_balance  # cache for _get_real_balance fallback
         self.position = 0        # 1 = LONG, -1 = SHORT, 0 = FLAT
         self.position_price = 0.0
         self.position_units = 0.0
@@ -441,6 +442,10 @@ class HTFLiveBot:
         # (handles case where no state file exists yet)
         if not self.dry_run and not self._state_file.exists():
             self._sync_balance_from_exchange()
+
+        # Always verify position against exchange on startup
+        if not self.dry_run:
+            self._sync_position_from_exchange()
 
         logger.info(
             "HTFLiveBot ready | symbol=%s dry_run=%s balance=%.2f",
@@ -690,6 +695,7 @@ class HTFLiveBot:
                 )
 
             self.balance = real_balance
+            self._last_exchange_balance = real_balance  # Update cache for _get_real_balance fallback
             # Keep initial_balance as the original testnet starting balance ($5,000)
             # so that PnL % in alerts reflects total performance, not per-session.
             # session_balance is used for position sizing only.
@@ -701,10 +707,11 @@ class HTFLiveBot:
     def _sync_position_from_exchange(self) -> None:
         """
         Sync position state with the actual exchange position.
-        The exchange is the source of truth — if it shows no position for
-        this symbol, the bot resets to flat (fixes ghost SL/TP alerts).
+        The exchange is the source of truth — covers both cases:
+        1. Bot has position but exchange is FLAT → reset to flat
+        2. Bot is FLAT but exchange has position → adopt exchange position
         """
-        if self.dry_run or self.position == 0:
+        if self.dry_run:
             return
         try:
             from src.api.futures_executor import get_futures_executor
@@ -720,10 +727,39 @@ class HTFLiveBot:
                     break
 
             if exchange_pos is None:
-                # Symbol not even in exchange response — position is flat
                 real_amt = 0.0
             else:
                 real_amt = abs(float(exchange_pos.get("positionAmt", 0)))
+
+            # Case 2: Bot thinks FLAT but exchange has a position — adopt it
+            if real_amt > 0 and self.position == 0:
+                raw_amt = float(exchange_pos.get("positionAmt", 0))
+                exchange_dir = 1 if raw_amt > 0 else -1
+                exchange_entry = float(exchange_pos.get("entryPrice", 0))
+                logger.warning(
+                    "⚠️ POSITION RECOVERY: bot was FLAT but exchange has %s %s "
+                    "(entry=$%.2f, qty=%.6f). Adopting exchange position.",
+                    "LONG" if exchange_dir == 1 else "SHORT",
+                    self.symbol, exchange_entry, real_amt,
+                )
+                self.position = exchange_dir
+                self.position_price = exchange_entry
+                self.position_units = real_amt
+                self.peak_price = exchange_entry
+                # Set SL/TP from exchange orders if available, else recalculate
+                if exchange_dir == 1:  # LONG
+                    self.sl_price = round(exchange_entry * (1 - STOP_LOSS_PCT), 2)
+                    self.tp_price = round(exchange_entry * (1 + TAKE_PROFIT_PCT), 2)
+                else:  # SHORT
+                    self.sl_price = round(exchange_entry * (1 + STOP_LOSS_PCT), 2)
+                    self.tp_price = round(exchange_entry * (1 - TAKE_PROFIT_PCT), 2)
+                self._save_state()
+                logger.info(
+                    "✅ Position recovered from exchange: %s %s @ $%.2f, SL=$%.2f, TP=$%.2f",
+                    "LONG" if exchange_dir == 1 else "SHORT",
+                    self.symbol, exchange_entry, self.sl_price, self.tp_price,
+                )
+                return
 
             if real_amt == 0.0 and self.position != 0:
                 # Exchange says flat but bot thinks it has a position — reset
@@ -791,13 +827,24 @@ class HTFLiveBot:
             logger.warning("Position sync failed: %s", exc)
 
     def _get_real_balance(self) -> float:
-        """Fetch real USDT wallet balance from exchange. Falls back to internal balance."""
+        """Fetch real USDT wallet balance from exchange.
+
+        Never falls back to self.balance (which drifts from reality).
+        Returns exchange balance, or last cached exchange balance on failure.
+        """
         try:
             if self.testnet_executor and not self.dry_run:
-                return self.testnet_executor.get_account_balance("USDT")
+                bal = self.testnet_executor.get_account_balance("USDT")
+                if bal > 0:
+                    self._last_exchange_balance = bal
+                    return bal
+                logger.warning("Exchange returned 0 balance — using last cached: %.2f",
+                               getattr(self, '_last_exchange_balance', 0))
         except Exception as exc:
-            logger.debug("Real balance fetch failed: %s", exc)
-        return self.balance
+            logger.warning("Real balance fetch failed: %s — using last cached: %.2f",
+                           exc, getattr(self, '_last_exchange_balance', 0))
+        # Return last known exchange balance, never the internal tracker
+        return getattr(self, '_last_exchange_balance', self.balance)
 
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
@@ -1719,23 +1766,29 @@ class HTFLiveBot:
         if not sig:
             return None
 
-        bos_bull = sig.get("bos_bullish", False)
-        bos_bear = sig.get("bos_bearish", False)
-        choch_bull = sig.get("choch_bullish", False)
-        choch_bear = sig.get("choch_bearish", False)
         trend = sig.get("trend", "ranging")
+        last_dir = sig.get("last_signal_direction", "none")
 
-        # Use the overall trend direction as the PRIMARY signal.
-        # The aggregate booleans (bos_bull, bos_bear etc.) cover the entire lookback
-        # window so both sides are often True simultaneously — not useful for direction.
-        # The trend field reflects the CURRENT structure (HH/HL = bullish, LH/LL = bearish).
-        # Require at least one real BOS/CHOCH signal to confirm the trend is active.
-        if trend == "bullish" and (bos_bull or choch_bull):
+        # Most-recent-signal-wins: use last_signal_direction (the direction of
+        # the most recent BOS/CHOCH signal) instead of cumulative booleans.
+        # The old boolean approach caused ALL four flags to be permanently True
+        # over any non-trivial lookback, blocking every entry.
+        #
+        # Entry logic:
+        #   1. trend must be bullish or bearish (not ranging)
+        #   2. last_signal_direction must agree with trend
+        if trend == "bullish" and last_dir == "bullish":
             direction = ACTION_LONG
-        elif trend == "bearish" and (bos_bear or choch_bear):
+        elif trend == "bearish" and last_dir == "bearish":
             direction = ACTION_SHORT
+        elif trend in ("bullish", "bearish") and last_dir != trend:
+            logger.info(
+                "Structure-first: trend=%s but last_signal=%s — waiting for alignment",
+                trend, last_dir,
+            )
+            return None
         else:
-            # Ranging or no confirming signal — skip
+            # Ranging or no signal — skip
             return None
 
         # Per-symbol config
@@ -2786,7 +2839,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             # Sync updated SL to exchange
                             if not self.dry_run and self.testnet_executor:
@@ -2839,7 +2894,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2882,7 +2939,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2934,7 +2993,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -3163,11 +3224,7 @@ class HTFLiveBot:
                     "WS_RECONNECTED",
                     f"WebSocket reconnected after {ws_state['reconnect_count']} retries"
                 )
-            else:
-                _write_connectivity_alert(
-                    "WS_CONNECTED",
-                    f"WebSocket connected to {self.symbol} aggTrade stream"
-                )
+            # Skip WS_CONNECTED alert on initial startup — it's just noise (4 symbols × 1 msg each)
             ws_state["connected"] = True
             ws_state["disconnect_alerted"] = False
             ws_state["last_tick_time"] = time.time()

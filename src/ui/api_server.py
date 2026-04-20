@@ -689,26 +689,23 @@ def get_market_structure():
                 "error": "Insufficient data"
             })
 
-        # Run market structure analysis
+        # Run market structure analysis (uses enhanced detection with quality checks)
         from src.signals.bos_choch import MarketStructure
         ms = MarketStructure()
 
-        # Detect swing points
-        swings = ms.detect_swing_points(df)
-        swings = ms.label_swings(swings)
-        trend = ms.determine_trend(swings)
+        # Full analysis — includes swing detection, BOS/CHOCH, fake checks,
+        # displacement, break distance, CHOCH confirmation, quality rating,
+        # strict trend, chop detection, and last-signal-direction
+        result_obj = ms._analyze_single_tf(df)
+        swings = result_obj.swing_points
+        trend = result_obj.trend
+        bos_signals = [s for s in result_obj.signals if s.kind == "bos"]
+        choch_signals = [s for s in result_obj.signals if s.kind == "choch"]
+        full_result = result_obj.to_dict()
 
-        # Detect ALL BOS and CHOCH across the chart
-        bos_signals, choch_signals = ms.detect_all_structure_breaks(df, swings)
-
-        # Check for fakes
-        for sig in bos_signals:
-            sig.is_fake = ms.is_fake_breakout(df, sig)
-        for sig in choch_signals:
-            sig.is_fake = ms.is_fake_breakout(df, sig)
-
-        # Run full analysis for confidence
-        full_result = ms.get_signals(df)
+        # Get confidence from multi-TF analysis
+        mtf_result = ms.get_signals(df)
+        full_result["confidence"] = mtf_result.get("confidence", 0.0)
 
         # Build response
         time_values = df['time_s'].values
@@ -722,29 +719,24 @@ def get_market_structure():
             else:
                 swing_lows.append(entry)
 
-        bos_list = []
-        for sig in bos_signals:
-            bos_list.append({
+        def _sig_to_dict(sig):
+            return {
                 "time": int(time_values[sig.bar_index]) if sig.bar_index < len(time_values) else int(time_values[-1]),
-                "level": sig.level,
+                "level": float(sig.level),
                 "direction": sig.direction,
-                "is_fake": sig.is_fake,
+                "is_fake": bool(sig.is_fake),
                 "origin_time": int(time_values[sig.origin_index]) if 0 <= sig.origin_index < len(time_values) else None,
-                "origin_price": sig.origin_price,
-                "break_body_price": sig.break_body_price,
-            })
+                "origin_price": float(sig.origin_price),
+                "break_body_price": float(sig.break_body_price),
+                # Enhanced quality fields
+                "quality": getattr(sig, "quality", "normal"),
+                "has_displacement": bool(getattr(sig, "has_displacement", False)),
+                "break_distance_atr": round(float(getattr(sig, "break_distance_atr", 0.0)), 3),
+                "is_confirmed": bool(getattr(sig, "is_confirmed", False)),
+            }
 
-        choch_list = []
-        for sig in choch_signals:
-            choch_list.append({
-                "time": int(time_values[sig.bar_index]) if sig.bar_index < len(time_values) else int(time_values[-1]),
-                "level": sig.level,
-                "direction": sig.direction,
-                "is_fake": sig.is_fake,
-                "origin_time": int(time_values[sig.origin_index]) if 0 <= sig.origin_index < len(time_values) else None,
-                "origin_price": sig.origin_price,
-                "break_body_price": sig.break_body_price,
-            })
+        bos_list = [_sig_to_dict(sig) for sig in bos_signals]
+        choch_list = [_sig_to_dict(sig) for sig in choch_signals]
 
         return jsonify({
             "swing_highs": swing_highs,
@@ -753,6 +745,10 @@ def get_market_structure():
             "choch_signals": choch_list,
             "trend": full_result.get("trend", trend),
             "confidence": full_result.get("confidence", 0.0),
+            # Enhanced fields
+            "strict_trend": full_result.get("strict_trend", "ranging"),
+            "is_chop": full_result.get("is_chop", False),
+            "last_signal_direction": full_result.get("last_signal_direction", "none"),
         })
     except Exception as e:
         logger.error(f"Market structure error for {symbol}: {e}")
