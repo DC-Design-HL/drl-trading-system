@@ -67,8 +67,16 @@ TRADES_FILE = Path("logs/htf_trades.json")
 
 
 def _get_state_file(symbol: str = None) -> Path:
-    """Return symbol-specific state file path."""
+    """Return symbol-specific state file path.
+
+    Honors DRL_STATE_DIR env var so a dry-run consolidated process can
+    isolate its state from the live 4-bot deployment writing the same
+    symbol files.
+    """
     sym = symbol or SYMBOL
+    state_dir = os.environ.get("DRL_STATE_DIR")
+    if state_dir:
+        return Path(state_dir) / f"htf_trading_state_{sym}.json"
     if sym == "BTCUSDT":
         return Path("logs/htf_trading_state.json")  # backwards compat
     return Path(f"logs/htf_trading_state_{sym}.json")
@@ -90,10 +98,46 @@ TRADING_FEE = 0.0004   # 0.04% taker fee
 TRAILING_BREAKEVEN_PCT = 0.008   # At +0.8% profit, activate trailing stop (was 0.5% — too tight)
 TRAILING_LOCK_PCT = 0.02         # At +2% profit, lock 50% of profit (legacy, kept for BOS overlay)
 TRAILING_DISTANCE_PCT = 0.005    # Trail 0.5% behind peak (was 0.3% — was cutting winners too early)
+TRAILING_DISTANCE_POST_TP1 = 0.008  # Trail 0.8% behind peak after TP1 hit — backtested +$181 (Apr 6-14)
 
 # Anti-overtrading guards
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
 MIN_HOLD_SECONDS = 3600   # 1 hour minimum hold (HTF signal is slower)
+
+# Time-based stagnant exit (hold > STAGNANT_HOURS, pnl in [STAGNANT_PCT_MIN, STAGNANT_PCT_MAX]).
+# Widened lower bound from -0.3% → -1.0% on 2026-04-25 after 35-day backtest
+# (456 reconstructed round-trips Mar 22 → Apr 25): widening to [-1.0%, +0.5%]
+# improved net pnl by +$49 over baseline, the most robust improvement (positive
+# in both 20d and 35d windows, 34 trades affected). Catches drifters that miss
+# SL but are clearly off-thesis at the 6h mark.
+STAGNANT_HOURS = 6.0
+STAGNANT_PCT_MIN = -0.010
+STAGNANT_PCT_MAX = 0.005
+
+# Anti-whipsaw: block quick losing reversals (Strategy E from backtest_whipsaw.py)
+# If previous trade was opposite direction, closed <2h ago, AND lost money → skip.
+# Backtested +$75.92 improvement; reverse-close pattern is 1W/12L.
+WHIPSAW_COOLDOWN_HOURS = 2.0
+
+# ── Asymmetric REVERSE_CLOSE_LONG guard (canary rollout) ──
+# Walk-forward counterfactual (2026-04-23, 66 trades over Apr 6-22) showed
+# REVERSE_CLOSE_LONG is systematically −$297 over the window while the
+# "held instead" counterfactual was +$1,462 — delta +$1,711 on LONG side,
+# 95% CI [+$1,408, +$1,976], P(delta>0)=100% across 10k bootstrap resamples.
+# Pattern is sign-consistent across all 4 symbols and both observed regimes
+# (uptrend and range). SHORT reversals have the OPPOSITE sign (blocking them
+# would cost ~$740), so guard applies to LONG only.
+#
+# Regime gate: the walk-forward window contained zero sustained BTC downtrend.
+# In a downtrend the LONG-reversal-is-wrong logic could plausibly invert, so
+# we only block when BTC 4h EMA slope over 20h > MIN_SLOPE_PCT (not in clear
+# downtrend). Graceful degradation to current behavior otherwise.
+#
+# Starts as a canary on XRP only (biggest offender: 11 trades, −$109 actual,
+# +$566 projected delta). Expand to BTC/ETH/SOL after 2 weeks of live signal.
+REVERSAL_BLOCK_LONG_CANARY_SYMBOLS: set = {"XRPUSDT"}
+REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT = -0.5
+_BTC_REGIME_CACHE_TTL_SECONDS = 900
 
 # Actions from PPO (must match HTFTradingEnv)
 ACTION_HOLD = 0
@@ -148,6 +192,16 @@ ORDERBOOK_GUARD_ENABLED = True
 RSI_GUARD_ENABLED = True
 RSI_GUARD_OB_THRESHOLD = 70         # Don't LONG above this RSI (overbought)
 RSI_GUARD_OS_THRESHOLD = 30         # Don't SHORT below this RSI (oversold)
+# Regime-aware loosened thresholds (added 2026-04-11): in confirmed strong
+# trends (regime detector reports TRENDING_UP/DOWN with ADX >= TREND_ADX_MIN),
+# RSI > 70 / < 30 is normal trend behavior, not exhaustion. The base 70/30
+# ceiling was over-applying in trends and blocking high-conviction longs
+# during the bull leg on 2026-04-11. Loosen the band only when the regime
+# detector confirms we are NOT in a range. ADX >= 30 = "strong trend" per
+# Wilder's classification; we already have ADX < 20 as the ranging block.
+RSI_GUARD_OB_TREND = 80             # LONG ceiling when TRENDING_UP + ADX >= TREND_ADX_MIN
+RSI_GUARD_OS_TREND = 20             # SHORT floor when TRENDING_DOWN + ADX >= TREND_ADX_MIN
+RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = real trend, not noise)
 
 # ── ADX Ranging Guard ──
 # Blocks trades when ADX is very low (no trend, choppy/ranging market).
@@ -167,6 +221,23 @@ RESCUE_MIN_AGREES = 2               # Minimum signal agreements for rescue (out 
 # Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
 FIXED_MAX_NOTIONAL = 3000.0  # USDT
 
+# ── Structure-First Mode ──
+# When True, BOS/CHOCH signals are the PRIMARY entry trigger.
+# The DRL model is NOT used for entry decisions (only for exit management).
+# Backtested over 31 days: 41.0% WR, +$7,146 vs model-first 27.2% WR, -$7,075.
+STRUCTURE_FIRST_MODE = True
+
+# Per-symbol structure config:
+# "S1" = struct only (BOS/CHOCH triggers entry, no OB filter, no model)
+# "S5" = struct + OB proximity + RSI + ADX directional confirmation
+STRUCTURE_SYMBOL_CONFIG = {
+    "BTCUSDT": "S1",   # 47.8% WR, +$3,798 in backtest
+    "ETHUSDT": "S5",   # 43.5% WR, +$1,217 with extra filters
+    "SOLUSDT": "S1",   # 37.0% WR, +$770
+    "XRPUSDT": "S1",   # 44.4% WR, +$2,336
+}
+STRUCTURE_OB_PROXIMITY_PCT = 0.010  # 1% proximity for OB check (S5 mode)
+
 # How many 15M bars to fetch (10 days = ~960 bars)
 FETCH_DAYS = 12
 
@@ -176,7 +247,32 @@ FETCH_DAYS = 12
 # ---------------------------------------------------------------------------
 
 def _find_best_fold_model(wf_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
-    """Find the best model (highest OOS Sharpe) in a walk-forward directory."""
+    """Find the best model (highest OOS Sharpe) in a walk-forward directory.
+
+    Checks two formats:
+      1. v3 ensemble: top3_models.json + final_model_X.zip (preferred)
+      2. Legacy: fold_XX/best_model.zip + fold_XX/fold_result.json
+    """
+    # --- v3 ensemble format (from train_model.py) ---
+    top3_file = wf_dir / "top3_models.json"
+    if top3_file.exists():
+        try:
+            top3 = json.loads(top3_file.read_text())
+            best = top3["top_folds"][0]  # rank 0 = best
+            rank = best["rank"]
+            model_zip = wf_dir / f"final_model_{rank}.zip"
+            vecnorm = wf_dir / f"final_vecnorm_{rank}.pkl"
+            if model_zip.exists():
+                sharpe = best.get("val_sharpe", 0)
+                logger.info(
+                    "HTF model: v3 ensemble rank 0 (val Sharpe %.2f) → %s",
+                    sharpe, model_zip,
+                )
+                return model_zip, vecnorm if vecnorm.exists() else None
+        except Exception:
+            pass
+
+    # --- Legacy fold format ---
     best_sharpe = -999.0
     best_model_path: Optional[Path] = None
     best_vecnorm_path: Optional[Path] = None
@@ -263,6 +359,52 @@ def find_best_htf_model(symbol: str = "BTCUSDT") -> Tuple[Optional[Path], Option
 
 
 # ---------------------------------------------------------------------------
+# BTC regime slope helper — shared across all symbol threads
+# ---------------------------------------------------------------------------
+
+# Module-level cache so 4 consolidated-mode symbol threads share one fetch.
+_btc_regime_cache = {"slope_pct": None, "ts": 0.0}
+
+
+def _compute_btc_4h_ema_slope_pct(fetcher) -> Optional[float]:
+    """Return BTC 4h EMA(10) slope over a trailing 20h window, as percent.
+
+    Result is cached for _BTC_REGIME_CACHE_TTL_SECONDS so the 4 symbol
+    threads running in the consolidated bot process share one fetch.
+    Returns the last cached value (possibly stale) if the fetch fails;
+    returns None only if no value has ever been computed.
+    """
+    now = time.time()
+    cached = _btc_regime_cache.get("slope_pct")
+    if cached is not None and (now - _btc_regime_cache["ts"]) < _BTC_REGIME_CACHE_TTL_SECONDS:
+        return cached
+    try:
+        df = fetcher.fetch_asset("BTCUSDT", "4h", days=7)
+        if df is None or len(df) < 15:
+            return cached
+        closes = df["close"].astype(float).values
+
+        def _ema(vals, period: int) -> float:
+            k = 2.0 / (period + 1)
+            e = float(vals[0])
+            for v in vals[1:]:
+                e = float(v) * k + e * (1 - k)
+            return e
+
+        ema_now = _ema(closes[-10:], 10)
+        ema_prev = _ema(closes[-15:-5], 10)
+        if ema_prev == 0:
+            return cached
+        slope_pct = (ema_now - ema_prev) / ema_prev * 100.0
+        _btc_regime_cache["slope_pct"] = slope_pct
+        _btc_regime_cache["ts"] = now
+        return slope_pct
+    except Exception as exc:
+        logger.debug("BTC regime slope fetch failed: %s", exc)
+        return cached
+
+
+# ---------------------------------------------------------------------------
 # HTF Live Bot
 # ---------------------------------------------------------------------------
 
@@ -278,14 +420,16 @@ class HTFLiveBot:
         dry_run: bool = True,
         initial_balance: float = 5_000.0,
         interval_minutes: int = 15,
+        symbol: str = None,
     ):
-        self.symbol = SYMBOL
+        self.symbol = symbol or SYMBOL
         self.dry_run = dry_run
         self.initial_balance = initial_balance
         self.interval_minutes = interval_minutes
 
         # Portfolio state
         self.balance = initial_balance
+        self._last_exchange_balance = initial_balance  # cache for _get_real_balance fallback
         self.position = 0        # 1 = LONG, -1 = SHORT, 0 = FLAT
         self.position_price = 0.0
         self.position_units = 0.0
@@ -312,12 +456,23 @@ class HTFLiveBot:
         # Phase 1 §3.4: Entry time tracking for time-based stagnant exit
         self.position_entry_time = 0.0
 
+        # Wall-clock time of the most recent partial-TP fire. Used by
+        # _sync_with_exchange to suppress upward position-units syncs for a
+        # grace window after a partial close, since the exchange may not yet
+        # reflect the reduce-only partial-close fill.
+        self.last_partial_close_time = 0.0
+
         # Cache of last fetched 15m DataFrame (used by _open_position for regime detection)
         self._last_df = None
 
         # Anti-overtrading
         self.last_loss_time = 0.0
         self.last_entry_time = 0.0
+
+        # Anti-whipsaw: track last closed trade for Strategy E filter
+        self.last_close_direction = 0    # 1=was LONG, -1=was SHORT
+        self.last_close_pnl = 0.0        # PnL of last closed trade
+        self.last_close_time = 0.0       # epoch time of last close
 
         # Bookkeeping
         self.trades: List[Dict] = []
@@ -369,6 +524,10 @@ class HTFLiveBot:
         # (handles case where no state file exists yet)
         if not self.dry_run and not self._state_file.exists():
             self._sync_balance_from_exchange()
+
+        # Always verify position against exchange on startup
+        if not self.dry_run:
+            self._sync_position_from_exchange()
 
         logger.info(
             "HTFLiveBot ready | symbol=%s dry_run=%s balance=%.2f",
@@ -474,6 +633,9 @@ class HTFLiveBot:
             "partial_tp1_price": self.partial_tp1_price,
             "partial_tp2_price": self.partial_tp2_price,
             "position_entry_time": self.position_entry_time,
+            "last_close_direction": self.last_close_direction,
+            "last_close_pnl": self.last_close_pnl,
+            "last_close_time": self.last_close_time,
             "updated_at": datetime.now().isoformat(),
         }
         # Save to local HTF state file
@@ -540,6 +702,9 @@ class HTFLiveBot:
             self.partial_tp1_price = float(state.get("partial_tp1_price", 0.0))
             self.partial_tp2_price = float(state.get("partial_tp2_price", 0.0))
             self.position_entry_time = float(state.get("position_entry_time", 0.0))
+            self.last_close_direction = int(state.get("last_close_direction", 0))
+            self.last_close_pnl = float(state.get("last_close_pnl", 0.0))
+            self.last_close_time = float(state.get("last_close_time", 0.0))
             logger.info(
                 "State restored: pos=%d price=%.2f balance=%.2f",
                 self.position, self.position_price, self.balance,
@@ -612,6 +777,7 @@ class HTFLiveBot:
                 )
 
             self.balance = real_balance
+            self._last_exchange_balance = real_balance  # Update cache for _get_real_balance fallback
             # Keep initial_balance as the original testnet starting balance ($5,000)
             # so that PnL % in alerts reflects total performance, not per-session.
             # session_balance is used for position sizing only.
@@ -623,10 +789,11 @@ class HTFLiveBot:
     def _sync_position_from_exchange(self) -> None:
         """
         Sync position state with the actual exchange position.
-        The exchange is the source of truth — if it shows no position for
-        this symbol, the bot resets to flat (fixes ghost SL/TP alerts).
+        The exchange is the source of truth — covers both cases:
+        1. Bot has position but exchange is FLAT → reset to flat
+        2. Bot is FLAT but exchange has position → adopt exchange position
         """
-        if self.dry_run or self.position == 0:
+        if self.dry_run:
             return
         try:
             from src.api.futures_executor import get_futures_executor
@@ -642,10 +809,39 @@ class HTFLiveBot:
                     break
 
             if exchange_pos is None:
-                # Symbol not even in exchange response — position is flat
                 real_amt = 0.0
             else:
                 real_amt = abs(float(exchange_pos.get("positionAmt", 0)))
+
+            # Case 2: Bot thinks FLAT but exchange has a position — adopt it
+            if real_amt > 0 and self.position == 0:
+                raw_amt = float(exchange_pos.get("positionAmt", 0))
+                exchange_dir = 1 if raw_amt > 0 else -1
+                exchange_entry = float(exchange_pos.get("entryPrice", 0))
+                logger.warning(
+                    "⚠️ POSITION RECOVERY: bot was FLAT but exchange has %s %s "
+                    "(entry=$%.2f, qty=%.6f). Adopting exchange position.",
+                    "LONG" if exchange_dir == 1 else "SHORT",
+                    self.symbol, exchange_entry, real_amt,
+                )
+                self.position = exchange_dir
+                self.position_price = exchange_entry
+                self.position_units = real_amt
+                self.peak_price = exchange_entry
+                # Set SL/TP from exchange orders if available, else recalculate
+                if exchange_dir == 1:  # LONG
+                    self.sl_price = round(exchange_entry * (1 - STOP_LOSS_PCT), 2)
+                    self.tp_price = round(exchange_entry * (1 + TAKE_PROFIT_PCT), 2)
+                else:  # SHORT
+                    self.sl_price = round(exchange_entry * (1 + STOP_LOSS_PCT), 2)
+                    self.tp_price = round(exchange_entry * (1 - TAKE_PROFIT_PCT), 2)
+                self._save_state()
+                logger.info(
+                    "✅ Position recovered from exchange: %s %s @ $%.2f, SL=$%.2f, TP=$%.2f",
+                    "LONG" if exchange_dir == 1 else "SHORT",
+                    self.symbol, exchange_entry, self.sl_price, self.tp_price,
+                )
+                return
 
             if real_amt == 0.0 and self.position != 0:
                 # Exchange says flat but bot thinks it has a position — reset
@@ -703,23 +899,58 @@ class HTFLiveBot:
                         self.symbol, self.position_price, self.sl_price, self.tp_price,
                     )
                 elif abs(real_amt - self.position_units) > 0.0001:
-                    logger.info(
-                        "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
-                        self.position_units, real_amt,
-                    )
-                    self.position_units = real_amt
-                    self._save_state()
+                    # Only accept DOWNWARD corrections. Upward jumps are almost
+                    # always a partial-TP timing artifact: the bot has just
+                    # decremented position_units for a reduce-only partial close
+                    # that hasn't yet reflected on the exchange side. Trusting
+                    # the exchange here re-adds the closed units and causes the
+                    # eventual full-close pnl to double-count (see
+                    # memory/project_pnl_accounting_bug_apr23.md).
+                    grace = 60.0
+                    within_grace = (time.time() - self.last_partial_close_time) < grace
+                    if real_amt > self.position_units + 1e-4:
+                        logger.warning(
+                            "📐 Position sync skipped: exchange reports larger "
+                            "size (bot=%.6f, exchange=%.6f) — suspected partial-"
+                            "close settlement lag%s. Keeping bot-tracked units.",
+                            self.position_units, real_amt,
+                            " (within 60s grace after partial)" if within_grace else "",
+                        )
+                    elif within_grace:
+                        logger.info(
+                            "📐 Position sync skipped: within %.0fs grace after "
+                            "partial close (bot=%.6f, exchange=%.6f).",
+                            grace, self.position_units, real_amt,
+                        )
+                    else:
+                        logger.info(
+                            "📐 Position sync: units=%.6f → exchange=%.6f (corrected downward)",
+                            self.position_units, real_amt,
+                        )
+                        self.position_units = real_amt
+                        self._save_state()
         except Exception as exc:
             logger.warning("Position sync failed: %s", exc)
 
     def _get_real_balance(self) -> float:
-        """Fetch real USDT wallet balance from exchange. Falls back to internal balance."""
+        """Fetch real USDT wallet balance from exchange.
+
+        Never falls back to self.balance (which drifts from reality).
+        Returns exchange balance, or last cached exchange balance on failure.
+        """
         try:
             if self.testnet_executor and not self.dry_run:
-                return self.testnet_executor.get_account_balance("USDT")
+                bal = self.testnet_executor.get_account_balance("USDT")
+                if bal > 0:
+                    self._last_exchange_balance = bal
+                    return bal
+                logger.warning("Exchange returned 0 balance — using last cached: %.2f",
+                               getattr(self, '_last_exchange_balance', 0))
         except Exception as exc:
-            logger.debug("Real balance fetch failed: %s", exc)
-        return self.balance
+            logger.warning("Real balance fetch failed: %s — using last cached: %.2f",
+                           exc, getattr(self, '_last_exchange_balance', 0))
+        # Return last known exchange balance, never the internal tracker
+        return getattr(self, '_last_exchange_balance', self.balance)
 
     def _log_trade(self, trade: Dict) -> None:
         """Append trade to line-delimited JSON file and shared storage."""
@@ -899,13 +1130,27 @@ class HTFLiveBot:
         if RSI_GUARD_ENABLED:
             mtf = market.get("mtf", {})
             rsi_15m = mtf.get("signals", {}).get("15m", {}).get("rsi", 50)
+            # Regime-aware threshold: when the regime detector reports a
+            # confirmed strong trend in the SAME direction we're trading,
+            # loosen the RSI band so we stop fighting the regime detector.
+            # In ranges or mismatched regimes, fall back to the strict 70/30.
+            regime_for_rsi = market.get("regime", {}) or {}
+            regime_type_rsi = (regime_for_rsi.get("type") or "UNKNOWN").upper()
+            regime_adx_rsi = regime_for_rsi.get("adx", 0) or 0
+            ob_threshold = RSI_GUARD_OB_THRESHOLD
+            os_threshold = RSI_GUARD_OS_THRESHOLD
+            if isinstance(regime_adx_rsi, (int, float)) and regime_adx_rsi >= RSI_GUARD_TREND_ADX_MIN:
+                if direction == "LONG" and regime_type_rsi == "TRENDING_UP":
+                    ob_threshold = RSI_GUARD_OB_TREND
+                elif direction == "SHORT" and regime_type_rsi == "TRENDING_DOWN":
+                    os_threshold = RSI_GUARD_OS_TREND
             if isinstance(rsi_15m, (int, float)):
-                if direction == "LONG" and rsi_15m > RSI_GUARD_OB_THRESHOLD:
+                if direction == "LONG" and rsi_15m > ob_threshold:
                     rsi_blocked = True
-                    rsi_reason = f"RSI 15m={rsi_15m:.0f} > {RSI_GUARD_OB_THRESHOLD} (overbought)"
-                elif direction == "SHORT" and rsi_15m < RSI_GUARD_OS_THRESHOLD:
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} > {ob_threshold} (overbought)"
+                elif direction == "SHORT" and rsi_15m < os_threshold:
                     rsi_blocked = True
-                    rsi_reason = f"RSI 15m={rsi_15m:.0f} < {RSI_GUARD_OS_THRESHOLD} (oversold)"
+                    rsi_reason = f"RSI 15m={rsi_15m:.0f} < {os_threshold} (oversold)"
 
         # --- Check ADX ---
         adx_blocked = False
@@ -983,6 +1228,40 @@ class HTFLiveBot:
             self.symbol, direction, " + ".join(reasons), confidence,
         )
         return False
+
+    def _should_block_long_reversal(self) -> bool:
+        """Canary guard: block REVERSE_CLOSE_LONG for specific symbols when the
+        BTC 4h regime is not a clear downtrend.
+
+        Returns True → skip the reversal close (position stays LONG, SL/TP
+        continues to protect it).  Returns False → let the reversal fire as
+        normal.
+
+        Regime gate ensures we fall back to current behavior in downtrend
+        regimes where the counterfactual evidence is absent.  Fail-open on
+        fetch errors so an outage of the klines endpoint never silently
+        disables trading.
+        """
+        if self.symbol not in REVERSAL_BLOCK_LONG_CANARY_SYMBOLS:
+            return False
+        slope_pct = _compute_btc_4h_ema_slope_pct(self.fetcher)
+        if slope_pct is None:
+            logger.warning(
+                "[%s] BTC regime slope unavailable — allowing LONG reversal (fail-open)",
+                self.symbol,
+            )
+            return False
+        if slope_pct <= REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT:
+            logger.info(
+                "[%s] LONG reversal allowed — BTC 4h slope %+.2f%% <= gate %+.2f%% (downtrend)",
+                self.symbol, slope_pct, REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT,
+            )
+            return False
+        logger.info(
+            "🛡️  [%s] REVERSE_CLOSE_LONG blocked (canary) — BTC 4h slope %+.2f%% > gate %+.2f%%",
+            self.symbol, slope_pct, REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT,
+        )
+        return True
 
     def _check_signal_gate(self, action: int, confidence: float) -> bool:
         """
@@ -1583,8 +1862,14 @@ class HTFLiveBot:
                     logger.warning("BOS/CHOCH: no 5m data available — skipping")
                     self._last_structure_signals = {}
                 else:
-                    self._last_structure_signals = self.market_structure.get_signals(
+                    _struct_result = self.market_structure.get_signals(
                         df_5m, df_1h=df_1h, df_4h=df_4h,
+                    )
+                    # Convert to dict for .get() access throughout the codebase
+                    self._last_structure_signals = (
+                        _struct_result.to_dict()
+                        if hasattr(_struct_result, 'to_dict')
+                        else _struct_result
                     )
                     # Log BOS/CHOCH signal state every iteration at INFO level
                     sig = self._last_structure_signals
@@ -1607,6 +1892,115 @@ class HTFLiveBot:
                 logger.warning("BOS/CHOCH signal computation failed: %s", exc)
                 self._last_structure_signals = {}
         return self._last_structure_signals
+
+    def _get_structure_direction(self, current_price: float, df_15m: pd.DataFrame) -> Optional[int]:
+        """
+        Structure-first entry: derive trade direction from BOS/CHOCH signals.
+        Returns ACTION_LONG, ACTION_SHORT, or None (no entry).
+
+        Per-symbol config controls which extra filters apply:
+          S1: BOS/CHOCH only (no OB, no ADX directional check)
+          S5: BOS/CHOCH + OB proximity + RSI guard + ADX directional confirmation
+        """
+        sig = self._last_structure_signals
+        if not sig:
+            return None
+
+        trend = sig.get("trend", "ranging")
+        last_dir = sig.get("last_signal_direction", "none")
+
+        # Most-recent-signal-wins: use last_signal_direction (the direction of
+        # the most recent BOS/CHOCH signal) instead of cumulative booleans.
+        # The old boolean approach caused ALL four flags to be permanently True
+        # over any non-trivial lookback, blocking every entry.
+        #
+        # Entry logic:
+        #   1. trend must be bullish or bearish (not ranging)
+        #   2. last_signal_direction must agree with trend
+        if trend == "bullish" and last_dir == "bullish":
+            direction = ACTION_LONG
+        elif trend == "bearish" and last_dir == "bearish":
+            direction = ACTION_SHORT
+        elif trend in ("bullish", "bearish") and last_dir != trend:
+            logger.info(
+                "Structure-first: trend=%s but last_signal=%s — waiting for alignment",
+                trend, last_dir,
+            )
+            return None
+        else:
+            # Ranging or no signal — skip
+            return None
+
+        # Per-symbol config
+        sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(self.symbol, "S1")
+
+        if sym_cfg == "S5":
+            # Extra filter: Order Block proximity
+            if df_15m is not None and len(df_15m) >= 40:
+                ob_window = df_15m.tail(40)
+                opn = ob_window["open"].values
+                close = ob_window["close"].values
+                high = ob_window["high"].values
+                low = ob_window["low"].values
+                n = len(close)
+                bull_obs, bear_obs = [], []
+                atr_proxy = np.mean(high - low) + 1e-10
+                for idx in range(max(0, n - 30), n - 2):
+                    body_i = close[idx] - opn[idx]
+                    body_i1 = close[idx + 1] - opn[idx + 1]
+                    move = abs(close[idx + 2] - close[idx + 1]) if (idx + 2) < n else 0.0
+                    if body_i < 0 and body_i1 > 0 and move > atr_proxy * 0.5:
+                        bull_obs.append((high[idx] + low[idx]) / 2.0)
+                    if body_i > 0 and body_i1 < 0 and move > atr_proxy * 0.5:
+                        bear_obs.append((high[idx] + low[idx]) / 2.0)
+
+                ob_levels = bull_obs if direction == ACTION_LONG else bear_obs
+                near_ob = any(
+                    abs(current_price - lvl) / (lvl + 1e-10) < STRUCTURE_OB_PROXIMITY_PCT
+                    for lvl in ob_levels
+                )
+                if not near_ob:
+                    logger.info("Structure-first S5: blocked by OB proximity (no nearby %s OB)",
+                                "bullish" if direction == ACTION_LONG else "bearish")
+                    return None
+
+            # Extra filter: ADX directional confirmation (from 15m candles)
+            if df_15m is not None and len(df_15m) >= 30:
+                try:
+                    _close = df_15m["close"].values
+                    _high = df_15m["high"].values
+                    _low = df_15m["low"].values
+                    _period = 14
+                    # Quick ADX/DI from last 30 bars
+                    _plus_dm = np.diff(_high[-30:])
+                    _minus_dm = -np.diff(_low[-30:])
+                    _plus_dm = np.where((_plus_dm > _minus_dm) & (_plus_dm > 0), _plus_dm, 0)
+                    _minus_dm = np.where((_minus_dm > _plus_dm) & (_minus_dm > 0), _minus_dm, 0)
+                    _tr = np.maximum(_high[-29:] - _low[-29:],
+                                     np.maximum(np.abs(_high[-29:] - _close[-30:-1]),
+                                                np.abs(_low[-29:] - _close[-30:-1])))
+                    _atr = np.mean(_tr[-_period:])
+                    if _atr > 0:
+                        _plus_di = 100 * np.mean(_plus_dm[-_period:]) / _atr
+                        _minus_di = 100 * np.mean(_minus_dm[-_period:]) / _atr
+                        _adx_val = 100 * abs(_plus_di - _minus_di) / (_plus_di + _minus_di + 1e-10)
+                        if _adx_val >= ADX_GUARD_MIN:
+                            if direction == ACTION_LONG and _minus_di > _plus_di:
+                                logger.info("Structure-first S5: ADX directional block (LONG but -DI > +DI, ADX=%.1f)", _adx_val)
+                                return None
+                            if direction == ACTION_SHORT and _plus_di > _minus_di:
+                                logger.info("Structure-first S5: ADX directional block (SHORT but +DI > -DI, ADX=%.1f)", _adx_val)
+                                return None
+                except Exception as exc:
+                    logger.debug("Structure-first S5 ADX check failed: %s", exc)
+
+        logger.info(
+            "Structure-first %s: %s | trend=%s last_signal=%s",
+            sym_cfg,
+            "LONG" if direction == ACTION_LONG else "SHORT",
+            trend, last_dir,
+        )
+        return direction
 
     # ------------------------------------------------------------------
     # Liquidation price safety check
@@ -1791,20 +2185,18 @@ class HTFLiveBot:
         adjustment_reason = ""
 
         if profit_pct >= TRAILING_BREAKEVEN_PCT:
-            # Continuous trailing stop: trail TRAILING_DISTANCE_PCT behind peak price
-            # At +0.5% profit → trailing activates, SL = peak - 0.3% (locks ~0.2%)
-            # At +1.0% profit → SL = peak - 0.3% (locks ~0.7%)
-            # At +1.5% profit → SL = peak - 0.3% (locks ~1.2%)
-            # Tighter trailing captures more of the typical 1-1.5% MFE moves
+            # After TP1, widen trailing distance to let winners run longer.
+            # Backtested Apr 6-14: 0.5%→0.8% post-TP1 added +$181 across 120 trades.
+            trail_dist = TRAILING_DISTANCE_POST_TP1 if self.partial_tp_level >= 1 else TRAILING_DISTANCE_PCT
             if self.position == 1:
-                trailing_sl = self.peak_price * (1.0 - TRAILING_DISTANCE_PCT)
+                trailing_sl = self.peak_price * (1.0 - trail_dist)
                 # Never let trailing SL go below entry (minimum breakeven)
                 trailing_sl = max(trailing_sl, entry)
                 if trailing_sl > new_sl:
                     new_sl = trailing_sl
                     adjustment_reason = "trailing_continuous"
             else:
-                trailing_sl = self.peak_price * (1.0 + TRAILING_DISTANCE_PCT)
+                trailing_sl = self.peak_price * (1.0 + trail_dist)
                 # Never let trailing SL go above entry (minimum breakeven)
                 trailing_sl = min(trailing_sl, entry)
                 if new_sl <= 0 or trailing_sl < new_sl:
@@ -2008,6 +2400,39 @@ class HTFLiveBot:
             logger.info("Cooldown active: %.0fs remaining — HOLD", remaining)
             return None
 
+        # ── Guard: anti-whipsaw (block quick losing reversals) ──
+        # Case 1: Flat and last trade was opposite direction, lost, closed <2h ago.
+        # Case 2: In position and model wants to REVERSE — check if current position
+        #         was itself a reversal from a recent loss (whipsaw chain).
+        if action != ACTION_HOLD and self.last_close_direction != 0:
+            # Determine if this action would be opposite to the last closed direction
+            would_reverse_last_close = (
+                (self.last_close_direction == 1 and action == ACTION_SHORT) or
+                (self.last_close_direction == -1 and action == ACTION_LONG)
+            )
+            # Also catch same-iteration reversals: bot is LONG and model says SHORT
+            # (the close hasn't happened yet, but we know the new entry would be
+            # opposite to the CURRENT position which is the last close's direction)
+            is_live_reversal = (
+                (self.position == 1 and action == ACTION_SHORT) or
+                (self.position == -1 and action == ACTION_LONG)
+            )
+            check_whipsaw = (
+                (self.position == 0 and would_reverse_last_close) or
+                (is_live_reversal and self.last_close_pnl < 0)
+            )
+            if check_whipsaw:
+                hours_since_close = (now - self.last_close_time) / 3600.0 if self.last_close_time > 0 else 999
+                if self.last_close_pnl < 0 and hours_since_close < WHIPSAW_COOLDOWN_HOURS:
+                    logger.info(
+                        "🚫 Anti-whipsaw: last %s lost $%.2f, closed %.1fh ago — blocking %s reversal",
+                        "LONG" if self.last_close_direction == 1 else "SHORT",
+                        self.last_close_pnl,
+                        hours_since_close,
+                        ACTION_LABELS.get(action, "?"),
+                    )
+                    return None
+
         # ── Guard: minimum hold time ──
         # Exception: if the model wants to REVERSE direction (e.g. SHORT→LONG)
         # with high confidence (≥0.75), let it flip — the model should decide.
@@ -2016,11 +2441,13 @@ class HTFLiveBot:
             (self.position == -1 and action == ACTION_LONG)
         )
         if self.position != 0 and (now - self.last_entry_time) < MIN_HOLD_SECONDS:
-            if is_reversal and confidence >= 0.82:
+            # In structure-first mode, allow reversal if BOS/CHOCH confidence >= 0.65
+            reversal_conf_threshold = 0.65 if STRUCTURE_FIRST_MODE else 0.82
+            if is_reversal and confidence >= reversal_conf_threshold:
                 logger.info(
-                    "Min hold override: reversal %s→%s with conf=%.2f ≥ 0.82 — allowing flip",
+                    "Min hold override: reversal %s→%s with conf=%.2f ≥ %.2f — allowing flip",
                     "LONG" if self.position == 1 else "SHORT",
-                    ACTION_LABELS.get(action, "?"), confidence,
+                    ACTION_LABELS.get(action, "?"), confidence, reversal_conf_threshold,
                 )
             else:
                 remaining = MIN_HOLD_SECONDS - (now - self.last_entry_time)
@@ -2028,27 +2455,39 @@ class HTFLiveBot:
                 return None
 
         # ── Guard: confidence threshold (per-symbol or global) ──
-        min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
-        if action != ACTION_HOLD and confidence < min_conf:
-            logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
-            return None
-
-        # ── Guard: per-symbol directional confidence floor ──
-        if action != ACTION_HOLD:
-            direction_str = "LONG" if action == ACTION_LONG else "SHORT"
-            dir_floor = SYMBOL_DIRECTIONAL_CONF.get(self.symbol, {}).get(direction_str)
-            if dir_floor is not None and confidence < dir_floor:
-                logger.info("🚫 Directional floor: %s %s conf=%.2f < %.2f — HOLD", self.symbol, direction_str, confidence, dir_floor)
+        # SKIP in structure-first mode — BOS confidence != model confidence
+        if not STRUCTURE_FIRST_MODE:
+            min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
+            if action != ACTION_HOLD and confidence < min_conf:
+                logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
                 return None
 
+        # ── Guard: per-symbol directional confidence floor ──
+        # SKIP in structure-first mode — these are model-confidence calibrated
+        if not STRUCTURE_FIRST_MODE:
+            if action != ACTION_HOLD:
+                direction_str = "LONG" if action == ACTION_LONG else "SHORT"
+                dir_floor = SYMBOL_DIRECTIONAL_CONF.get(self.symbol, {}).get(direction_str)
+                if dir_floor is not None and confidence < dir_floor:
+                    logger.info("🚫 Directional floor: %s %s conf=%.2f < %.2f — HOLD", self.symbol, direction_str, confidence, dir_floor)
+                    return None
+
         # ── Guard: ranging regime filter ──
-        # In ranging markets (low ADX), require higher confidence to enter
+        # In structure-first mode, use ADX as hard block (no confidence comparison)
         if action != ACTION_HOLD and self.position == 0 and self.regime_detector is not None and self._last_df is not None:
             try:
                 regime_info = self.regime_detector.detect_regime(self._last_df)
                 regime_name = regime_info.regime.value
                 adx_val = getattr(regime_info, 'trend_strength', None) or 0.0
-                if adx_val < RANGING_ADX_THRESHOLD and confidence < RANGING_MIN_CONFIDENCE:
+                if STRUCTURE_FIRST_MODE:
+                    # In structure-first mode, just block on very low ADX
+                    if adx_val < ADX_GUARD_MIN:
+                        logger.info(
+                            "🚫 Structure-first ADX block: ADX=%.1f < %.1f — SKIP entry",
+                            adx_val, ADX_GUARD_MIN,
+                        )
+                        return None
+                elif adx_val < RANGING_ADX_THRESHOLD and confidence < RANGING_MIN_CONFIDENCE:
                     logger.info(
                         "🚫 Ranging regime filter: ADX=%.1f < %.1f, conf=%.2f < %.2f — SKIP entry",
                         adx_val, RANGING_ADX_THRESHOLD, confidence, RANGING_MIN_CONFIDENCE,
@@ -2108,22 +2547,25 @@ class HTFLiveBot:
 
         # ── Guard: Market Signal Gate ──
         # Low-confidence entries need confirmation from real market signals
-        # Applies to new entries AND reversals (close existing + open opposite)
-        if action != ACTION_HOLD and (self.position == 0 or
-            (self.position == 1 and action == ACTION_SHORT) or
-            (self.position == -1 and action == ACTION_LONG)):
-            if not self._check_signal_gate(action, confidence):
-                # For reversals: close the existing position flat (don't open opposite)
-                # This avoids double-loss from closing + immediately entering wrong direction
-                if is_reversal and self.position != 0:
-                    logger.info("Reversal gate BLOCKED — closing existing position flat, not flipping")
-                    return self._close_position(current_price, "REVERSAL_BLOCKED_CLOSE", confidence)
-                return None
+        # SKIP in structure-first mode — structure IS the primary signal, no confidence tiers
+        if not STRUCTURE_FIRST_MODE:
+            if action != ACTION_HOLD and (self.position == 0 or
+                (self.position == 1 and action == ACTION_SHORT) or
+                (self.position == -1 and action == ACTION_LONG)):
+                if not self._check_signal_gate(action, confidence):
+                    # For reversals: close the existing position flat (don't open opposite)
+                    # This avoids double-loss from closing + immediately entering wrong direction
+                    if is_reversal and self.position != 0:
+                        logger.info("Reversal gate BLOCKED — closing existing position flat, not flipping")
+                        return self._close_position(current_price, "REVERSAL_BLOCKED_CLOSE", confidence)
+                    return None
 
         trade: Optional[Dict] = None
 
         # ── CLOSE existing position if direction reverses ──
         if self.position == 1 and action == ACTION_SHORT:
+            if self._should_block_long_reversal():
+                return None
             trade = self._close_position(current_price, "REVERSE_CLOSE_LONG", confidence)
         elif self.position == -1 and action == ACTION_LONG:
             trade = self._close_position(current_price, "REVERSE_CLOSE_SHORT", confidence)
@@ -2326,6 +2768,11 @@ class HTFLiveBot:
         if net_pnl < 0:
             self.last_loss_time = time.time()
 
+        # Track last close for anti-whipsaw filter
+        self.last_close_direction = self.position  # 1=LONG, -1=SHORT
+        self.last_close_pnl = net_pnl
+        self.last_close_time = time.time()
+
         trade = {
             "action": action_str,
             "reason": reason,
@@ -2508,6 +2955,7 @@ class HTFLiveBot:
                             partial_pnl = (self.partial_tp1_price - self.position_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 1
                             old_sl = self.sl_price
                             self.sl_price = self.position_price  # Move SL to break-even
@@ -2533,7 +2981,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             # Sync updated SL to exchange
                             if not self.dry_run and self.testnet_executor:
@@ -2552,6 +3002,7 @@ class HTFLiveBot:
                             partial_pnl = (self.partial_tp2_price - self.position_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 2
                             level2_gain = self.partial_tp2_price - self.position_price
                             new_trailing_sl = self.position_price + level2_gain * 0.50
@@ -2586,7 +3037,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2604,6 +3057,7 @@ class HTFLiveBot:
                             partial_pnl = (self.position_price - self.partial_tp1_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 1
                             old_sl = self.sl_price
                             self.sl_price = self.position_price  # Move SL to break-even
@@ -2629,7 +3083,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2647,6 +3103,7 @@ class HTFLiveBot:
                             partial_pnl = (self.position_price - self.partial_tp2_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 2
                             level2_gain = self.position_price - self.partial_tp2_price
                             new_trailing_sl = self.position_price - level2_gain * 0.50
@@ -2681,7 +3138,9 @@ class HTFLiveBot:
                                 "new_sl": self.sl_price,
                                 "timestamp": datetime.now().isoformat(),
                                 "agent": "htf",
+                                "balance_after": self._get_real_balance(),
                             })
+                            self._sync_balance_from_exchange()
                             self._save_state()
                             if not self.dry_run and self.testnet_executor:
                                 try:
@@ -2708,16 +3167,16 @@ class HTFLiveBot:
                 status["realized_pnl"] = self.realized_pnl
                 return status
 
-            # Phase 1 §3.4: Time-based stagnant exit (>6h, PnL between -0.3% and +0.5%)
+            # Phase 1 §3.4: Time-based stagnant exit (see STAGNANT_* constants).
             # BUT: keep position if model confidence ≥ 0.80 OR 2/4 market signals agree
             if self.position != 0 and self.position_price > 0 and self.position_entry_time > 0:
                 _time_in_pos = time.time() - self.position_entry_time
-                if _time_in_pos > 21600:  # 6 hours
+                if _time_in_pos > STAGNANT_HOURS * 3600:
                     if self.position == 1:
                         _stagnant_pct = (current_price - self.position_price) / self.position_price
                     else:
                         _stagnant_pct = (self.position_price - current_price) / self.position_price
-                    if -0.003 <= _stagnant_pct <= 0.005:
+                    if STAGNANT_PCT_MIN <= _stagnant_pct <= STAGNANT_PCT_MAX:
                         # Check if we should KEEP the position despite stagnation
                         _keep_position = False
                         _keep_reason = ""
@@ -2798,9 +3257,10 @@ class HTFLiveBot:
                         else:
                             logger.info(
                                 "⏱️ TIME-BASED STAGNANT EXIT: %s in position %.1fh, "
-                                "PnL=%+.3f%% (within stagnant band [-0.3%%, +0.5%%]) "
+                                "PnL=%+.3f%% (within stagnant band [%+.1f%%, %+.1f%%]) "
                                 "— no model confidence or market signal support → closing",
                                 self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
+                                STAGNANT_PCT_MIN * 100, STAGNANT_PCT_MAX * 100,
                             )
                             stagnant_trade = self._close_position(current_price, "STAGNANT_EXIT", 1.0)
                             status["action"] = stagnant_trade.get("action", "CLOSE")
@@ -2809,23 +3269,36 @@ class HTFLiveBot:
                             status["realized_pnl"] = self.realized_pnl
                             return status
 
-            # 3. Compute observation
-            obs = self.compute_observation(df_15m)
-            if obs is None:
-                status["error"] = "Observation failed"
-                return status
+            # 3. Determine action — structure-first or model-first
+            if STRUCTURE_FIRST_MODE:
+                # Structure-first: BOS/CHOCH signals drive entry direction
+                struct_action = self._get_structure_direction(current_price, df_15m)
+                if struct_action is None:
+                    action = ACTION_HOLD
+                    confidence = 0.0
+                else:
+                    action = struct_action
+                    # Use BOS/CHOCH confidence from the structure signal
+                    sig = self._last_structure_signals or {}
+                    confidence = sig.get("confidence", 0.5)
+            else:
+                # Model-first (legacy): PPO model drives entry direction
+                obs = self.compute_observation(df_15m)
+                if obs is None:
+                    status["error"] = "Observation failed"
+                    return status
+                action, confidence = self.get_action(obs)
 
-            # 4. Get action from model
-            action, confidence = self.get_action(obs)
             status["action"] = ACTION_LABELS[action]
             status["confidence"] = confidence
 
             logger.info(
-                "Step: price=$%.2f action=%s conf=%.2f pos=%d bal=$%.2f",
+                "Step: price=$%.2f action=%s conf=%.2f pos=%d bal=$%.2f mode=%s",
                 current_price, ACTION_LABELS[action], confidence, self.position, self.balance,
+                "STRUCT" if STRUCTURE_FIRST_MODE else "MODEL",
             )
 
-            # 5. Execute trade
+            # 4. Execute trade (guards still apply: RSI, ADX, orderbook, exhaustion)
             trade = self.execute_trade(action, confidence, current_price)
             if trade:
                 status["action"] = trade.get("action", ACTION_LABELS[action])
@@ -2897,11 +3370,7 @@ class HTFLiveBot:
                     "WS_RECONNECTED",
                     f"WebSocket reconnected after {ws_state['reconnect_count']} retries"
                 )
-            else:
-                _write_connectivity_alert(
-                    "WS_CONNECTED",
-                    f"WebSocket connected to {self.symbol} aggTrade stream"
-                )
+            # Skip WS_CONNECTED alert on initial startup — it's just noise (4 symbols × 1 msg each)
             ws_state["connected"] = True
             ws_state["disconnect_alerted"] = False
             ws_state["last_tick_time"] = time.time()

@@ -17,6 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Self-anchor CWD so every relative path (data/*, logs/*) lands in the repo
+# regardless of caller. Supersedes the earlier partial _LOG_DIR anchor below.
+os.chdir(Path(__file__).resolve().parent)
+
 from dotenv import load_dotenv
 load_dotenv()
 

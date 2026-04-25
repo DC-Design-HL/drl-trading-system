@@ -27,6 +27,9 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Self-anchor CWD (defense-in-depth — see live_trading_all.py).
+os.chdir(Path(__file__).resolve().parent)
 from typing import Dict
 
 # Add project root to path

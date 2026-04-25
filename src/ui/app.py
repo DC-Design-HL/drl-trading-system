@@ -970,20 +970,37 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                 function drawStructureLine(sig, sigType) {{
                     const isFake = sig.is_fake;
                     const isBullish = sig.direction === 'bullish';
+                    const quality = sig.quality || 'normal';
+                    const hasDisplacement = sig.has_displacement || false;
+                    const isConfirmed = sig.is_confirmed || false;
+                    const breakDist = sig.break_distance_atr || 0;
+
+                    // Quality-based opacity: strong=full, normal=0.7, weak=0.4, fake=0.2
+                    const opacityMap = {{ strong: 1.0, normal: 0.7, weak: 0.4, fake: 0.2 }};
+                    const opacity = opacityMap[quality] || 0.7;
+
                     let lineColor;
                     if (sigType === 'bos') {{
                         lineColor = isBullish
-                            ? (isFake ? 'rgba(0, 230, 118, 0.3)' : 'rgba(0, 230, 118, 0.7)')
-                            : (isFake ? 'rgba(255, 82, 82, 0.3)' : 'rgba(255, 82, 82, 0.7)');
+                            ? `rgba(0, 230, 118, ${{opacity}})`
+                            : `rgba(255, 82, 82, ${{opacity}})`;
                     }} else {{
                         lineColor = isBullish
-                            ? (isFake ? 'rgba(66, 165, 245, 0.3)' : 'rgba(66, 165, 245, 0.8)')
-                            : (isFake ? 'rgba(255, 152, 0, 0.3)' : 'rgba(255, 152, 0, 0.8)');
+                            ? `rgba(66, 165, 245, ${{opacity}})`
+                            : `rgba(255, 152, 0, ${{opacity}})`;
                     }}
-                    const lineStyle = isFake ? 1 : 2;  // 1=Dotted, 2=Dashed
-                    const label = sigType === 'bos'
-                        ? (isBullish ? (isFake ? 'BOS↑(fake)' : 'BOS↑') : (isFake ? 'BOS↓(fake)' : 'BOS↓'))
-                        : (isBullish ? (isFake ? 'CHOCH↑(fake)' : 'CHOCH↑') : (isFake ? 'CHOCH↓(fake)' : 'CHOCH↓'));
+                    // Line style: strong=solid, normal=dashed, weak/fake=dotted
+                    const lineStyle = quality === 'strong' ? 0 : (quality === 'normal' ? 2 : 1);
+                    // Build label with quality badge
+                    let label = sigType === 'bos'
+                        ? (isBullish ? 'BOS↑' : 'BOS↓')
+                        : (isBullish ? 'CHOCH↑' : 'CHOCH↓');
+                    if (quality === 'strong') label += '★';
+                    else if (quality === 'weak') label += '⚠';
+                    else if (quality === 'fake') label += '✗';
+                    if (hasDisplacement) label += '⚡';
+                    if (sigType === 'choch' && isConfirmed) label += '✓';
+                    if (sigType === 'choch' && !isConfirmed && !isFake) label += '?';
 
                     // Candle B (break candle) index
                     const breakIdx = candleTimes.indexOf(sig.time);
@@ -992,31 +1009,29 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
 
                     if (breakIdx < 0) return;
 
-                    // Origin = Candle A wick price, Break = Candle B body price
-                    const originPrice = sig.origin_price || sig.level;
-                    const breakBodyPrice = sig.break_body_price || sig.level;
+                    // Horizontal line at the swing level from Candle A to Candle B
+                    const levelPrice = sig.level;
 
-                    // Start point: Candle A wick (or fallback to a few candles back)
+                    // Start point: Candle A (swing origin)
                     const startTime = originIdx >= 0 ? candleTimes[originIdx] : candleTimes[Math.max(0, breakIdx - 8)];
-                    const startPrice = originIdx >= 0 ? originPrice : sig.level;
 
-                    // End point: Candle B body
+                    // End point: Candle B (break candle)
                     const endTime = candleTimes[breakIdx];
-                    const endPrice = breakBodyPrice;
 
+                    const lineWidthMap = {{ strong: 3, normal: 2, weak: 1, fake: 1 }};
                     const lineSeries = chart.addLineSeries({{
                         color: lineColor,
-                        lineWidth: 2,
+                        lineWidth: lineWidthMap[quality] || 2,
                         lineStyle: lineStyle,
                         lastValueVisible: false,
                         priceLineVisible: false,
                         crosshairMarkerVisible: false,
                     }});
 
-                    // Draw diagonal line from A wick → B body
+                    // Draw horizontal line at the swing level from A to B
                     lineSeries.setData([
-                        {{ time: startTime, value: startPrice }},
-                        {{ time: endTime, value: endPrice }},
+                        {{ time: startTime, value: levelPrice }},
+                        {{ time: endTime, value: levelPrice }},
                     ]);
 
                     // Label marker at the break candle
@@ -1037,14 +1052,48 @@ def create_tradingview_chart_with_websocket(df: pd.DataFrame, trades: list, time
                 const chochSignals = msData.choch_signals || [];
                 chochSignals.forEach((choch) => drawStructureLine(choch, 'choch'));
 
-                // Log summary
+                // Log summary with enhanced fields
                 console.log('[chart] Market structure loaded:',
                     'swingH=' + (msData.swing_highs || []).length,
                     'swingL=' + (msData.swing_lows || []).length,
                     'BOS=' + bosSignals.length,
                     'CHOCH=' + chochSignals.length,
                     'trend=' + msData.trend,
+                    'strict=' + (msData.strict_trend || 'n/a'),
+                    'chop=' + (msData.is_chop || false),
+                    'lastDir=' + (msData.last_signal_direction || 'none'),
                     'conf=' + msData.confidence);
+
+                // ── Chop Zone indicator ──
+                if (msData.is_chop) {{
+                    // Add a subtle background band between last swing high and low
+                    const shPrices = (msData.swing_highs || []).map(s => s.price);
+                    const slPrices = (msData.swing_lows || []).map(s => s.price);
+                    if (shPrices.length && slPrices.length) {{
+                        const chopHigh = Math.max(...shPrices.slice(-3));
+                        const chopLow = Math.min(...slPrices.slice(-3));
+                        const chopMid = (chopHigh + chopLow) / 2;
+                        // Draw midline to indicate chop zone
+                        const chopLine = chart.addLineSeries({{
+                            color: 'rgba(255, 235, 59, 0.4)',
+                            lineWidth: 1,
+                            lineStyle: 4,  // SparseDotted
+                            lastValueVisible: true,
+                            priceLineVisible: false,
+                            crosshairMarkerVisible: false,
+                            title: 'CHOP',
+                        }});
+                        // Use first and last candle times for the line
+                        if (candleData.length >= 2) {{
+                            const firstTime = candleData[Math.max(0, candleData.length - 50)].time;
+                            const lastTime = candleData[candleData.length - 1].time;
+                            chopLine.setData([
+                                {{ time: firstTime, value: chopMid }},
+                                {{ time: lastTime, value: chopMid }},
+                            ]);
+                        }}
+                    }}
+                }}
             }} catch(msErr) {{
                 console.error('[BOS/CHOCH] Error rendering market structure:', msErr);
             }}
@@ -2104,7 +2153,19 @@ def main():
                 _n_bos = len(_ms_data.get('bos_signals', []))
                 _n_choch = len(_ms_data.get('choch_signals', []))
                 _ms_trend = _ms_data.get('trend', 'ranging')
-                _ms_info = f" | Structure: {_n_sh}H/{_n_sl}L swings, {_n_bos} BOS, {_n_choch} CHOCH, trend={_ms_trend}"
+                _ms_strict = _ms_data.get('strict_trend', 'ranging')
+                _ms_chop = _ms_data.get('is_chop', False)
+                _ms_last_dir = _ms_data.get('last_signal_direction', 'none')
+                # Count quality levels
+                _all_sigs = _ms_data.get('bos_signals', []) + _ms_data.get('choch_signals', [])
+                _n_strong = sum(1 for s in _all_sigs if s.get('quality') == 'strong')
+                _n_weak = sum(1 for s in _all_sigs if s.get('quality') == 'weak')
+                _n_fake = sum(1 for s in _all_sigs if s.get('quality') == 'fake')
+                _chop_tag = " | CHOP" if _ms_chop else ""
+                _quality_tag = f" | Q: {_n_strong}★ {_n_weak}⚠ {_n_fake}✗" if (_n_strong + _n_weak + _n_fake) > 0 else ""
+                _ms_info = (f" | Structure: {_n_sh}H/{_n_sl}L swings, {_n_bos} BOS, {_n_choch} CHOCH"
+                           f" | trend={_ms_trend} strict={_ms_strict} last={_ms_last_dir}"
+                           f"{_chop_tag}{_quality_tag}")
             st.caption(f"📍 {num_opens} entries + {num_closes} exits · 🟢 LONG ▲ · 🔴 SHORT ▼ · EXIT(SL) ■ · EXIT(TP) ■{_ms_info}")
         
         with tab_live_portfolio:
