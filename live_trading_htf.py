@@ -85,8 +85,14 @@ def _get_state_file(symbol: str = None) -> Path:
 # Risk pool = RISK_POOL_PCT of balance, divided into RISK_BUDGET_PARTS
 # Each trade risks exactly (risk_pool / budget_parts) dollars.
 # Margin is derived from liquidation buffer: liq must be SL + LIQ_BUFFER_PCT from entry.
-RISK_POOL_PCT = 0.10       # 10% of balance is the risk pool
-RISK_BUDGET_PARTS = 20     # Pool divided into 20 equal risk slots
+#
+# Aggressive-sizing rollout 2026-04-25 (target 30%/mo on $5K base):
+#   - RISK_POOL_PCT 0.10 → 0.30 (3× per-trade dollar_risk: $25 → $75)
+#   - FIXED_MAX_NOTIONAL 3000 → 6000 (allow the larger notional through)
+# Backtested 32.4%/mo on the recent 20d regime, 10% max DD.
+# Restore point: tag v-pre-aggressive-sizing-20260425.
+RISK_POOL_PCT = 0.30       # 30% of balance is the risk pool (was 0.10)
+RISK_BUDGET_PARTS = 20     # Pool divided into 20 equal risk slots (unchanged)
 LIQ_BUFFER_PCT = 0.01      # Liquidation must be 1% beyond SL from entry
 MAX_LEVERAGE = 50          # Hard cap on leverage (Binance testnet limit)
 
@@ -178,6 +184,25 @@ SIGNAL_GATE_OF_THRESHOLD = 0.20     # Order flow score magnitude to count as dir
 SIGNAL_GATE_OB_THRESHOLD = 0.30     # Orderbook imbalance magnitude to count as directional
 SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count as opposing
 
+# ── USDT Dominance (USDT.D) Filter ──
+# When stablecoin dominance is rising, capital is fleeing crypto → bad time
+# to LONG. We use a synthetic proxy: inverse momentum of the 4-symbol crypto
+# basket. If the basket dropped > USDT_D_THRESHOLD_PCT over the lookback
+# window, treat USDT.D as "rising" and block LONG entries. SHORTs are
+# unaffected (they benefit from this regime).
+#
+# Backtest evidence: docs/backtest-signal-combinations-2026-04-21.md and
+# backtest_dominance_filter.py — over 248 trades the variant
+# "ADX 15-40 + USDT.D 2h rising blocks LONG" lifted WR 58.5% → 65.8% and
+# pnl +$265 → +$431 (+62%, +7.3% WR).
+USDT_D_GUARD_ENABLED = True
+USDT_D_LOOKBACK_HOURS = 2
+USDT_D_THRESHOLD_PCT = 0.5   # 4-symbol basket must drop > 0.5% to flag "USDT.D rising"
+USDT_D_PROXY_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
+_USDT_D_CACHE_TTL_SECONDS = 600   # 10 min — share across all 4 bot threads
+_usdt_d_cache: dict = {"ts": 0, "rising": False, "basket_change_pct": 0.0}
+
+
 # ── Orderbook Guard (Golden Guard) ──
 # Blocks trades when orderbook bias contradicts the trade direction.
 # Applies to ALL tiers (including Tier 1 autonomous) — orderbook divergence
@@ -209,6 +234,11 @@ RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = re
 # Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
 ADX_GUARD_ENABLED = True
 ADX_GUARD_MIN = 20                  # Block all trades when ADX below this
+# ADX exhaustion: ADX>60 means the trend is overextended. Backtest
+# (docs/adx-exhaustion-guard-proposal.md, 53 trades): ADX>60 cluster has
+# 25% WR, -$67 PnL across 8 trades. Blocking saves +$81 net, asymmetric
+# risk/reward (2/8 winners avg +$6 vs 6/8 losers avg -$13). Deployed 2026-04-25.
+ADX_GUARD_MAX = 60                  # Block all trades when ADX above this
 
 # ── Rescue Rule ──
 # Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.
@@ -218,8 +248,9 @@ RESCUE_ENABLED = False
 RESCUE_MIN_CONFIDENCE = 0.90        # Model confidence threshold for rescue
 RESCUE_MIN_AGREES = 2               # Minimum signal agreements for rescue (out of 4: MTF, OF, whale, OB)
 
-# Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding
-FIXED_MAX_NOTIONAL = 3000.0  # USDT
+# Phase 1 §3.5: Hard cap on notional per trade to prevent martingale compounding.
+# Raised 3000 → 6000 on 2026-04-25 to accommodate the 3× position-size scaling.
+FIXED_MAX_NOTIONAL = 6000.0  # USDT
 
 # ── Structure-First Mode ──
 # When True, BOS/CHOCH signals are the PRIMARY entry trigger.
@@ -401,6 +432,45 @@ def _compute_btc_4h_ema_slope_pct(fetcher) -> Optional[float]:
         return slope_pct
     except Exception as exc:
         logger.debug("BTC regime slope fetch failed: %s", exc)
+        return cached
+
+
+def _is_usdt_dominance_rising(fetcher) -> Optional[bool]:
+    """Return True if USDT.D proxy is RISING over USDT_D_LOOKBACK_HOURS.
+
+    Synthetic proxy: average % change of the 4-symbol crypto basket over
+    the lookback window. If the basket dropped > USDT_D_THRESHOLD_PCT,
+    USDT.D is treated as rising (capital fleeing crypto). Cached across
+    all 4 bot threads. Returns None only on hard failure (no cache yet).
+    """
+    if not USDT_D_GUARD_ENABLED:
+        return False
+    now = time.time()
+    cached = _usdt_d_cache.get("rising")
+    if (now - _usdt_d_cache["ts"]) < _USDT_D_CACHE_TTL_SECONDS:
+        return cached
+    try:
+        changes_pct = []
+        for sym in USDT_D_PROXY_SYMBOLS:
+            df = fetcher.fetch_asset(sym, "1h", days=1)
+            if df is None or len(df) < USDT_D_LOOKBACK_HOURS + 1:
+                continue
+            closes = df["close"].astype(float).values
+            t_now = float(closes[-1])
+            t_lookback = float(closes[-(USDT_D_LOOKBACK_HOURS + 1)])
+            if t_lookback <= 0:
+                continue
+            changes_pct.append((t_now - t_lookback) / t_lookback * 100.0)
+        if not changes_pct:
+            return cached
+        avg_basket_change = sum(changes_pct) / len(changes_pct)
+        rising = avg_basket_change <= -USDT_D_THRESHOLD_PCT
+        _usdt_d_cache["rising"] = rising
+        _usdt_d_cache["basket_change_pct"] = avg_basket_change
+        _usdt_d_cache["ts"] = now
+        return rising
+    except Exception as exc:
+        logger.debug("USDT.D proxy fetch failed: %s", exc)
         return cached
 
 
@@ -1096,13 +1166,36 @@ class HTFLiveBot:
 
         return not blocked
 
+    def _check_usdt_d_guard(self, action: int) -> bool:
+        """USDT.D filter: block LONGs when stablecoin dominance is rising.
+
+        Returns True if ALLOWED, False if BLOCKED. Only affects LONG entries.
+        Fail-open: if the proxy can't be computed, allow the trade.
+        """
+        if not USDT_D_GUARD_ENABLED or action != ACTION_LONG:
+            return True
+        rising = _is_usdt_dominance_rising(self.fetcher)
+        if rising is None:
+            logger.debug("USDT.D proxy unavailable — allowing LONG (fail-open)")
+            return True
+        if rising:
+            basket_pct = _usdt_d_cache.get("basket_change_pct", 0.0)
+            logger.info(
+                "🛡️ USDT.D FILTER BLOCK: %s LONG blocked — crypto basket %+.2f%% over %dh "
+                "(below -%.2f%% threshold = USDT.D rising)",
+                self.symbol, basket_pct, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
+            )
+            return False
+        return True
+
     def _check_rsi_adx_guard(self, action: int, confidence: float) -> bool:
         """
         RSI Extreme + ADX Ranging Guard with Rescue Override.
 
         Blocks trades when:
         1. RSI extreme: LONG with 15m RSI > 70 (overbought) or SHORT with RSI < 30 (oversold)
-        2. ADX too low: ADX < 15 means no trend (ranging/choppy market)
+        2. ADX too low: ADX < ADX_GUARD_MIN means no trend (ranging/choppy market)
+        3. ADX too high: ADX > ADX_GUARD_MAX means trend exhaustion (overextended)
 
         Rescue Override: If blocked by RSI or ADX, but model confidence >= 0.90
         AND >= 2 market signals agree with the direction, ALLOW the trade anyway.
@@ -1158,9 +1251,13 @@ class HTFLiveBot:
         if ADX_GUARD_ENABLED:
             regime = market.get("regime", {})
             adx = regime.get("adx", 30) or 30
-            if isinstance(adx, (int, float)) and adx < ADX_GUARD_MIN:
-                adx_blocked = True
-                adx_reason = f"ADX={adx:.0f} < {ADX_GUARD_MIN} (ranging)"
+            if isinstance(adx, (int, float)):
+                if adx < ADX_GUARD_MIN:
+                    adx_blocked = True
+                    adx_reason = f"ADX={adx:.0f} < {ADX_GUARD_MIN} (ranging)"
+                elif adx > ADX_GUARD_MAX:
+                    adx_blocked = True
+                    adx_reason = f"ADX={adx:.0f} > {ADX_GUARD_MAX} (exhaustion / overextended trend)"
 
         if not rsi_blocked and not adx_blocked:
             return True  # No block needed
@@ -2543,6 +2640,16 @@ class HTFLiveBot:
             (self.position == 1 and action == ACTION_SHORT) or
             (self.position == -1 and action == ACTION_LONG)):
             if not self._check_rsi_adx_guard(action, confidence):
+                return None
+
+        # ── Guard: USDT.D Filter (LONG only) ──
+        # Block LONG entries when stablecoin dominance is rising (capital
+        # fleeing crypto). SHORTs unaffected. See USDT_D_* constants for
+        # backtest evidence and threshold reasoning.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_usdt_d_guard(action):
                 return None
 
         # ── Guard: Market Signal Gate ──
