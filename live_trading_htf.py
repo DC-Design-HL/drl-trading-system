@@ -104,10 +104,40 @@ TRAILING_DISTANCE_POST_TP1 = 0.008  # Trail 0.8% behind peak after TP1 hit — b
 COOLDOWN_SECONDS = 1800   # 30 min after a stopped-out trade
 MIN_HOLD_SECONDS = 3600   # 1 hour minimum hold (HTF signal is slower)
 
+# Time-based stagnant exit (hold > STAGNANT_HOURS, pnl in [STAGNANT_PCT_MIN, STAGNANT_PCT_MAX]).
+# Widened lower bound from -0.3% → -1.0% on 2026-04-25 after 35-day backtest
+# (456 reconstructed round-trips Mar 22 → Apr 25): widening to [-1.0%, +0.5%]
+# improved net pnl by +$49 over baseline, the most robust improvement (positive
+# in both 20d and 35d windows, 34 trades affected). Catches drifters that miss
+# SL but are clearly off-thesis at the 6h mark.
+STAGNANT_HOURS = 6.0
+STAGNANT_PCT_MIN = -0.010
+STAGNANT_PCT_MAX = 0.005
+
 # Anti-whipsaw: block quick losing reversals (Strategy E from backtest_whipsaw.py)
 # If previous trade was opposite direction, closed <2h ago, AND lost money → skip.
 # Backtested +$75.92 improvement; reverse-close pattern is 1W/12L.
 WHIPSAW_COOLDOWN_HOURS = 2.0
+
+# ── Asymmetric REVERSE_CLOSE_LONG guard (canary rollout) ──
+# Walk-forward counterfactual (2026-04-23, 66 trades over Apr 6-22) showed
+# REVERSE_CLOSE_LONG is systematically −$297 over the window while the
+# "held instead" counterfactual was +$1,462 — delta +$1,711 on LONG side,
+# 95% CI [+$1,408, +$1,976], P(delta>0)=100% across 10k bootstrap resamples.
+# Pattern is sign-consistent across all 4 symbols and both observed regimes
+# (uptrend and range). SHORT reversals have the OPPOSITE sign (blocking them
+# would cost ~$740), so guard applies to LONG only.
+#
+# Regime gate: the walk-forward window contained zero sustained BTC downtrend.
+# In a downtrend the LONG-reversal-is-wrong logic could plausibly invert, so
+# we only block when BTC 4h EMA slope over 20h > MIN_SLOPE_PCT (not in clear
+# downtrend). Graceful degradation to current behavior otherwise.
+#
+# Starts as a canary on XRP only (biggest offender: 11 trades, −$109 actual,
+# +$566 projected delta). Expand to BTC/ETH/SOL after 2 weeks of live signal.
+REVERSAL_BLOCK_LONG_CANARY_SYMBOLS: set = {"XRPUSDT"}
+REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT = -0.5
+_BTC_REGIME_CACHE_TTL_SECONDS = 900
 
 # Actions from PPO (must match HTFTradingEnv)
 ACTION_HOLD = 0
@@ -329,6 +359,52 @@ def find_best_htf_model(symbol: str = "BTCUSDT") -> Tuple[Optional[Path], Option
 
 
 # ---------------------------------------------------------------------------
+# BTC regime slope helper — shared across all symbol threads
+# ---------------------------------------------------------------------------
+
+# Module-level cache so 4 consolidated-mode symbol threads share one fetch.
+_btc_regime_cache = {"slope_pct": None, "ts": 0.0}
+
+
+def _compute_btc_4h_ema_slope_pct(fetcher) -> Optional[float]:
+    """Return BTC 4h EMA(10) slope over a trailing 20h window, as percent.
+
+    Result is cached for _BTC_REGIME_CACHE_TTL_SECONDS so the 4 symbol
+    threads running in the consolidated bot process share one fetch.
+    Returns the last cached value (possibly stale) if the fetch fails;
+    returns None only if no value has ever been computed.
+    """
+    now = time.time()
+    cached = _btc_regime_cache.get("slope_pct")
+    if cached is not None and (now - _btc_regime_cache["ts"]) < _BTC_REGIME_CACHE_TTL_SECONDS:
+        return cached
+    try:
+        df = fetcher.fetch_asset("BTCUSDT", "4h", days=7)
+        if df is None or len(df) < 15:
+            return cached
+        closes = df["close"].astype(float).values
+
+        def _ema(vals, period: int) -> float:
+            k = 2.0 / (period + 1)
+            e = float(vals[0])
+            for v in vals[1:]:
+                e = float(v) * k + e * (1 - k)
+            return e
+
+        ema_now = _ema(closes[-10:], 10)
+        ema_prev = _ema(closes[-15:-5], 10)
+        if ema_prev == 0:
+            return cached
+        slope_pct = (ema_now - ema_prev) / ema_prev * 100.0
+        _btc_regime_cache["slope_pct"] = slope_pct
+        _btc_regime_cache["ts"] = now
+        return slope_pct
+    except Exception as exc:
+        logger.debug("BTC regime slope fetch failed: %s", exc)
+        return cached
+
+
+# ---------------------------------------------------------------------------
 # HTF Live Bot
 # ---------------------------------------------------------------------------
 
@@ -379,6 +455,12 @@ class HTFLiveBot:
 
         # Phase 1 §3.4: Entry time tracking for time-based stagnant exit
         self.position_entry_time = 0.0
+
+        # Wall-clock time of the most recent partial-TP fire. Used by
+        # _sync_with_exchange to suppress upward position-units syncs for a
+        # grace window after a partial close, since the exchange may not yet
+        # reflect the reduce-only partial-close fill.
+        self.last_partial_close_time = 0.0
 
         # Cache of last fetched 15m DataFrame (used by _open_position for regime detection)
         self._last_df = None
@@ -817,12 +899,36 @@ class HTFLiveBot:
                         self.symbol, self.position_price, self.sl_price, self.tp_price,
                     )
                 elif abs(real_amt - self.position_units) > 0.0001:
-                    logger.info(
-                        "📐 Position sync: units=%.6f → exchange=%.6f (corrected)",
-                        self.position_units, real_amt,
-                    )
-                    self.position_units = real_amt
-                    self._save_state()
+                    # Only accept DOWNWARD corrections. Upward jumps are almost
+                    # always a partial-TP timing artifact: the bot has just
+                    # decremented position_units for a reduce-only partial close
+                    # that hasn't yet reflected on the exchange side. Trusting
+                    # the exchange here re-adds the closed units and causes the
+                    # eventual full-close pnl to double-count (see
+                    # memory/project_pnl_accounting_bug_apr23.md).
+                    grace = 60.0
+                    within_grace = (time.time() - self.last_partial_close_time) < grace
+                    if real_amt > self.position_units + 1e-4:
+                        logger.warning(
+                            "📐 Position sync skipped: exchange reports larger "
+                            "size (bot=%.6f, exchange=%.6f) — suspected partial-"
+                            "close settlement lag%s. Keeping bot-tracked units.",
+                            self.position_units, real_amt,
+                            " (within 60s grace after partial)" if within_grace else "",
+                        )
+                    elif within_grace:
+                        logger.info(
+                            "📐 Position sync skipped: within %.0fs grace after "
+                            "partial close (bot=%.6f, exchange=%.6f).",
+                            grace, self.position_units, real_amt,
+                        )
+                    else:
+                        logger.info(
+                            "📐 Position sync: units=%.6f → exchange=%.6f (corrected downward)",
+                            self.position_units, real_amt,
+                        )
+                        self.position_units = real_amt
+                        self._save_state()
         except Exception as exc:
             logger.warning("Position sync failed: %s", exc)
 
@@ -1122,6 +1228,40 @@ class HTFLiveBot:
             self.symbol, direction, " + ".join(reasons), confidence,
         )
         return False
+
+    def _should_block_long_reversal(self) -> bool:
+        """Canary guard: block REVERSE_CLOSE_LONG for specific symbols when the
+        BTC 4h regime is not a clear downtrend.
+
+        Returns True → skip the reversal close (position stays LONG, SL/TP
+        continues to protect it).  Returns False → let the reversal fire as
+        normal.
+
+        Regime gate ensures we fall back to current behavior in downtrend
+        regimes where the counterfactual evidence is absent.  Fail-open on
+        fetch errors so an outage of the klines endpoint never silently
+        disables trading.
+        """
+        if self.symbol not in REVERSAL_BLOCK_LONG_CANARY_SYMBOLS:
+            return False
+        slope_pct = _compute_btc_4h_ema_slope_pct(self.fetcher)
+        if slope_pct is None:
+            logger.warning(
+                "[%s] BTC regime slope unavailable — allowing LONG reversal (fail-open)",
+                self.symbol,
+            )
+            return False
+        if slope_pct <= REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT:
+            logger.info(
+                "[%s] LONG reversal allowed — BTC 4h slope %+.2f%% <= gate %+.2f%% (downtrend)",
+                self.symbol, slope_pct, REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT,
+            )
+            return False
+        logger.info(
+            "🛡️  [%s] REVERSE_CLOSE_LONG blocked (canary) — BTC 4h slope %+.2f%% > gate %+.2f%%",
+            self.symbol, slope_pct, REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT,
+        )
+        return True
 
     def _check_signal_gate(self, action: int, confidence: float) -> bool:
         """
@@ -2424,6 +2564,8 @@ class HTFLiveBot:
 
         # ── CLOSE existing position if direction reverses ──
         if self.position == 1 and action == ACTION_SHORT:
+            if self._should_block_long_reversal():
+                return None
             trade = self._close_position(current_price, "REVERSE_CLOSE_LONG", confidence)
         elif self.position == -1 and action == ACTION_LONG:
             trade = self._close_position(current_price, "REVERSE_CLOSE_SHORT", confidence)
@@ -2813,6 +2955,7 @@ class HTFLiveBot:
                             partial_pnl = (self.partial_tp1_price - self.position_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 1
                             old_sl = self.sl_price
                             self.sl_price = self.position_price  # Move SL to break-even
@@ -2859,6 +3002,7 @@ class HTFLiveBot:
                             partial_pnl = (self.partial_tp2_price - self.position_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 2
                             level2_gain = self.partial_tp2_price - self.position_price
                             new_trailing_sl = self.position_price + level2_gain * 0.50
@@ -2913,6 +3057,7 @@ class HTFLiveBot:
                             partial_pnl = (self.position_price - self.partial_tp1_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 1
                             old_sl = self.sl_price
                             self.sl_price = self.position_price  # Move SL to break-even
@@ -2958,6 +3103,7 @@ class HTFLiveBot:
                             partial_pnl = (self.position_price - self.partial_tp2_price) * partial_units
                             self.realized_pnl += partial_pnl
                             self.position_units -= partial_units
+                            self.last_partial_close_time = time.time()
                             self.partial_tp_level = 2
                             level2_gain = self.position_price - self.partial_tp2_price
                             new_trailing_sl = self.position_price - level2_gain * 0.50
@@ -3021,16 +3167,16 @@ class HTFLiveBot:
                 status["realized_pnl"] = self.realized_pnl
                 return status
 
-            # Phase 1 §3.4: Time-based stagnant exit (>6h, PnL between -0.3% and +0.5%)
+            # Phase 1 §3.4: Time-based stagnant exit (see STAGNANT_* constants).
             # BUT: keep position if model confidence ≥ 0.80 OR 2/4 market signals agree
             if self.position != 0 and self.position_price > 0 and self.position_entry_time > 0:
                 _time_in_pos = time.time() - self.position_entry_time
-                if _time_in_pos > 21600:  # 6 hours
+                if _time_in_pos > STAGNANT_HOURS * 3600:
                     if self.position == 1:
                         _stagnant_pct = (current_price - self.position_price) / self.position_price
                     else:
                         _stagnant_pct = (self.position_price - current_price) / self.position_price
-                    if -0.003 <= _stagnant_pct <= 0.005:
+                    if STAGNANT_PCT_MIN <= _stagnant_pct <= STAGNANT_PCT_MAX:
                         # Check if we should KEEP the position despite stagnation
                         _keep_position = False
                         _keep_reason = ""
@@ -3111,9 +3257,10 @@ class HTFLiveBot:
                         else:
                             logger.info(
                                 "⏱️ TIME-BASED STAGNANT EXIT: %s in position %.1fh, "
-                                "PnL=%+.3f%% (within stagnant band [-0.3%%, +0.5%%]) "
+                                "PnL=%+.3f%% (within stagnant band [%+.1f%%, %+.1f%%]) "
                                 "— no model confidence or market signal support → closing",
                                 self.symbol, _time_in_pos / 3600, _stagnant_pct * 100,
+                                STAGNANT_PCT_MIN * 100, STAGNANT_PCT_MAX * 100,
                             )
                             stagnant_trade = self._close_position(current_price, "STAGNANT_EXIT", 1.0)
                             status["action"] = stagnant_trade.get("action", "CLOSE")

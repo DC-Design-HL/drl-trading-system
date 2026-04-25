@@ -21,6 +21,10 @@ import threading
 import time
 from pathlib import Path
 
+# Self-anchor CWD (defense-in-depth against cron/watchdog launches with
+# wrong CWD — see live_trading_all.py for the 2026-04-24 incident).
+os.chdir(Path(__file__).resolve().parent)
+
 # Load .env so api_server can reach storage/exchange APIs
 from dotenv import load_dotenv
 load_dotenv()

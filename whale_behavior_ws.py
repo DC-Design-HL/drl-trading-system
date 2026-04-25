@@ -21,6 +21,9 @@ from typing import Dict, Set
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Self-anchor CWD (defense-in-depth — see live_trading_all.py).
+os.chdir(Path(__file__).resolve().parent)
+
 try:
     from dotenv import load_dotenv
     load_dotenv()

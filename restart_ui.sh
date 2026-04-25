@@ -6,6 +6,10 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG="$REPO/logs"
 PIDS="$REPO/logs/running_services.json"
 
+# Anchor CWD to the repo so Streamlit inherits it. See start_services.sh
+# for the full explanation of the 2026-04-24 incident.
+cd "$REPO"
+
 set -a
 source "$REPO/.env"
 export OMP_NUM_THREADS=1

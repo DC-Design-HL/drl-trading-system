@@ -29,6 +29,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Belt-and-suspenders: self-anchor CWD to this file's directory. The shell
+# launcher (start_services.sh) already does `cd "$REPO"`, but if this script
+# is ever invoked from another caller with a different CWD, every relative
+# path (data/models, data/trading.db, logs/*) would silently target the wrong
+# tree. Incident 2026-04-22 20:28 → 2026-04-24 08:50: cron-triggered restarts
+# ran with CWD=$HOME, writing 36h of bot activity to /home/claude/{data,logs}.
+os.chdir(Path(__file__).resolve().parent)
+
 try:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env", override=False)

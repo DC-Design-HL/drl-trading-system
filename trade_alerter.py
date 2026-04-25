@@ -16,6 +16,11 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime
 
+# Self-anchor CWD so the relative paths below target the repo tree even
+# if the launcher forgets to `cd "$REPO"`. See live_trading_all.py for the
+# 2026-04-24 incident that motivated this.
+os.chdir(Path(__file__).resolve().parent)
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -336,11 +341,13 @@ def format_open_trade(alert: dict) -> str:
         lines.append("")
         lines.extend(signal_lines)
 
-    # Whale behavior model signal (display only — sell-focused)
-    whale_lines = _format_whale_behavior()
-    if whale_lines:
+    # Display-only: whale flow + news sentiment signals (direction + confidence).
+    # Shown in every open alert for later stats analysis. Not consumed by
+    # decision logic.
+    wn_lines = _format_whale_news_lines(symbol)
+    if wn_lines:
         lines.append("")
-        lines.extend(whale_lines)
+        lines.extend(wn_lines)
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -429,11 +436,13 @@ def format_close_trade(alert: dict) -> str:
         lines.append("")
         lines.extend(signal_lines)
 
-    # Whale behavior model signal (display only — sell-focused)
-    whale_lines = _format_whale_behavior()
-    if whale_lines:
+    # Display-only: whale flow + news sentiment signals (direction + confidence).
+    # Shown in every close alert for later stats analysis. Not consumed by
+    # decision logic.
+    wn_lines = _format_whale_news_lines(symbol)
+    if wn_lines:
         lines.append("")
-        lines.extend(whale_lines)
+        lines.extend(wn_lines)
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -505,6 +514,12 @@ def format_partial_close(alert: dict) -> str:
         lines.append("📍 Trailing stop: ACTIVE")
 
     lines.append(f"📈 Strategy: {_format_strategy(strategy)}")
+
+    # Display-only whale + news signals (same as open/close alerts).
+    wn_lines = _format_whale_news_lines(symbol)
+    if wn_lines:
+        lines.append("")
+        lines.extend(wn_lines)
 
     ts = _format_timestamp(alert.get("timestamp", ""))
     if ts:
@@ -608,50 +623,231 @@ def format_liquidation_risk(alert: dict) -> str:
     return "\n".join(lines)
 
 
-def _format_whale_behavior() -> list:
-    """Format whale behavior model signal — sell-focused."""
-    whale_beh = _get_whale_signal()
-    if not whale_beh or whale_beh.get("intent") in ("unavailable", "no_data", None):
+# Wallet classification used by the basic whale-flow heuristic. When the
+# trained LSTM is unavailable we fall back to a simple "which side of the
+# market is accumulating" signal based on raw on-chain flow.
+_EXCHANGE_WALLET_HINTS = (
+    "binance_hot_wallet", "binance_cold_wallet", "binance_cold_2",
+    "binance_reserve", "coinbase_institutional", "kraken_deposit",
+)
+_WHALE_WALLET_HINTS = (
+    "smart_money_whale_1", "jump_trading", "galaxy_digital", "robinhood",
+    "eth_2.0_deposit_contract",
+)
+_WHALE_DATA_DIR = Path("data/whale_behavior/eth")
+
+
+def _tail_jsonl_since(path: Path, since_ts: float, max_bytes: int = 131072) -> list:
+    """Read the tail of a jsonl file and return entries with timestamp >= since_ts.
+
+    Reads up to max_bytes from the end to avoid parsing huge history files.
+    For ~30 min windows 128 KB is plenty; some files have microsecond
+    resolution and would exceed, but on those we over-fetch harmlessly.
+    """
+    try:
+        size = path.stat().st_size
+    except Exception:
         return []
+    read_from = max(0, size - max_bytes)
+    try:
+        with open(path, "rb") as f:
+            f.seek(read_from)
+            if read_from > 0:
+                f.readline()  # partial line — discard
+            raw = f.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        ts = o.get("timestamp", 0)
+        if isinstance(ts, (int, float)) and ts >= since_ts:
+            out.append(o)
+    return out
 
-    lines = []
-    sell_conf = whale_beh.get("sell_confidence", 0)
-    buy_conf = whale_beh.get("buy_confidence", 0)
-    active = whale_beh.get("active_wallets", 0)
-    details = whale_beh.get("wallet_details", {})
 
-    # Find wallets with strong sell signals
-    sellers = []
-    for name, d in details.items():
-        sell_p = d.get("probs", {}).get("SELL", 0)
-        if sell_p >= 0.40:
-            # Shorten wallet names for readability
-            short = name.replace("binance_", "B.").replace("_wallet", "").replace("_", " ").title()
-            sellers.append((short, sell_p))
-    sellers.sort(key=lambda x: x[1], reverse=True)
+def _basic_whale_flow_signal(window_minutes: int = 30) -> dict:
+    """Compute a basic whale-flow direction/confidence from raw tx data.
 
-    # Overall whale sell pressure indicator
-    if sell_conf >= 0.50:
-        emoji = "🔴"
-        label = "SELL PRESSURE"
-    elif sell_conf >= 0.35:
-        emoji = "⚠️"
-        label = "Mild sell"
-    elif buy_conf >= 0.40:
-        emoji = "🟢"
-        label = "Accumulating"
+    Bullish flow:  ETH leaving exchange wallets, ETH entering known whale wallets.
+    Bearish flow:  ETH entering exchange wallets, ETH leaving known whale wallets.
+
+    Returns:
+        {direction: 'LONG' | 'SHORT' | 'NEUTRAL', confidence: 0.0-1.0,
+         bullish_eth: float, bearish_eth: float, tx_count: int, window_min: int}
+    """
+    now = time.time()
+    since_ts = now - window_minutes * 60
+    bullish = 0.0
+    bearish = 0.0
+    count = 0
+
+    if not _WHALE_DATA_DIR.is_dir():
+        return {"direction": "NEUTRAL", "confidence": 0.0, "bullish_eth": 0.0,
+                "bearish_eth": 0.0, "tx_count": 0, "window_min": window_minutes}
+
+    for f in _WHALE_DATA_DIR.glob("*.jsonl"):
+        stem = f.stem.lower()
+        is_exchange = any(h in stem for h in _EXCHANGE_WALLET_HINTS)
+        is_whale = any(h in stem for h in _WHALE_WALLET_HINTS)
+        if not (is_exchange or is_whale):
+            continue
+        for o in _tail_jsonl_since(f, since_ts):
+            action = o.get("action", "")
+            if action == "CONTRACT_CALL":
+                continue
+            value = float(o.get("value_eth", 0) or 0)
+            if value < 0.1:  # drop dust (most IN-direction exchange txs are 1e-18 placeholders)
+                continue
+            direction = o.get("direction", "")
+            if is_exchange:
+                if direction == "in":
+                    bearish += value
+                elif direction == "out":
+                    bullish += value
+            else:  # whale
+                if direction == "in":
+                    bullish += value
+                elif direction == "out":
+                    bearish += value
+            count += 1
+
+    total = bullish + bearish
+    if total <= 0:
+        return {"direction": "NEUTRAL", "confidence": 0.0, "bullish_eth": 0.0,
+                "bearish_eth": 0.0, "tx_count": count, "window_min": window_minutes}
+    net = bullish - bearish
+    if abs(net) < 0.15 * total:
+        direction = "NEUTRAL"
+        conf = 0.0
+    elif net > 0:
+        direction = "LONG"
+        conf = min(1.0, abs(net) / total)
     else:
-        emoji = "🐋"
-        label = "Neutral"
+        direction = "SHORT"
+        conf = min(1.0, abs(net) / total)
+    return {"direction": direction, "confidence": conf,
+            "bullish_eth": bullish, "bearish_eth": bearish,
+            "tx_count": count, "window_min": window_minutes}
 
-    line = f"{emoji} Whale Signal: {label} (sell={sell_conf:.0%} buy={buy_conf:.0%})"
-    lines.append(line)
 
-    # Show individual distributing wallets
-    if sellers:
-        seller_parts = [f"{name} {p:.0%}" for name, p in sellers[:3]]
-        lines.append(f"   Distributing: {' | '.join(seller_parts)}")
+def _basic_news_signal(symbol: str, window_minutes: int = 60) -> dict:
+    """Aggregate news_events sentiment for the target asset over recent window.
 
+    Events tagged with the exact asset (e.g. 'BTC') or 'ALL' (market-wide) are
+    included. Sentiment is the confidence-weighted mean of sentiment_score over
+    the window.
+
+    Returns:
+        {direction: 'LONG' | 'SHORT' | 'NEUTRAL', confidence: 0.0-1.0,
+         weighted_score: -1.0..+1.0, event_count: int, window_min: int}
+    """
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+    asset = symbol.replace("USDT", "").replace("USDC", "").upper()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
+    try:
+        con = sqlite3.connect("data/trading.db")
+        cur = con.cursor()
+        cur.execute(
+            "SELECT sentiment_score, confidence, assets FROM news_events "
+            "WHERE created_at > ? ORDER BY created_at DESC",
+            (cutoff,),
+        )
+        rows = cur.fetchall()
+        con.close()
+    except Exception:
+        return {"direction": "NEUTRAL", "confidence": 0.0, "weighted_score": 0.0,
+                "event_count": 0, "window_min": window_minutes}
+
+    total_weight = 0.0
+    weighted_sum = 0.0
+    n = 0
+    for score, conf, assets_json in rows:
+        if score is None or conf is None:
+            continue
+        try:
+            assets = json.loads(assets_json) if assets_json else []
+        except Exception:
+            continue
+        if asset not in assets and "ALL" not in assets:
+            continue
+        w = float(conf)
+        weighted_sum += float(score) * w
+        total_weight += w
+        n += 1
+    if total_weight <= 0 or n == 0:
+        return {"direction": "NEUTRAL", "confidence": 0.0, "weighted_score": 0.0,
+                "event_count": 0, "window_min": window_minutes}
+    weighted_score = weighted_sum / total_weight
+    if weighted_score > 0.2:
+        direction = "LONG"
+        conf = min(1.0, abs(weighted_score))
+    elif weighted_score < -0.2:
+        direction = "SHORT"
+        conf = min(1.0, abs(weighted_score))
+    else:
+        direction = "NEUTRAL"
+        conf = 0.0
+    return {"direction": direction, "confidence": conf, "weighted_score": weighted_score,
+            "event_count": n, "window_min": window_minutes}
+
+
+def _format_whale_news_lines(symbol: str) -> list:
+    """Append both whale-flow + news signals as display-only lines for the alert.
+
+    These are STATISTICS ONLY — not consumed by decision logic. Chen wants them
+    so that the alert stream is a single place to compare model intent vs
+    whale/news signal over time, independent of the bot's decision.
+    """
+    lines = []
+    # --- Whale ---
+    whale_ml = _get_whale_signal()
+    if whale_ml and whale_ml.get("intent") not in ("unavailable", "no_data", None):
+        sell_conf = whale_ml.get("sell_confidence", 0)
+        buy_conf = whale_ml.get("buy_confidence", 0)
+        # ML direction: SHORT if sell pressure dominant, LONG if buy, else NEUTRAL
+        if sell_conf >= 0.50 and sell_conf > buy_conf:
+            d = "SHORT"; c = sell_conf
+        elif buy_conf >= 0.40 and buy_conf > sell_conf:
+            d = "LONG"; c = buy_conf
+        else:
+            d = "NEUTRAL"; c = max(sell_conf, buy_conf)
+        lines.append(f"🐋 Whale (ml): {d} @ {c*100:.0f}% conf  (sell={sell_conf:.0%} buy={buy_conf:.0%})")
+    else:
+        w = _basic_whale_flow_signal(30)
+        emoji = {"LONG": "🟢", "SHORT": "🔴", "NEUTRAL": "⚪️"}[w["direction"]]
+        lines.append(
+            f"🐋 Whale (basic, {w['window_min']}m): {emoji} {w['direction']} "
+            f"@ {w['confidence']*100:.0f}% conf"
+        )
+        if w["tx_count"] > 0:
+            lines.append(
+                f"   flows: bullish {w['bullish_eth']:.1f} ETH | "
+                f"bearish {w['bearish_eth']:.1f} ETH | tx {w['tx_count']}"
+            )
+        else:
+            lines.append(f"   flows: no meaningful on-chain activity in window")
+
+    # --- News ---
+    n = _basic_news_signal(symbol, 60)
+    emoji = {"LONG": "🟢", "SHORT": "🔴", "NEUTRAL": "⚪️"}[n["direction"]]
+    lines.append(
+        f"📰 News ({n['window_min']}m, {symbol.replace('USDT','')}+ALL): "
+        f"{emoji} {n['direction']} @ {n['confidence']*100:.0f}% conf"
+    )
+    if n["event_count"] > 0:
+        lines.append(
+            f"   weighted score: {n['weighted_score']:+.2f} | events: {n['event_count']}"
+        )
+    else:
+        lines.append(f"   no relevant news in window")
     return lines
 
 
