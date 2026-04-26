@@ -197,7 +197,16 @@ SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count
 # pnl +$265 → +$431 (+62%, +7.3% WR).
 USDT_D_GUARD_ENABLED = True
 USDT_D_LOOKBACK_HOURS = 2
-USDT_D_THRESHOLD_PCT = 0.5   # 4-symbol basket must drop > 0.5% to flag "USDT.D rising"
+# Threshold widened 0.5 → 0.7 on 2026-04-26 after threshold-sensitivity backtest
+# (scripts/backtest_usdt_d_threshold.py, 152 LONG trades over 20d):
+#   -0.5% deployed: blocked 17 trades, blocking netted +$3.84 (i.e. mild loss
+#                   vs no-filter, blocking some net-winners)
+#   -0.7% chosen:   blocks 13 trades, allowed-set WR rises 54.6% → 56.1%,
+#                   net delta +$23 over 20d at 1× / ~$120/mo at 3× sizing
+# -0.7% was the most robust positive option (-0.4% was higher EV but noisier,
+# dominated by a single trade swing). All 5 worst LONG losers had basket
+# < -0.9% so they're still blocked at the wider threshold.
+USDT_D_THRESHOLD_PCT = 0.7   # 4-symbol basket must drop > 0.7% to flag "USDT.D rising"
 USDT_D_PROXY_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
 _USDT_D_CACHE_TTL_SECONDS = 600   # 10 min — share across all 4 bot threads
 _usdt_d_cache: dict = {"ts": 0, "rising": False, "basket_change_pct": 0.0}

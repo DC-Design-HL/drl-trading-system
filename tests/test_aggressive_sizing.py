@@ -53,10 +53,13 @@ def test_adx_exhaustion_block() -> None:
 
 
 def test_usdt_d_filter_config() -> None:
-    """USDT.D filter must be on, with the documented 4-symbol basket."""
+    """USDT.D filter must be on, with the documented 4-symbol basket.
+    Threshold tuned 0.5 → 0.7 on 2026-04-26 after threshold-sensitivity backtest
+    (scripts/backtest_usdt_d_threshold.py).
+    """
     assert USDT_D_GUARD_ENABLED is True
     assert USDT_D_LOOKBACK_HOURS == 2
-    assert USDT_D_THRESHOLD_PCT == 0.5
+    assert USDT_D_THRESHOLD_PCT == 0.7
     assert set(USDT_D_PROXY_SYMBOLS) == {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"}
 
 
