@@ -447,31 +447,50 @@ def _is_usdt_dominance_rising(fetcher) -> Optional[bool]:
         return False
     now = time.time()
     cached = _usdt_d_cache.get("rising")
-    if (now - _usdt_d_cache["ts"]) < _USDT_D_CACHE_TTL_SECONDS:
+    cached_change = _usdt_d_cache.get("basket_change_pct")
+    if _usdt_d_cache.get("ts") and (now - _usdt_d_cache["ts"]) < _USDT_D_CACHE_TTL_SECONDS:
         return cached
     try:
-        changes_pct = []
+        per_sym = {}
         for sym in USDT_D_PROXY_SYMBOLS:
             df = fetcher.fetch_asset(sym, "1h", days=1)
             if df is None or len(df) < USDT_D_LOOKBACK_HOURS + 1:
+                per_sym[sym] = None
                 continue
             closes = df["close"].astype(float).values
             t_now = float(closes[-1])
             t_lookback = float(closes[-(USDT_D_LOOKBACK_HOURS + 1)])
             if t_lookback <= 0:
+                per_sym[sym] = None
                 continue
-            changes_pct.append((t_now - t_lookback) / t_lookback * 100.0)
-        if not changes_pct:
-            return cached
-        avg_basket_change = sum(changes_pct) / len(changes_pct)
+            per_sym[sym] = (t_now - t_lookback) / t_lookback * 100.0
+        valid = [v for v in per_sym.values() if v is not None]
+        if not valid:
+            logger.warning(
+                "USDT.D proxy: all %d symbol fetches returned no data — fail-open",
+                len(USDT_D_PROXY_SYMBOLS),
+            )
+            return None
+        avg_basket_change = sum(valid) / len(valid)
         rising = avg_basket_change <= -USDT_D_THRESHOLD_PCT
+        # Diagnostic: visible in bots_live.log so we can see what the filter
+        # observed on every cache refresh, even when it didn't fire.
+        logger.info(
+            "USDT.D proxy: basket %+.3f%% over %dh (threshold -%.2f%%) → rising=%s | "
+            "BTC=%s ETH=%s SOL=%s XRP=%s",
+            avg_basket_change, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT, rising,
+            f"{per_sym.get('BTCUSDT'):+.3f}%" if per_sym.get('BTCUSDT') is not None else "n/a",
+            f"{per_sym.get('ETHUSDT'):+.3f}%" if per_sym.get('ETHUSDT') is not None else "n/a",
+            f"{per_sym.get('SOLUSDT'):+.3f}%" if per_sym.get('SOLUSDT') is not None else "n/a",
+            f"{per_sym.get('XRPUSDT'):+.3f}%" if per_sym.get('XRPUSDT') is not None else "n/a",
+        )
         _usdt_d_cache["rising"] = rising
         _usdt_d_cache["basket_change_pct"] = avg_basket_change
         _usdt_d_cache["ts"] = now
         return rising
     except Exception as exc:
-        logger.debug("USDT.D proxy fetch failed: %s", exc)
-        return cached
+        logger.warning("USDT.D proxy fetch failed: %s — fail-open", exc)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1175,17 +1194,26 @@ class HTFLiveBot:
         if not USDT_D_GUARD_ENABLED or action != ACTION_LONG:
             return True
         rising = _is_usdt_dominance_rising(self.fetcher)
+        basket_pct = _usdt_d_cache.get("basket_change_pct")
         if rising is None:
-            logger.debug("USDT.D proxy unavailable — allowing LONG (fail-open)")
+            logger.warning(
+                "🛡️ USDT.D guard: proxy unavailable for %s LONG — allowing (fail-open)",
+                self.symbol,
+            )
             return True
         if rising:
-            basket_pct = _usdt_d_cache.get("basket_change_pct", 0.0)
             logger.info(
-                "🛡️ USDT.D FILTER BLOCK: %s LONG blocked — crypto basket %+.2f%% over %dh "
+                "🛡️ USDT.D FILTER BLOCK: %s LONG blocked — crypto basket %+.3f%% over %dh "
                 "(below -%.2f%% threshold = USDT.D rising)",
-                self.symbol, basket_pct, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
+                self.symbol, basket_pct or 0.0, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
             )
             return False
+        # PASS — also log so we can confirm the guard is being checked at all.
+        logger.info(
+            "🛡️ USDT.D guard PASS: %s LONG — basket %+.3f%% over %dh (above -%.2f%% threshold)",
+            self.symbol, basket_pct if basket_pct is not None else 0.0,
+            USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
+        )
         return True
 
     def _check_rsi_adx_guard(self, action: int, confidence: float) -> bool:
