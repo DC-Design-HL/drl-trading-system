@@ -29,20 +29,22 @@ from live_trading_htf import (
 
 
 def test_aggressive_sizing_constants() -> None:
-    """Three sizing constants form the 30%/mo lever; all must move together."""
-    assert RISK_POOL_PCT == 0.30, "Risk pool must be 30% on this branch (was 10%)."
-    assert RISK_BUDGET_PARTS == 20, "Budget parts unchanged at 20 — only the pool grew."
-    assert FIXED_MAX_NOTIONAL == 6000.0, "Notional cap must be raised so $5K trades fit."
+    """Sizing was stepped back 3× → 2× on 2026-04-27 after -8.18% drawdown.
+    Notional cap stays at 6000 from the original aggressive bundle.
+    See tests/test_filter_option_a.py for the canonical post-rollback assertions.
+    """
+    assert RISK_POOL_PCT == 0.20, "Risk pool must be 20% (2× sizing post-rollback)."
+    assert RISK_BUDGET_PARTS == 20
+    assert FIXED_MAX_NOTIONAL == 6000.0
 
 
 def test_per_trade_risk_dollars_at_5k_balance() -> None:
-    """Sanity: at $5K balance, dollar_risk per trade = $75 (1.5% of balance)."""
+    """Sanity: at $5K balance, dollar_risk per trade = $50 (1.0% of balance) at 2× sizing."""
     balance = 5_000
     pool = balance * RISK_POOL_PCT
     risk_per_trade = pool / RISK_BUDGET_PARTS
-    assert risk_per_trade == 75.0, (
-        f"Expected $75/trade at $5K balance, got ${risk_per_trade}. "
-        f"If this changes, the 30%/mo target math no longer applies."
+    assert risk_per_trade == 50.0, (
+        f"Expected $50/trade at $5K balance under 2× sizing, got ${risk_per_trade}."
     )
 
 

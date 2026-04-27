@@ -91,7 +91,12 @@ def _get_state_file(symbol: str = None) -> Path:
 #   - FIXED_MAX_NOTIONAL 3000 → 6000 (allow the larger notional through)
 # Backtested 32.4%/mo on the recent 20d regime, 10% max DD.
 # Restore point: tag v-pre-aggressive-sizing-20260425.
-RISK_POOL_PCT = 0.30       # 30% of balance is the risk pool (was 0.10)
+#
+# Stepped 0.30 → 0.20 (3× → 2×) on 2026-04-27 after equity drew down -8.18%
+# in 42h. Per-symbol filters added in same commit (see SYMBOL_SIDE_BLOCKLIST
+# below) to prevent the loser combos that drove the drawdown.
+# Restore point for the 3×-no-filter state: tag v-3x-no-filters-20260427.
+RISK_POOL_PCT = 0.20       # 20% of balance is the risk pool (was 0.30, originally 0.10)
 RISK_BUDGET_PARTS = 20     # Pool divided into 20 equal risk slots (unchanged)
 LIQ_BUFFER_PCT = 0.01      # Liquidation must be 1% beyond SL from entry
 MAX_LEVERAGE = 50          # Hard cap on leverage (Binance testnet limit)
@@ -183,6 +188,33 @@ SIGNAL_GATE_MIN_CONFIRMS = 2        # Need at least 2/4 signals to agree
 SIGNAL_GATE_OF_THRESHOLD = 0.20     # Order flow score magnitude to count as directional
 SIGNAL_GATE_OB_THRESHOLD = 0.30     # Orderbook imbalance magnitude to count as directional
 SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count as opposing
+
+# ── Per-symbol-side blocklist (loser combos) ──
+# Backtest 2026-04-26 over 288 round-trips (Apr 6 → Apr 26) showed clear
+# asymmetric per-symbol/side performance:
+#   Profitable: SOL SHORT (75.6% WR), XRP both, BTC LONG  → +$332
+#   Losing:    BTC SHORT (40.7% WR -$68), ETH SHORT (-$11),
+#              ETH LONG (-$23), SOL LONG (-$59)            → -$162
+# Blocking the 4 losing combos at entry would have saved +$162 on the
+# historical sample with no other change. Sample sizes 27-41 per bucket
+# — meaningful, not bulletproof. Re-validate after 2 weeks of fresh data.
+# Backtest harness: scripts/backtest_signal_filters.py.
+SYMBOL_SIDE_BLOCKLIST: set = {
+    ("BTCUSDT", "SHORT"),
+    ("ETHUSDT", "SHORT"),
+    ("ETHUSDT", "LONG"),
+    ("SOLUSDT", "LONG"),
+}
+
+# ── fake_bos / fake_choch entry guard ──
+# The structure detector flags suspicious BOS/CHOCH events as fake_bos /
+# fake_choch (wick rejection > 70% of body, or rapid reversal in 3 bars).
+# The bot already uses these flags to TIGHTEN SL post-entry, but did not
+# use them at the entry decision — a code asymmetry. Enabled 2026-04-27.
+# If True and the prevailing structure direction is flagged as fake, skip
+# the entry. Fail-open on missing flag.
+FAKE_BOS_ENTRY_GUARD_ENABLED = True
+
 
 # ── USDT Dominance (USDT.D) Filter ──
 # When stablecoin dominance is rising, capital is fleeing crypto → bad time
@@ -2053,8 +2085,10 @@ class HTFLiveBot:
         #   2. last_signal_direction must agree with trend
         if trend == "bullish" and last_dir == "bullish":
             direction = ACTION_LONG
+            side_str = "LONG"
         elif trend == "bearish" and last_dir == "bearish":
             direction = ACTION_SHORT
+            side_str = "SHORT"
         elif trend in ("bullish", "bearish") and last_dir != trend:
             logger.info(
                 "Structure-first: trend=%s but last_signal=%s — waiting for alignment",
@@ -2064,6 +2098,42 @@ class HTFLiveBot:
         else:
             # Ranging or no signal — skip
             return None
+
+        # Per-symbol-side blocklist: skip entries on combos that historically lose.
+        # See SYMBOL_SIDE_BLOCKLIST near the top of this file for backtest evidence.
+        if (self.symbol, side_str) in SYMBOL_SIDE_BLOCKLIST:
+            logger.info(
+                "🚫 Structure-first: skipping %s %s — combo is in SYMBOL_SIDE_BLOCKLIST "
+                "(historical net-negative expectancy; see scripts/backtest_signal_filters.py)",
+                self.symbol, side_str,
+            )
+            return None
+
+        # fake_bos / fake_choch entry guard: the detector already produces these
+        # flags. Use them at entry time, not just for SL adjustments.
+        if FAKE_BOS_ENTRY_GUARD_ENABLED:
+            fake_bos = bool(sig.get("fake_bos"))
+            fake_choch = bool(sig.get("fake_choch"))
+            # Direction-specific check: only block when the fake aligns with the
+            # direction we'd take. e.g. don't block a LONG just because there's a
+            # bearish fake_choch in the data — only if the bullish signal we're
+            # acting on was itself flagged fake.
+            if direction == ACTION_LONG and (sig.get("bos_bullish") and fake_bos
+                                              or sig.get("choch_bullish") and fake_choch):
+                logger.info(
+                    "🚫 Structure-first: skipping %s LONG — fake_bos=%s fake_choch=%s, "
+                    "direction-aligned signal flagged as fake",
+                    self.symbol, fake_bos, fake_choch,
+                )
+                return None
+            if direction == ACTION_SHORT and (sig.get("bos_bearish") and fake_bos
+                                               or sig.get("choch_bearish") and fake_choch):
+                logger.info(
+                    "🚫 Structure-first: skipping %s SHORT — fake_bos=%s fake_choch=%s, "
+                    "direction-aligned signal flagged as fake",
+                    self.symbol, fake_bos, fake_choch,
+                )
+                return None
 
         # Per-symbol config
         sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(self.symbol, "S1")
