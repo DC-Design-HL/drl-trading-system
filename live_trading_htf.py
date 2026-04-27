@@ -209,11 +209,18 @@ SYMBOL_SIDE_BLOCKLIST: set = {
 # ── fake_bos / fake_choch entry guard ──
 # The structure detector flags suspicious BOS/CHOCH events as fake_bos /
 # fake_choch (wick rejection > 70% of body, or rapid reversal in 3 bars).
-# The bot already uses these flags to TIGHTEN SL post-entry, but did not
-# use them at the entry decision — a code asymmetry. Enabled 2026-04-27.
-# If True and the prevailing structure direction is flagged as fake, skip
-# the entry. Fail-open on missing flag.
-FAKE_BOS_ENTRY_GUARD_ENABLED = True
+# The bot already uses these flags to TIGHTEN SL post-entry.
+#
+# DISABLED 2026-04-27 19:30 UTC. Briefly enabled at 12:08 (commit 8eb762e)
+# without backtest validation. In 5h of live traffic the guard blocked
+# SOLUSDT SHORT (76% WR / +$177 historical — the bot's best combo) 4×
+# and BTCUSDT LONG (also a winner) 2×, while the data showed it never
+# blocked an actual losing combo. The fake-flag is firing on ~50% of
+# all structure events; without a per-trade fake_bos audit log we cannot
+# distinguish predictive fakes from noise. Re-enable only after the trade
+# DB is instrumented to capture the flag and a real backtest is run.
+# Code path retained so it can be flipped on without redeployment.
+FAKE_BOS_ENTRY_GUARD_ENABLED = False
 
 
 # ── USDT Dominance (USDT.D) Filter ──

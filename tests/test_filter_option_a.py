@@ -61,9 +61,11 @@ def test_blocklist_is_directional() -> None:
     assert ("BTCUSDT", "LONG") not in SYMBOL_SIDE_BLOCKLIST
 
 
-def test_fake_bos_entry_guard_enabled() -> None:
-    """The fake_bos entry guard fixes a code asymmetry where the bot used
-    fake_bos for SL adjustments but not for entry decisions. Must be on
-    by default after this rollout.
+def test_fake_bos_entry_guard_disabled() -> None:
+    """The fake_bos entry guard was briefly enabled on 2026-04-27 12:08 and
+    rolled back at 19:30 same day after live observation showed it firing
+    on the bot's best combos (SOL SHORT 4×, BTC LONG 2×) without any
+    measurable benefit. Re-enable only after the trade DB captures the
+    flag per-trade and a real backtest is run.
     """
-    assert FAKE_BOS_ENTRY_GUARD_ENABLED is True
+    assert FAKE_BOS_ENTRY_GUARD_ENABLED is False
