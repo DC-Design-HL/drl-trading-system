@@ -189,6 +189,26 @@ SIGNAL_GATE_OF_THRESHOLD = 0.20     # Order flow score magnitude to count as dir
 SIGNAL_GATE_OB_THRESHOLD = 0.30     # Orderbook imbalance magnitude to count as directional
 SIGNAL_GATE_REGIME_ADX_MIN = 25.0   # ADX must be above this for regime to count as opposing
 
+# ── Funding-rate gate (LONG-only) ──
+# Block LONG entries when 8h funding rate < 0 (longs paying shorts =
+# market structure leans short). Backtested 2026-04-27 over 288 closes:
+#   Blocked 51 trades that had 35.3% WR / -$9.24/trade in aggregate.
+#   Incremental Δ on top of blocklist: +$284 over 20-day window
+#   (~+$425/30d at 1×, ~+$850/30d at 2×).
+# Asymmetric — does not affect SHORTs (they benefit from this regime).
+# scripts/backtest_phase3_filters.py is the harness.
+FUNDING_LONG_GUARD_ENABLED = True
+FUNDING_LONG_GUARD_MIN_RATE = 0.0  # Block if funding strictly less than this
+
+# ── Whale-NEUTRAL block ──
+# When the whale-direction predictor returns NEUTRAL, the bot performs
+# poorly: 37.3% WR / -$8.67 avg over 60 historical entries. The signal
+# isn't bullish or bearish — it's "no confidence." Backtested incremental
+# Δ on top of blocklist: +$413 over 20-day window.
+# Block both LONGs and SHORTs when whale_dir=NEUTRAL.
+WHALE_NEUTRAL_GUARD_ENABLED = True
+
+
 # ── Per-symbol-side blocklist (loser combos) ──
 # Backtest 2026-04-26 over 288 round-trips (Apr 6 → Apr 26) showed clear
 # asymmetric per-symbol/side performance:
@@ -1262,6 +1282,61 @@ class HTFLiveBot:
             self.symbol, basket_pct if basket_pct is not None else 0.0,
             USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
         )
+        return True
+
+    def _check_funding_long_guard(self, action: int) -> bool:
+        """Block LONG entries when 8h funding rate < FUNDING_LONG_GUARD_MIN_RATE.
+        Negative funding = market structure leans short. Backtest 2026-04-27:
+        51 historical LONGs with funding<0 had 35.3% WR / -$9.24 avg pnl.
+        Returns True if ALLOWED, False if BLOCKED. Affects LONG only.
+        Fail-open if funding rate is unavailable.
+        """
+        if not FUNDING_LONG_GUARD_ENABLED or action != ACTION_LONG:
+            return True
+        try:
+            market = self._fetch_market_signals(self.symbol)
+        except Exception as exc:
+            logger.debug("Funding guard: fetch failed (%s) — allowing (fail-open)", exc)
+            return True
+        funding = (market.get("funding") or {}).get("rate")
+        if funding is None:
+            logger.debug("Funding guard: rate unavailable for %s — allowing (fail-open)", self.symbol)
+            return True
+        if funding < FUNDING_LONG_GUARD_MIN_RATE:
+            logger.info(
+                "🛡️ FUNDING-LONG BLOCK: %s LONG blocked — funding rate %+.4f%% (< %+.4f%% threshold, "
+                "structure leans short)",
+                self.symbol, funding * 100, FUNDING_LONG_GUARD_MIN_RATE * 100,
+            )
+            return False
+        return True
+
+    def _check_whale_neutral_guard(self, action: int) -> bool:
+        """Block any entry when whale-direction signal is NEUTRAL.
+        Backtest 2026-04-27: 60 historical entries with whale=NEUTRAL had
+        37.3% WR / -$8.67 avg pnl. The "no confidence" state is a regime
+        stress indicator, not a directional one.
+        Returns True if ALLOWED, False if BLOCKED. Affects both directions.
+        Fail-open if whale signal is unavailable.
+        """
+        if not WHALE_NEUTRAL_GUARD_ENABLED or action == ACTION_HOLD:
+            return True
+        try:
+            market = self._fetch_market_signals(self.symbol)
+        except Exception as exc:
+            logger.debug("Whale guard: fetch failed (%s) — allowing (fail-open)", exc)
+            return True
+        whale_dir = ((market.get("whale") or {}).get("direction") or "").upper()
+        if not whale_dir:
+            logger.debug("Whale guard: direction unavailable for %s — allowing (fail-open)", self.symbol)
+            return True
+        if whale_dir == "NEUTRAL":
+            logger.info(
+                "🛡️ WHALE-NEUTRAL BLOCK: %s %s blocked — whale.direction=NEUTRAL "
+                "(historical regime: 37%% WR, -$8.67 avg)",
+                self.symbol, "LONG" if action == ACTION_LONG else "SHORT",
+            )
+            return False
         return True
 
     def _check_rsi_adx_guard(self, action: int, confidence: float) -> bool:
@@ -2764,6 +2839,24 @@ class HTFLiveBot:
             (self.position == 1 and action == ACTION_SHORT) or
             (self.position == -1 and action == ACTION_LONG)):
             if not self._check_usdt_d_guard(action):
+                return None
+
+        # ── Guard: Funding-rate (LONG only) — phase 3 ──
+        # Block LONG entries when funding rate is negative. See FUNDING_LONG_*
+        # constants. Backtested +$284 incremental over 20d on top of blocklist.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_funding_long_guard(action):
+                return None
+
+        # ── Guard: Whale=NEUTRAL block — phase 3 ──
+        # Block any entry when the whale-direction predictor returns NEUTRAL.
+        # Stress regime indicator. Backtested +$413 incremental over 20d.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_whale_neutral_guard(action):
                 return None
 
         # ── Guard: Market Signal Gate ──
