@@ -1,0 +1,130 @@
+{
+  "generated_at": "2026-04-29T17:35:29.116148+00:00",
+  "window_hours": 4,
+  "min_flow_eth": 100.0,
+  "n_trades": 304,
+  "baseline_wr": 56.58,
+  "baseline_pnl": 11.51,
+  "results": [
+    {
+      "name": "baseline (no filter)",
+      "n_blocked": 0,
+      "n_allowed": 304,
+      "pnl_blocked": 0,
+      "pnl_allowed": 11.513488172905573,
+      "delta": 0,
+      "wr_allowed": 56.57894736842105,
+      "avg_pnl_allowed": 0.03787331635824202,
+      "wr_blocked": 0.0,
+      "delta_vs_base": 0.0
+    },
+    {
+      "name": "W1: block distribution",
+      "n_blocked": 64,
+      "n_allowed": 240,
+      "pnl_blocked": 204.28001305121444,
+      "pnl_allowed": -192.76652487830884,
+      "delta": -204.28001305121444,
+      "wr_allowed": 56.25,
+      "avg_pnl_allowed": -0.8031938536596201,
+      "wr_blocked": 57.8125,
+      "delta_vs_base": -204.2800130512144
+    },
+    {
+      "name": "W2: only accumulation",
+      "n_blocked": 173,
+      "n_allowed": 131,
+      "pnl_blocked": 154.55028658617778,
+      "pnl_allowed": -143.0367984132722,
+      "delta": -154.55028658617778,
+      "wr_allowed": 55.72519083969466,
+      "avg_pnl_allowed": -1.0918839573532229,
+      "wr_blocked": 57.22543352601156,
+      "delta_vs_base": -154.55028658617778
+    },
+    {
+      "name": "W3: block LONG during distrib",
+      "n_blocked": 36,
+      "n_allowed": 268,
+      "pnl_blocked": 36.076330759887135,
+      "pnl_allowed": -24.56284258698156,
+      "delta": -36.076330759887135,
+      "wr_allowed": 56.71641791044776,
+      "avg_pnl_allowed": -0.09165239771261777,
+      "wr_blocked": 55.55555555555556,
+      "delta_vs_base": -36.076330759887135
+    },
+    {
+      "name": "N1: block bearish news",
+      "n_blocked": 15,
+      "n_allowed": 289,
+      "pnl_blocked": -23.586895558783617,
+      "pnl_allowed": 35.10038373168919,
+      "delta": 23.586895558783617,
+      "wr_allowed": 56.40138408304498,
+      "avg_pnl_allowed": 0.12145461498854392,
+      "wr_blocked": 60.0,
+      "delta_vs_base": 23.586895558783617
+    },
+    {
+      "name": "N2: only neutral news",
+      "n_blocked": 32,
+      "n_allowed": 272,
+      "pnl_blocked": -213.98155383203655,
+      "pnl_allowed": 225.49504200494212,
+      "delta": 213.98155383203655,
+      "wr_allowed": 58.08823529411765,
+      "avg_pnl_allowed": 0.8290258897240519,
+      "wr_blocked": 43.75,
+      "delta_vs_base": 213.98155383203655
+    },
+    {
+      "name": "N3: block direction-misaligned news",
+      "n_blocked": 20,
+      "n_allowed": 284,
+      "pnl_blocked": -132.08871972818125,
+      "pnl_allowed": 143.6022079010868,
+      "delta": 132.08871972818125,
+      "wr_allowed": 56.690140845070424,
+      "avg_pnl_allowed": 0.5056415771165028,
+      "wr_blocked": 55.00000000000001,
+      "delta_vs_base": 132.08871972818125
+    },
+    {
+      "name": "C1: block distrib AND bearish news",
+      "n_blocked": 6,
+      "n_allowed": 298,
+      "pnl_blocked": 88.43667686792803,
+      "pnl_allowed": -76.92318869502245,
+      "delta": -88.43667686792803,
+      "wr_allowed": 56.04026845637584,
+      "avg_pnl_allowed": -0.2581315056879948,
+      "wr_blocked": 83.33333333333334,
+      "delta_vs_base": -88.43667686792801
+    },
+    {
+      "name": "C3: block distrib OR bearish news",
+      "n_blocked": 73,
+      "n_allowed": 231,
+      "pnl_blocked": 92.25644062450279,
+      "pnl_allowed": -80.7429524515972,
+      "delta": -92.25644062450279,
+      "wr_allowed": 56.709956709956714,
+      "avg_pnl_allowed": -0.349536590699555,
+      "wr_blocked": 56.16438356164384,
+      "delta_vs_base": -92.25644062450277
+    },
+    {
+      "name": "C4: only accum any OR balanced+bullish",
+      "n_blocked": 172,
+      "n_allowed": 132,
+      "pnl_blocked": 147.6582372261778,
+      "pnl_allowed": -136.14474905327222,
+      "delta": -147.6582372261778,
+      "wr_allowed": 56.060606060606055,
+      "avg_pnl_allowed": -1.031399614039941,
+      "wr_blocked": 56.97674418604651,
+      "delta_vs_base": -147.6582372261778
+    }
+  ]
+}
