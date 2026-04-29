@@ -1,0 +1,11 @@
+{
+  "settings": {
+    "sentiment_threshold": 0.5,
+    "window_hours": 4
+  },
+  "n_trades_total": 306,
+  "n_longs": 161,
+  "n_blocked_longs": 10,
+  "blocked_pnl": -223.60002538961098,
+  "delta_pnl": 223.60002538961098
+}
