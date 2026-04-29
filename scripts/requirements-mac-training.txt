@@ -16,6 +16,7 @@ lightgbm>=4.0          # tabular binary classifier on M3 (CPU, fast)
 
 # Project 2 — ETH VecNormalize fix (validate / re-export)
 stable-baselines3>=2.0
+sb3-contrib>=2.0       # RecurrentPPO etc. — the ETH model serialized with this
 gymnasium>=0.29        # or gym>=0.26 if SB3 is older
 torch>=2.1             # M3-native MPS backend
 
