@@ -51,7 +51,7 @@ DEPLOYED_ETH_MODEL = REPO / "data" / "models" / "htf_walkforward_eth" / "final_m
 DEPLOYED_VECNORM = REPO / "data" / "models" / "htf_walkforward_eth" / "final_vecnorm_0.pkl"
 
 
-def cmd_validate(model_path: Path, n_samples: int = 200, obs_dim: int = 117) -> int:
+def cmd_validate(model_path: Path, n_samples: int = 200, obs_dim: int | None = None) -> int:
     """Run noise through the ETH model and report whether confidence has variance."""
     try:
         import numpy as np
@@ -67,9 +67,20 @@ def cmd_validate(model_path: Path, n_samples: int = 200, obs_dim: int = 117) -> 
     print(f"Loading {model_path} ...")
     model = PPO.load(str(model_path))
 
-    # The model was trained on a 117-dim observation. Generate random
-    # observations in a plausible range (z-scaled inputs are usually in
-    # roughly [-3, 3] after VecNormalize).
+    # Detect the model's expected observation shape — different training
+    # runs have different feature counts (51 / 117 / etc.).
+    try:
+        expected_shape = model.observation_space.shape
+        if obs_dim is None:
+            obs_dim = int(expected_shape[0])
+        print(f"  model expects observation shape={expected_shape}; using obs_dim={obs_dim}")
+    except Exception:
+        if obs_dim is None:
+            obs_dim = 117
+            print(f"  could not introspect observation_space; falling back to obs_dim={obs_dim}")
+
+    # Generate random observations in a plausible range (z-scaled inputs
+    # are usually in roughly [-3, 3] after VecNormalize).
     print(f"Running {n_samples} random observations ...")
     confidences = []
     actions = []
