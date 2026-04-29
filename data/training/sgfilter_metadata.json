@@ -1,0 +1,143 @@
+{
+  "generated_at": "2026-04-29T06:55:33.027571+00:00",
+  "window": {
+    "start": "2026-04-06T00:00:00+00:00",
+    "end": "2026-04-30T00:00:00+00:00"
+  },
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT"
+  ],
+  "n_rows": 292,
+  "n_features": 62,
+  "feature_cols": [
+    "sig_mtf_bias",
+    "sig_mtf_aligned",
+    "sig_mtf_strength",
+    "sig_mtf_15m_dir",
+    "sig_mtf_15m_rsi",
+    "sig_mtf_15m_strength",
+    "sig_mtf_1h_dir",
+    "sig_mtf_1h_rsi",
+    "sig_mtf_1h_strength",
+    "sig_mtf_4h_dir",
+    "sig_mtf_4h_rsi",
+    "sig_mtf_4h_strength",
+    "sig_of_bias",
+    "sig_of_score",
+    "sig_of_large_buys",
+    "sig_of_large_sells",
+    "sig_regime_type",
+    "sig_regime_state",
+    "sig_regime_adx",
+    "sig_ob_bias",
+    "sig_ob_imbalance_10",
+    "sig_funding_rate",
+    "sig_whale_dir",
+    "sig_whale_score",
+    "sig_whale_confidence",
+    "news_1h_count",
+    "news_1h_sentiment_avg",
+    "news_1h_sentiment_min",
+    "news_1h_max_urgency",
+    "news_4h_count",
+    "news_4h_sentiment_avg",
+    "news_4h_sentiment_min",
+    "news_4h_max_urgency",
+    "news_24h_count",
+    "news_24h_sentiment_avg",
+    "news_24h_sentiment_min",
+    "news_24h_max_urgency",
+    "whale_4h_n_events",
+    "whale_4h_total_eth",
+    "whale_4h_net_flow_avg",
+    "whale_4h_intent_avg",
+    "whale_4h_in_count",
+    "whale_4h_out_count",
+    "whale_12h_n_events",
+    "whale_12h_total_eth",
+    "whale_12h_net_flow_avg",
+    "whale_12h_intent_avg",
+    "whale_12h_in_count",
+    "whale_12h_out_count",
+    "whale_24h_n_events",
+    "whale_24h_total_eth",
+    "whale_24h_net_flow_avg",
+    "whale_24h_intent_avg",
+    "whale_24h_in_count",
+    "whale_24h_out_count",
+    "hour_utc",
+    "day_of_week",
+    "is_weekend",
+    "session_asia",
+    "session_london",
+    "session_ny",
+    "session_off"
+  ],
+  "label_col": "win",
+  "regression_label_col": "pnl",
+  "label_balance": {
+    "win=1": 164,
+    "win=0": 128
+  },
+  "baseline_win_rate": 0.5616,
+  "baseline_pnl_total": -15.76,
+  "per_symbol_side": {
+    "ETHUSDT_LONG": {
+      "n": 39,
+      "wins": 20,
+      "pnl": -81.88280254711952,
+      "wr": 0.513
+    },
+    "XRPUSDT_SHORT": {
+      "n": 28,
+      "wins": 15,
+      "pnl": 32.79125857911828,
+      "wr": 0.536
+    },
+    "SOLUSDT_SHORT": {
+      "n": 45,
+      "wins": 33,
+      "pnl": 205.6724890891228,
+      "wr": 0.733
+    },
+    "BTCUSDT_SHORT": {
+      "n": 28,
+      "wins": 11,
+      "pnl": -69.70745059186376,
+      "wr": 0.393
+    },
+    "BTCUSDT_LONG": {
+      "n": 40,
+      "wins": 22,
+      "pnl": -66.68777779097104,
+      "wr": 0.55
+    },
+    "XRPUSDT_LONG": {
+      "n": 37,
+      "wins": 21,
+      "pnl": -90.234791464499,
+      "wr": 0.568
+    },
+    "ETHUSDT_SHORT": {
+      "n": 36,
+      "wins": 20,
+      "pnl": 21.641550834830042,
+      "wr": 0.556
+    },
+    "SOLUSDT_LONG": {
+      "n": 39,
+      "wins": 22,
+      "pnl": 32.64841140919158,
+      "wr": 0.564
+    }
+  },
+  "data_sources": {
+    "trades_db": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/data/trading.db",
+    "alerts_jsonl": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/logs/htf_pending_alerts.jsonl",
+    "whale_dir": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/data/whale_behavior/labeled_v2",
+    "news_table": "trading.db.news_events"
+  }
+}
