@@ -46,15 +46,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-DEFAULT_DATA = REPO / "data" / "whale_behavior" / "labeled_v2"
+DEFAULT_DATA = REPO / "data" / "whale_behavior" / "labeled_v3"   # forward-return labels
+LEGACY_DATA = REPO / "data" / "whale_behavior" / "labeled_v2"
 
 
-# Categorical labels we'll try to predict. The bot uses {BULLISH, BEARISH,
-# NEUTRAL}. The labeled_v2 files have richer labels (LARGE_TRANSFER_IN,
-# LARGE_TRANSFER_OUT, ACCUMULATION, DISTRIBUTION, etc.) — we map them.
-DIRECTION_FROM_ACTION = {
-    "LARGE_TRANSFER_IN": "BULLISH",   # whale buying / receiving
-    "LARGE_TRANSFER_OUT": "BEARISH",  # whale selling / sending
+# Direction labels are now read from the `direction_label` field of
+# labeled_v3/*.jsonl — produced by scripts/relabel_whale_with_forward_returns.py.
+# That field is the SIGN of the realized 4h forward return, not the
+# wallet's own action.
+#
+# The legacy DIRECTION_FROM_ACTION mapping (below) is retained for
+# backward compatibility if you point this script at labeled_v2 — but
+# it's known to produce a 94% BULL imbalance and a degenerate model.
+LEGACY_DIRECTION_FROM_ACTION = {
+    "LARGE_TRANSFER_IN": "BULLISH",
+    "LARGE_TRANSFER_OUT": "BEARISH",
     "ACCUMULATION": "BULLISH",
     "DISTRIBUTION": "BEARISH",
     "ROUTINE": "NEUTRAL",
@@ -87,8 +93,19 @@ def load_events(data_dir: Path) -> list[dict]:
 
 
 def derive_label(event: dict) -> str:
+    """Prefer the forward-return label (`direction_label` from labeled_v3).
+    Fall back to the legacy action-based mapping only if the field is missing,
+    with a warning printed on first fallback.
+    """
+    if "direction_label" in event:
+        return event["direction_label"]
+    if not getattr(derive_label, "_warned", False):
+        print("WARNING: dataset lacks 'direction_label' field — falling back to "
+              "action-based labels. Re-run scripts/relabel_whale_with_forward_returns.py "
+              "to produce labeled_v3/ for proper supervised labels.", file=sys.stderr)
+        derive_label._warned = True  # type: ignore[attr-defined]
     a = event.get("action", "ROUTINE")
-    return DIRECTION_FROM_ACTION.get(a, "NEUTRAL")
+    return LEGACY_DIRECTION_FROM_ACTION.get(a, "NEUTRAL")
 
 
 def featurize(events: list[dict], seq_len: int = 24):
@@ -236,7 +253,14 @@ def main(argv=None):
     model = WhaleBehaviorLSTM_v2(input_dim=X.shape[2], hidden_dim=args.hidden,
                                  num_layers=args.num_layers, num_classes=3)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    loss_fn = nn.CrossEntropyLoss()
+    # Class-weighted loss so the model isn't dominated by the majority NEUT class.
+    # Weight inversely to class frequency in the training set.
+    train_class_counts = [max(1, int((y_tr == i).sum())) for i in range(3)]
+    inv_freq = [1.0 / c for c in train_class_counts]
+    norm = sum(inv_freq)
+    class_weights = torch.tensor([w * 3 / norm for w in inv_freq], dtype=torch.float32)
+    print(f"  class weights (BEAR/NEUT/BULL): {[round(w, 3) for w in class_weights.tolist()]}")
+    loss_fn = nn.CrossEntropyLoss(weight=class_weights)
 
     train_loader = DataLoader(TensorDataset(torch.from_numpy(X_tr), torch.from_numpy(y_tr)),
                               batch_size=args.batch_size, shuffle=True)
@@ -302,11 +326,28 @@ def main(argv=None):
     torch.save(payload, str(out_path))
     print(f"\nSaved: {out_path}")
 
+    # 3-class random baseline = 33%. We need MEANINGFULLY better than that
+    # AND confidence variance, AND no single class dominating.
+    RANDOM_BASELINE = 1.0 / 3
+    MIN_TEST_ACC = 0.40
+    failed = []
+    if test_acc < MIN_TEST_ACC:
+        failed.append(f"test_acc={test_acc:.3f} < {MIN_TEST_ACC} (random baseline {RANDOM_BASELINE:.3f})")
     if confidence_stdev < 0.10:
-        print("⚠️ Confidence variance is low — model may not be informative.")
-        return 1
+        failed.append(f"confidence_stdev={confidence_stdev:.4f} < 0.10 (model not making distinctions)")
     if max(pred_dist) > 0.7 * sum(pred_dist):
-        print("⚠️ Single class dominates predictions — model may be miscalibrated.")
+        failed.append(f"single class dominates: {pred_dist}")
+    if failed:
+        print("\n❌ Acceptance gates FAILED:")
+        for msg in failed:
+            print(f"    - {msg}")
+        print("\nDO NOT ship this model to production. Possible causes:")
+        print("  * The labeled wallets are not predictive of 4h forward returns")
+        print("    (current state of labeled_v3 data on Apr 2026 — confirmed empirically).")
+        print("  * Try different wallets, longer horizons, or different forward-return")
+        print("    thresholds via scripts/relabel_whale_with_forward_returns.py.")
+        print("  * Keep WHALE_NEUTRAL_GUARD enabled in production until a model that")
+        print("    passes these gates is found.")
         return 1
     print("\n✅ Acceptance gates passed. Ship to server with:")
     print(f"    scp {out_path} server:.../data/models/")
