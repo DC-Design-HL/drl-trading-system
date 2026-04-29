@@ -1,0 +1,30 @@
+{
+  "trained_at": "2026-04-29T19:13:40.748172+00:00",
+  "n_train": 178,
+  "n_val": 55,
+  "n_test": 56,
+  "news_model": {
+    "name": "news_only",
+    "n_test": 56,
+    "test_auc": 0.5,
+    "accepted": 56,
+    "accepted_wr": 0.48214285714285715,
+    "accepted_pnl": -373.00859234169445,
+    "rejected_pnl": 0.0,
+    "delta_vs_no_filter": -0.0,
+    "baseline_test_pnl": -373.00859234169445,
+    "baseline_test_wr": 0.48214285714285715
+  },
+  "whale_model": {
+    "name": "whale_only",
+    "n_test": 56,
+    "test_auc": 0.5102171136653896,
+    "accepted": 56,
+    "accepted_wr": 0.48214285714285715,
+    "accepted_pnl": -373.00859234169445,
+    "rejected_pnl": 0.0,
+    "delta_vs_no_filter": -0.0,
+    "baseline_test_pnl": -373.00859234169445,
+    "baseline_test_wr": 0.48214285714285715
+  }
+}

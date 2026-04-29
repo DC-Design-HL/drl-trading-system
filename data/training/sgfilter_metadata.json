@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-29T06:55:33.027571+00:00",
+  "generated_at": "2026-04-29T19:13:22.394746+00:00",
   "window": {
     "start": "2026-04-06T00:00:00+00:00",
     "end": "2026-04-30T00:00:00+00:00"
@@ -10,7 +10,7 @@
     "SOLUSDT",
     "XRPUSDT"
   ],
-  "n_rows": 292,
+  "n_rows": 296,
   "n_features": 62,
   "feature_cols": [
     "sig_mtf_bias",
@@ -50,24 +50,24 @@
     "news_24h_sentiment_avg",
     "news_24h_sentiment_min",
     "news_24h_max_urgency",
+    "whale_4h_exchange_in_eth",
+    "whale_4h_exchange_out_eth",
+    "whale_4h_exchange_net_in_eth",
     "whale_4h_n_events",
-    "whale_4h_total_eth",
-    "whale_4h_net_flow_avg",
-    "whale_4h_intent_avg",
-    "whale_4h_in_count",
-    "whale_4h_out_count",
+    "whale_4h_n_exchange_events",
+    "whale_4h_regime_code",
+    "whale_12h_exchange_in_eth",
+    "whale_12h_exchange_out_eth",
+    "whale_12h_exchange_net_in_eth",
     "whale_12h_n_events",
-    "whale_12h_total_eth",
-    "whale_12h_net_flow_avg",
-    "whale_12h_intent_avg",
-    "whale_12h_in_count",
-    "whale_12h_out_count",
+    "whale_12h_n_exchange_events",
+    "whale_12h_regime_code",
+    "whale_24h_exchange_in_eth",
+    "whale_24h_exchange_out_eth",
+    "whale_24h_exchange_net_in_eth",
     "whale_24h_n_events",
-    "whale_24h_total_eth",
-    "whale_24h_net_flow_avg",
-    "whale_24h_intent_avg",
-    "whale_24h_in_count",
-    "whale_24h_out_count",
+    "whale_24h_n_exchange_events",
+    "whale_24h_regime_code",
     "hour_utc",
     "day_of_week",
     "is_weekend",
@@ -79,11 +79,11 @@
   "label_col": "win",
   "regression_label_col": "pnl",
   "label_balance": {
-    "win=1": 164,
+    "win=1": 168,
     "win=0": 128
   },
-  "baseline_win_rate": 0.5616,
-  "baseline_pnl_total": -15.76,
+  "baseline_win_rate": 0.5676,
+  "baseline_pnl_total": 73.57,
   "per_symbol_side": {
     "ETHUSDT_LONG": {
       "n": 39,
@@ -92,16 +92,16 @@
       "wr": 0.513
     },
     "XRPUSDT_SHORT": {
-      "n": 28,
-      "wins": 15,
-      "pnl": 32.79125857911828,
-      "wr": 0.536
+      "n": 30,
+      "wins": 17,
+      "pnl": 64.61695453396003,
+      "wr": 0.567
     },
     "SOLUSDT_SHORT": {
-      "n": 45,
-      "wins": 33,
-      "pnl": 205.6724890891228,
-      "wr": 0.733
+      "n": 46,
+      "wins": 34,
+      "pnl": 250.5208416666061,
+      "wr": 0.739
     },
     "BTCUSDT_SHORT": {
       "n": 28,
@@ -116,10 +116,10 @@
       "wr": 0.55
     },
     "XRPUSDT_LONG": {
-      "n": 37,
-      "wins": 21,
-      "pnl": -90.234791464499,
-      "wr": 0.568
+      "n": 38,
+      "wins": 22,
+      "pnl": -77.57944161309567,
+      "wr": 0.579
     },
     "ETHUSDT_SHORT": {
       "n": 36,
@@ -137,7 +137,7 @@
   "data_sources": {
     "trades_db": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/data/trading.db",
     "alerts_jsonl": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/logs/htf_pending_alerts.jsonl",
-    "whale_dir": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/data/whale_behavior/labeled_v2",
+    "whale_dir": "/home/claude/packages/327adce6-6ec4-4402-890c-9d12c6e8a471/workspace/drl-trading-system/data/whale_behavior/eth",
     "news_table": "trading.db.news_events"
   }
 }

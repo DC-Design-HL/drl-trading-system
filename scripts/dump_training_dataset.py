@@ -52,7 +52,16 @@ from typing import Optional
 REPO = Path(__file__).resolve().parent.parent
 DB_PATH = REPO / "data" / "trading.db"
 ALERTS_PATH = REPO / "logs" / "htf_pending_alerts.jsonl"
-WHALE_DIR = REPO / "data" / "whale_behavior" / "labeled_v2"
+# Use raw transaction logs from data/whale_behavior/eth/ (10 wallets, current
+# through Apr 2026) instead of labeled_v2/ which only had 3 wallets and ends
+# 2026-04-03 — BEFORE any bot trades. The May 2 filter analysis already uses
+# eth/ — this aligns the training data source with the live signal.
+WHALE_DIR = REPO / "data" / "whale_behavior" / "eth"
+
+EXCHANGE_WALLETS = {
+    "binance_hot_wallet", "binance_cold_wallet", "binance_cold_2",
+    "binance_reserve", "coinbase_institutional", "kraken_deposit",
+}
 
 
 def parse_iso(s: str) -> datetime:
@@ -245,14 +254,19 @@ def news_features_at(open_ts: datetime, symbol: str,
 # ---------------------------------------------------------------------------
 
 def load_whale_events() -> list[dict]:
-    """Concatenate all labeled_v2 whale files. Real on-chain transactions
-    with behavioral labels (intent_score, net_flow over 4h/12h/24h windows).
+    """Load raw whale txs from data/whale_behavior/eth/ (10 wallets,
+    825K events, current through Apr 2026). Each tx has direction (in/out)
+    and value_eth. The aggregation in whale_features_at() computes net
+    exchange flow over trailing windows — same convention as the May 2
+    filter analysis (scripts/backtest_whale_flow_news_filters.py).
     """
     if not WHALE_DIR.exists():
         return []
     out = []
+    MIN_FLOW_ETH = 100.0  # filter dust txs to keep aggregations meaningful
     for f in sorted(WHALE_DIR.glob("*.jsonl")):
-        wallet_name = f.stem.replace("_behavioral", "")
+        wallet_name = f.stem
+        is_exchange = wallet_name in EXCHANGE_WALLETS
         with open(f) as fp:
             for line in fp:
                 try:
@@ -266,39 +280,44 @@ def load_whale_events() -> list[dict]:
                     dt = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
                 except Exception:
                     continue
+                value = float(d.get("value_eth") or 0)
+                if value < MIN_FLOW_ETH:
+                    continue
                 out.append({
-                    "ts": dt, "wallet": wallet_name,
-                    "value_eth": float(d.get("value_eth") or 0),
-                    "direction": d.get("direction"),
-                    "net_flow_4h": float(d.get("net_flow_4h") or 0),
-                    "intent_score_4h": float(d.get("intent_score_4h") or 0),
-                    "net_flow_12h": float(d.get("net_flow_12h") or 0),
-                    "intent_score_12h": float(d.get("intent_score_12h") or 0),
-                    "net_flow_24h": float(d.get("net_flow_24h") or 0),
+                    "ts": dt, "wallet": wallet_name, "is_exchange": is_exchange,
+                    "value_eth": value,
+                    "direction": (d.get("direction") or "").lower(),
                 })
     out.sort(key=lambda x: x["ts"])
     return out
 
 
 def whale_features_at(open_ts: datetime, whale_events: list[dict]) -> dict:
-    """Aggregate whale flows from the labeled wallets in the trailing 4h/12h/24h."""
+    """Aggregate exchange-wallet net flow + per-direction counts in trailing windows.
+
+    Net flow IN = distribution (whales depositing → about to sell) → bearish.
+    Net flow OUT = accumulation (whales withdrawing → holding) → bullish.
+    Same convention as scripts/backtest_whale_flow_news_filters.py.
+    """
     out: dict = {}
     for window_h in (4, 12, 24):
         window_start = open_ts - timedelta(hours=window_h)
         relevant = [w for w in whale_events if window_start <= w["ts"] <= open_ts]
-        n = len(relevant)
-        out[f"whale_{window_h}h_n_events"] = n
-        out[f"whale_{window_h}h_total_eth"] = sum(w["value_eth"] for w in relevant)
-        out[f"whale_{window_h}h_net_flow_avg"] = (
-            sum(w["net_flow_4h"] for w in relevant) / n if n else 0.0
-        )
-        out[f"whale_{window_h}h_intent_avg"] = (
-            sum(w["intent_score_4h"] for w in relevant) / n if n else 0.0
-        )
-        n_in = sum(1 for w in relevant if (w["direction"] or "").lower() == "in")
-        n_out = sum(1 for w in relevant if (w["direction"] or "").lower() == "out")
-        out[f"whale_{window_h}h_in_count"] = n_in
-        out[f"whale_{window_h}h_out_count"] = n_out
+        ex_in = sum(w["value_eth"] for w in relevant if w["is_exchange"] and w["direction"] == "in")
+        ex_out = sum(w["value_eth"] for w in relevant if w["is_exchange"] and w["direction"] == "out")
+        out[f"whale_{window_h}h_exchange_in_eth"] = ex_in
+        out[f"whale_{window_h}h_exchange_out_eth"] = ex_out
+        out[f"whale_{window_h}h_exchange_net_in_eth"] = ex_in - ex_out
+        out[f"whale_{window_h}h_n_events"] = len(relevant)
+        out[f"whale_{window_h}h_n_exchange_events"] = sum(1 for w in relevant if w["is_exchange"])
+        # Regime label encoding: 1 = ACCUMULATION (net out), -1 = DISTRIBUTION (net in), 0 = balanced
+        if ex_in > ex_out:
+            regime_code = -1
+        elif ex_out > ex_in:
+            regime_code = 1
+        else:
+            regime_code = 0
+        out[f"whale_{window_h}h_regime_code"] = regime_code
     return out
 
 
