@@ -1,13 +1,23 @@
-# Mac M3 Training Handoff — 2026-04-27
+# Mac M3 Training Handoff — 2026-04-27 (scripts shipped 2026-04-29)
 
 This is the runnable spec for the model improvements that **must be
 trained on Chen's Mac M3 Pro** (server has 2 CPUs / 3.7 GB RAM and is
 production-only). All three projects below are independent — pick what
 you can finish in a session.
 
-Each has a **why**, a **concrete training command**, an **acceptance
-gate**, and a **deploy procedure** that integrates with the existing
-production cluster on `feature/bot-consolidation`.
+**All training uses ONLY real data** — no synthetic, no mock, no
+augmentation. Every label comes from a real bot trade outcome on
+Binance Futures testnet, every news event from the live RSS+sentiment
+pipeline, every whale event from the on-chain transaction log.
+
+Each project has a **runnable script**, an **acceptance gate**, and a
+**deploy procedure**. Scripts live in `scripts/`. Install training
+dependencies with:
+
+```bash
+python3 -m venv .venv-train && source .venv-train/bin/activate
+pip install -r scripts/requirements-mac-training.txt
+```
 
 ---
 
@@ -35,70 +45,55 @@ HOLD/LONG/SHORT formulation. The reward function becomes:
 - ACCEPT a signal that lost → -1
 - REJECT a signal that lost → +0.5
 
-### Training data preparation
+### Step 1 — Generate the training dataset (run on SERVER)
 
-Run on Mac, in the repo:
-
-```bash
-# 1. Pull last 90 days of fills + signals from Binance + DB
-python3 scripts/dump_training_dataset.py \
-    --symbol BTCUSDT \
-    --start 2026-01-27 \
-    --end   2026-04-27 \
-    --output data/training/sgfilter_btc.parquet
-
-# Repeat for ETHUSDT, SOLUSDT, XRPUSDT.
-```
-
-The dataset will have one row per BOS/CHOCH detection in the historical
-window with:
-- All 117 observation features at detection time
-- The structure direction (LONG/SHORT) chosen by the detector
-- Whether the bot would have taken it (per current guards)
-- The outcome if it had been taken (P&L, hold time)
-- The label: 1 if win, 0 if loss
-
-**Note:** I haven't built `dump_training_dataset.py` yet — file it under
-"add to training repo if you want to run this." A 100-line script. If
-you want me to write it, ask.
-
-### Suggested training (once dataset exists)
+The server already has all the data. The dumper produces a single
+self-contained parquet that you ship to Mac.
 
 ```bash
-# Per-symbol binary classifier with class balancing
-python3 train_sgfilter.py \
-    --dataset data/training/sgfilter_btc.parquet \
-    --algorithm RecurrentPPO \
-    --features 60 \
-    --reward differential_sharpe \
-    --hold_steps 0 \
-    --val_split 0.2 \
-    --test_split 0.2 \
-    --embargo_hours 48 \
-    --epochs 500 \
-    --seeds 3 \
-    --early_stop_sharpe 0.5 \
-    --output data/models/sgfilter/btc/
+# On the server, in the repo
+python3 scripts/dump_training_dataset.py
+# Default produces data/training/sgfilter_dataset.parquet
+# covering BTC/ETH/SOL/XRP since 2026-04-06.
+
+# Verified on 2026-04-29: 292 closed trades joined with full signal
+# context, news (8d window of 533 sentiment-scored events), and on-chain
+# whale flows (26,868 events from labeled wallets). 62 features per row.
 ```
 
-Key choices, with rationale:
+Then `scp` the parquet + metadata.json to the Mac repo at the same
+path.
 
-- **RecurrentPPO (LSTM head)** — `docs/TRAINING_PLAN.md` already specs
-  this. The structure-first signal is sequence-dependent (regime
-  history matters); LSTM head captures it.
-- **Differential Sharpe reward** — `docs/TRAINING_PLAN_REVIEW.md`
-  Section 1.3 flags the current PnL+penalty reward as non-Markovian.
-  Fixes destabilization.
-- **60 features (not 117)** — feature reduction per
-  `TRAINING_PLAN_REVIEW.md` Section 2.1. Drop the 12 redundant compact
-  features replicated across 4 timeframes; the resulting input has VC
-  dimension ~2K (was ~11K), reducing overfit.
-- **48h embargo** — strict 3-way val/test split with embargo prevents
-  lookahead leakage. Critical for HTF data.
-- **3 seeds, multi-seed averaging** — variance reduction in PPO
-  training. Take the median of 3 seeds.
-- **early_stop_sharpe 0.5** — abandon training run if validation Sharpe
-  doesn't exceed 0.5 by epoch 200. Saves Mac time.
+### Step 2 — Train the classifier (run on MAC)
+
+The model is **LightGBM gradient-boosted trees**, not RecurrentPPO.
+Reasons:
+- Tabular features → trees outperform deep nets here. Pragmatic, not
+  ideological.
+- Trains in seconds on Mac M3 CPU. No GPU needed.
+- Native categorical handling for `mtf_bias`, `regime_type`, etc.
+- Native feature importance. You'll know exactly which signals the model
+  uses.
+- Direct probability output → simple ACCEPT/REJECT threshold.
+- Reproducible (fixed seed).
+
+```bash
+# On Mac, in the repo, with the .venv-train activated
+python3 scripts/train_sgfilter.py
+# Default: 3 seeds, ACCEPT_THRESHOLD=0.55, walk-forward 60/20/20 split
+# with 48h embargo. Output: data/models/sgfilter/sgfilter_seed{42,43,44}.txt
+# plus feature_importance.txt and training_summary.json.
+```
+
+The script reports per-seed AUC, accuracy, precision, recall on
+train/val/test; ensemble (median across seeds) results; top-15 feature
+importance. Honest evaluation — no cheating with test data.
+
+The training script implements:
+- Walk-forward 60/20/20 split with 48-hour embargo (anti-leakage).
+- 3-seed ensemble (median of probabilities).
+- Early stopping on validation logloss (50 rounds patience).
+- Feature importance per seed (gain-based).
 
 ### Acceptance gate (don't deploy if these aren't met)
 
@@ -154,32 +149,27 @@ reports false 0.95+ confidence; ETH LONG is -$23 / 39 trades historical.
 
 **The fix.** Two options:
 
+### Step 0 — Validate the bug is real
+
+```bash
+# On Mac, in repo, with .venv-train activated
+python3 scripts/train_eth_vecnorm_fix.py --mode validate
+# Runs 200 random observations through the deployed ETH model. If
+# confidence stdev < 0.01, VecNormalize is broken (the documented bug).
+# If stdev > 0.05, the bug is NOT real and ETH's poor performance has
+# a different root cause — stop and investigate elsewhere.
+```
+
 ### Option A — Re-export with vecnorm (preserves training)
 
 ```bash
-# On Mac, locate the training run that produced final_model_0.zip
-cd training_runs/htf_walkforward_eth_final/
+# On Mac, with the original training run dir on disk
+python3 scripts/train_eth_vecnorm_fix.py --mode reexport \
+    --training_run training_runs/htf_walkforward_eth_final/
 
-# Re-export with vecnorm explicitly bundled
-python3 -c "
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import VecNormalize
-import shutil
-
-# Reload the trained agent
-model = PPO.load('final_model_0.zip')
-vec = VecNormalize.load('vecnorm.pkl', dummy_vec_env)
-vec.training = False
-vec.norm_reward = False
-
-# Save side-by-side
-shutil.copy('vecnorm.pkl', 'final_model_0_vecnorm.pkl')
-print('Re-exported.')
-"
-
-# SCP back to server
-scp final_model_0.zip final_model_0_vecnorm.pkl \
-    claude@server:~/packages/.../data/models/htf_walkforward_eth/
+# Then validate the fix:
+python3 scripts/train_eth_vecnorm_fix.py --mode validate
+# Confidence stdev should now be > 0.05.
 ```
 
 ### Option B — Retrain ETH model without vecnorm (cleaner)
@@ -226,40 +216,25 @@ been stale since Feb 14. The currently-live whale signal is mostly
 NEUTRAL across all symbols, which is why the new WHALE_NEUTRAL_GUARD
 deployed today is useful: it correctly identifies the "no signal" state.
 
-**The fix.** Retrain on fresh wallet data with the new architecture.
+**The fix.** Retrain the LSTM on the existing labeled data
+(`data/whale_behavior/labeled_v2/*.jsonl`, 26,868 real on-chain events
+across 3 wallets verified 2026-04-29). All training data is real
+on-chain transactions with behavioral labels computed from observable
+patterns; no synthetic generation.
 
 ```bash
-# 1. Refresh whale-wallet labeled training data
-cd ~/drl-trading-system  # local clone on Mac
-python3 scripts/refresh_whale_dataset.py \
-    --since 2026-02-15 \
-    --output data/training/whale_v2_dataset.parquet
-# This pulls fresh on-chain data from Etherscan/Alchemy and re-labels
-# wallet activity. Memory has noted "1,750 new labeled sequences
-# available" — those should be in the dataset.
-
-# 2. Retrain
-python3 train_whale_lstm.py \
-    --dataset data/training/whale_v2_dataset.parquet \
-    --architecture WhaleBehaviorLSTM \
-    --input_dim 272 \
-    --hidden_dim 256 \
-    --num_layers 2 \
-    --epochs 100 \
-    --val_split 0.2 \
-    --output data/models/whale_v2.pt
-
-# 3. Validate predictions are non-trivial
-python3 -c "
-import torch
-from src.whale_behavior.models.predictor import WhaleBehaviorLSTM
-m = WhaleBehaviorLSTM(input_dim=272, hidden_dim=256, num_layers=2)
-m.load_state_dict(torch.load('data/models/whale_v2.pt'))
-# Run inference on recent wallet activity. Confidence should range
-# 0-1 with std > 0.1 across 50 samples. If stuck near 0.5, model is
-# uninformative.
-"
+# On Mac, with .venv-train activated
+python3 scripts/train_whale_v2.py
+# Default: seq_len=24, hidden=256, 2 LSTM layers + attention head,
+# 50 epochs, early-stop on val accuracy. CrossEntropy loss over
+# {BEARISH, NEUTRAL, BULLISH} classes.
+# Output: data/models/whale_v2.pt
 ```
+
+The script prints per-epoch train loss + val accuracy, then test-set
+results. Acceptance gates checked automatically before save:
+- Test confidence stdev > 0.10 (model is informative)
+- No single class > 70% of predictions (model is balanced)
 
 ### Acceptance gate
 

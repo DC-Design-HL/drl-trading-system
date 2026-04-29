@@ -1,0 +1,23 @@
+# Mac M3 training dependencies — install before running scripts/train_*.py
+# Real-data only training (no synthetic generation).
+#
+# Install:
+#   python3 -m venv .venv-train && source .venv-train/bin/activate
+#   pip install -r scripts/requirements-mac-training.txt
+
+# Core data
+pandas>=2.0
+pyarrow>=14.0          # parquet IO
+numpy>=1.24
+scikit-learn>=1.3      # metrics, splits
+
+# Project 1 — Structure-Gated Filter (gradient boosted classifier)
+lightgbm>=4.0          # tabular binary classifier on M3 (CPU, fast)
+
+# Project 2 — ETH VecNormalize fix (validate / re-export)
+stable-baselines3>=2.0
+gymnasium>=0.29        # or gym>=0.26 if SB3 is older
+torch>=2.1             # M3-native MPS backend
+
+# Project 3 — Whale LSTM v2 retrain
+# (torch covers it; no extra deps)
