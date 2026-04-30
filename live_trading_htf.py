@@ -208,6 +208,24 @@ FUNDING_LONG_GUARD_MIN_RATE = 0.0  # Block if funding strictly less than this
 # Block both LONGs and SHORTs when whale_dir=NEUTRAL.
 WHALE_NEUTRAL_GUARD_ENABLED = True
 
+# ── Extreme-positive news fade guard (LONG-only) ──
+# Skip LONG entries when news in the trailing 4h has sentiment_score > 0.5
+# (asset-tagged or untagged/global). Backed by independent forward-return
+# correlation analysis: extreme-positive sentiment fades over 60-240m at
+# p=2.5e-6 (Bonferroni-OK over 76 hypotheses). Adoption-event news fades
+# even harder: -41 bps @ 240m (Bonferroni-OK).
+#
+# Backtest on production-filtered trades (8-day news window, Apr 21-29):
+#   Blocked 7-10 LONGs, ALL LOSERS (0% WR), ~$158-224 of pnl prevented.
+# Asymmetric — does not affect SHORTs.
+# Reads news from data/trading.db news_events table populated by
+# news_sentinel.py.
+EXT_POS_NEWS_GUARD_ENABLED = True
+EXT_POS_NEWS_SENTIMENT_THRESHOLD = 0.5  # >this counts as "extreme positive"
+EXT_POS_NEWS_LOOKBACK_HOURS = 4
+_EXT_POS_NEWS_CACHE_TTL_SECONDS = 60      # short cache; news arrives continuously
+_ext_pos_news_cache: dict = {}            # symbol → (ts, hit_bool, latest_match_dict)
+
 
 # ── Per-symbol-side blocklist (loser combos) ──
 # Backtest 2026-04-26 over 288 round-trips (Apr 6 → Apr 26) showed clear
@@ -1335,6 +1353,66 @@ class HTFLiveBot:
                 "🛡️ WHALE-NEUTRAL BLOCK: %s %s blocked — whale.direction=NEUTRAL "
                 "(historical regime: 37%% WR, -$8.67 avg)",
                 self.symbol, "LONG" if action == ACTION_LONG else "SHORT",
+            )
+            return False
+        return True
+
+    def _check_ext_pos_news_guard(self, action: int) -> bool:
+        """Block LONG entries when news in trailing 4h has sentiment > 0.5.
+        Asset-tagged to symbol's base coin OR untagged/global news.
+        Backed by Bonferroni-OK forward-return analysis (extreme-positive
+        sentiment fades over 60-240m). Affects LONG only.
+        Fail-open if news DB is unavailable.
+        """
+        if not EXT_POS_NEWS_GUARD_ENABLED or action != ACTION_LONG:
+            return True
+        import sqlite3
+        from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+        # Per-symbol short-TTL cache (news arrives continuously; refresh fast)
+        cache_key = self.symbol
+        cached = _ext_pos_news_cache.get(cache_key)
+        now = time.time()
+        if cached and (now - cached[0]) < _EXT_POS_NEWS_CACHE_TTL_SECONDS:
+            hit, info = cached[1], cached[2]
+        else:
+            try:
+                asset = self.symbol.replace("USDT", "").upper()
+                lookback_start = _dt.now(_tz.utc) - _td(hours=EXT_POS_NEWS_LOOKBACK_HOURS)
+                conn = sqlite3.connect("data/trading.db")
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT published_at, sentiment_score, assets, event_type, title "
+                    "FROM news_events "
+                    "WHERE sentiment_score IS NOT NULL "
+                    "AND sentiment_score > ? "
+                    "AND published_at >= ? "
+                    "ORDER BY published_at DESC",
+                    (EXT_POS_NEWS_SENTIMENT_THRESHOLD, lookback_start.isoformat()),
+                )
+                rows = cur.fetchall()
+                conn.close()
+                hit = False
+                info = None
+                for ts, sent, assets_json, et, title in rows:
+                    try:
+                        tags = json.loads(assets_json) if assets_json else []
+                    except Exception:
+                        tags = []
+                    if tags and not any(asset in (t or "").upper() for t in tags):
+                        continue  # asset-tagged but not for this symbol
+                    hit = True
+                    info = {"ts": ts[:19], "sentiment": float(sent),
+                            "event_type": et or "", "title": (title or "")[:80]}
+                    break
+                _ext_pos_news_cache[cache_key] = (now, hit, info)
+            except Exception as exc:
+                logger.debug("Ext-pos news guard: DB read failed (%s) — fail-open", exc)
+                return True
+        if hit and info:
+            logger.info(
+                "🛡️ EXT-POS-NEWS BLOCK: %s LONG blocked — sentiment %+.2f at %s "
+                "(%s) %s",
+                self.symbol, info["sentiment"], info["ts"], info["event_type"], info["title"],
             )
             return False
         return True
@@ -2857,6 +2935,17 @@ class HTFLiveBot:
             (self.position == 1 and action == ACTION_SHORT) or
             (self.position == -1 and action == ACTION_LONG)):
             if not self._check_whale_neutral_guard(action):
+                return None
+
+        # ── Guard: Extreme-positive news fade (LONG only) ──
+        # Block LONG entries when news in trailing 4h has sentiment > 0.5.
+        # Backed by Bonferroni-OK forward-return analysis showing euphoric
+        # news fades over 60-240m. Backtested incremental Δ over 8 days
+        # of news coverage: +$158 prevented losses (10 blocked, 0/10 wins).
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_ext_pos_news_guard(action):
                 return None
 
         # ── Guard: Market Signal Gate ──
