@@ -1,0 +1,418 @@
+{
+  "generated_at": "2026-05-01T08:30:02.990917+00:00",
+  "n_round_trips": 311,
+  "by_reason": {
+    "STAGNANT_EXIT": {
+      "n": 51,
+      "pnl": -196.64976220424862,
+      "wins": 13,
+      "longs": 25,
+      "shorts": 26
+    },
+    "SL": {
+      "n": 177,
+      "pnl": 551.4586156945537,
+      "wins": 142,
+      "longs": 93,
+      "shorts": 84
+    },
+    "REVERSE_CLOSE_LONG": {
+      "n": 39,
+      "pnl": -326.6542134319306,
+      "wins": 6,
+      "longs": 39,
+      "shorts": 0
+    },
+    "REVERSE_CLOSE_SHORT": {
+      "n": 33,
+      "pnl": -95.10240114037205,
+      "wins": 10,
+      "longs": 0,
+      "shorts": 33
+    },
+    "REVERSAL_BLOCKED_CLOSE": {
+      "n": 8,
+      "pnl": -27.13888363200041,
+      "wins": 2,
+      "longs": 4,
+      "shorts": 4
+    },
+    "TP": {
+      "n": 2,
+      "pnl": 64.4205669328,
+      "wins": 2,
+      "longs": 1,
+      "shorts": 1
+    },
+    "TP_CORRECTED": {
+      "n": 1,
+      "pnl": 0.62825,
+      "wins": 1,
+      "longs": 1,
+      "shorts": 0
+    }
+  },
+  "reverse_close_canary": {
+    "pre": [
+      {
+        "sym": "ETHUSDT",
+        "pnl": -5.9753826479998144,
+        "ts": "2026-04-07T04:12:06.961729"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -5.690818234116723,
+        "ts": "2026-04-07T04:12:07.537065"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -15.226008720000113,
+        "ts": "2026-04-07T14:19:24.786212"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -7.8846729600000725,
+        "ts": "2026-04-07T14:34:35.643596"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -20.29860820000003,
+        "ts": "2026-04-08T23:28:40.440018"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": 8.054252169408358,
+        "ts": "2026-04-14T06:59:08.047321"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -2.2803864107331973,
+        "ts": "2026-04-14T10:32:31.809036"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -4.348417139999867,
+        "ts": "2026-04-14T12:19:09.521933"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -0.6385055519998712,
+        "ts": "2026-04-14T13:04:11.083411"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -19.96617893887349,
+        "ts": "2026-04-14T18:24:32.384737"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -20.201745211999736,
+        "ts": "2026-04-14T18:24:52.653198"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -7.216687152000065,
+        "ts": "2026-04-15T03:20:44.691933"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -0.6678828,
+        "ts": "2026-04-15T09:26:33.053538"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -0.3678916386744432,
+        "ts": "2026-04-15T17:13:09.235877"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": 2.2961524628314858,
+        "ts": "2026-04-16T02:37:13.443260"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": 4.23462384,
+        "ts": "2026-04-16T05:54:22.034636"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": 0.16238419999990816,
+        "ts": "2026-04-16T06:10:02.585326"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -9.595643935999973,
+        "ts": "2026-04-16T08:57:54.147588"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -5.58336136,
+        "ts": "2026-04-16T10:13:29.594049"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -4.137830399999858,
+        "ts": "2026-04-17T01:12:27.231884"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -12.923643839999912,
+        "ts": "2026-04-17T18:03:12.286671"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -12.544370608,
+        "ts": "2026-04-17T18:49:44.534436"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -11.108412611310131,
+        "ts": "2026-04-17T20:51:12.485110"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": 5.828234160000072,
+        "ts": "2026-04-18T01:10:26.801158"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": 5.215230079999944,
+        "ts": "2026-04-18T02:10:33.813684"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -23.493276095999864,
+        "ts": "2026-04-18T09:33:11.931531"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -7.073509864000114,
+        "ts": "2026-04-18T17:56:06.449370"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -10.078024336000123,
+        "ts": "2026-04-18T18:40:02.923309"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -9.89267319999977,
+        "ts": "2026-04-18T19:25:45.726086"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -10.296851964505812,
+        "ts": "2026-04-18T20:11:47.867523"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -2.9831644800002985,
+        "ts": "2026-04-19T02:01:41.651955"
+      },
+      {
+        "sym": "SOLUSDT",
+        "pnl": -9.850173840000057,
+        "ts": "2026-04-19T02:01:45.909015"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -2.230650620179339,
+        "ts": "2026-04-19T02:02:17.975349"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -1.9237684479998656,
+        "ts": "2026-04-19T03:49:57.486918"
+      },
+      {
+        "sym": "ETHUSDT",
+        "pnl": -20.032020795999998,
+        "ts": "2026-04-20T23:28:19.499060"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -0.08103190512471425,
+        "ts": "2026-04-22T08:28:34.239759"
+      },
+      {
+        "sym": "XRPUSDT",
+        "pnl": -10.183982768000021,
+        "ts": "2026-04-22T17:35:44.163131"
+      }
+    ],
+    "post": [
+      {
+        "sym": "ETHUSDT",
+        "pnl": -0.09768802056299397,
+        "ts": "2026-04-24T02:10:36.970718"
+      },
+      {
+        "sym": "BTCUSDT",
+        "pnl": -77.57182564409008,
+        "ts": "2026-04-27T09:06:11.054562"
+      }
+    ]
+  },
+  "worst_combos": [
+    {
+      "reason": "REVERSE_CLOSE_LONG",
+      "symbol": "BTCUSDT",
+      "side": "LONG",
+      "n": 11,
+      "pnl": -119.24364333536809,
+      "wins": 2
+    },
+    {
+      "reason": "REVERSE_CLOSE_LONG",
+      "symbol": "XRPUSDT",
+      "side": "LONG",
+      "n": 11,
+      "pnl": -109.30306869599963,
+      "wins": 2
+    },
+    {
+      "reason": "REVERSE_CLOSE_LONG",
+      "symbol": "ETHUSDT",
+      "side": "LONG",
+      "n": 8,
+      "pnl": -56.617116920563134,
+      "wins": 0
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "SOLUSDT",
+      "side": "SHORT",
+      "n": 8,
+      "pnl": -50.428991290544765,
+      "wins": 3
+    },
+    {
+      "reason": "REVERSE_CLOSE_SHORT",
+      "symbol": "ETHUSDT",
+      "side": "SHORT",
+      "n": 9,
+      "pnl": -43.764835390294934,
+      "wins": 1
+    },
+    {
+      "reason": "REVERSE_CLOSE_LONG",
+      "symbol": "SOLUSDT",
+      "side": "LONG",
+      "n": 9,
+      "pnl": -41.490384479999726,
+      "wins": 2
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "XRPUSDT",
+      "side": "LONG",
+      "n": 7,
+      "pnl": -33.0253203479956,
+      "wins": 2
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "BTCUSDT",
+      "side": "SHORT",
+      "n": 11,
+      "pnl": -28.22457062311346,
+      "wins": 4
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "ETHUSDT",
+      "side": "LONG",
+      "n": 5,
+      "pnl": -25.81389765542832,
+      "wins": 0
+    },
+    {
+      "reason": "REVERSE_CLOSE_SHORT",
+      "symbol": "BTCUSDT",
+      "side": "SHORT",
+      "n": 8,
+      "pnl": -24.887466627302675,
+      "wins": 1
+    },
+    {
+      "reason": "REVERSAL_BLOCKED_CLOSE",
+      "symbol": "SOLUSDT",
+      "side": "LONG",
+      "n": 4,
+      "pnl": -23.827807599999865,
+      "wins": 1
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "SOLUSDT",
+      "side": "LONG",
+      "n": 7,
+      "pnl": -23.8140527344516,
+      "wins": 3
+    },
+    {
+      "reason": "SL",
+      "symbol": "BTCUSDT",
+      "side": "SHORT",
+      "n": 9,
+      "pnl": -16.595413341447628,
+      "wins": 6
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "BTCUSDT",
+      "side": "LONG",
+      "n": 6,
+      "pnl": -15.574161941417735,
+      "wins": 1
+    },
+    {
+      "reason": "REVERSE_CLOSE_SHORT",
+      "symbol": "XRPUSDT",
+      "side": "SHORT",
+      "n": 9,
+      "pnl": -15.298345744000162,
+      "wins": 4
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "ETHUSDT",
+      "side": "SHORT",
+      "n": 3,
+      "pnl": -11.202209004000073,
+      "wins": 0
+    },
+    {
+      "reason": "REVERSE_CLOSE_SHORT",
+      "symbol": "SOLUSDT",
+      "side": "SHORT",
+      "n": 7,
+      "pnl": -11.151753378774282,
+      "wins": 4
+    },
+    {
+      "reason": "STAGNANT_EXIT",
+      "symbol": "XRPUSDT",
+      "side": "SHORT",
+      "n": 4,
+      "pnl": -8.56655860729706,
+      "wins": 0
+    },
+    {
+      "reason": "REVERSAL_BLOCKED_CLOSE",
+      "symbol": "ETHUSDT",
+      "side": "SHORT",
+      "n": 2,
+      "pnl": -6.026016752000371,
+      "wins": 0
+    },
+    {
+      "reason": "SL",
+      "symbol": "ETHUSDT",
+      "side": "LONG",
+      "n": 27,
+      "pnl": 0.4505240083089319,
+      "wins": 20
+    }
+  ]
+}
