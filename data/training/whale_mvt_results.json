@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-05-01T06:49:27.181410+00:00",
+  "subset_criteria": {
+    "actions": [
+      "EXCHANGE_DEPOSIT",
+      "TOKEN_FROM_EXCHANGE",
+      "EXCHANGE_WITHDRAWAL",
+      "TOKEN_TO_EXCHANGE"
+    ],
+    "min_eth": 100.0,
+    "smart_money_wallets": [
+      "galaxy_digital",
+      "jump_trading",
+      "smart_money_whale_1"
+    ],
+    "exchange_counterparties": [
+      "binance",
+      "okx",
+      "kraken",
+      "bitfinex",
+      "coinbase"
+    ],
+    "window_start": "2024-01-01T00:00:00+00:00",
+    "window_end": "2026-04-30T00:00:00+00:00"
+  },
+  "n_events": 143,
+  "bonferroni_alpha": 0.016666666666666666,
+  "horizons": {
+    "15m": {
+      "n_iid": 143,
+      "iid_mean_bps": 4.88,
+      "iid_p": 0.069,
+      "n_non_overlap": 87,
+      "non_overlap_mean_bps": 4.99,
+      "non_overlap_p": 0.1444,
+      "verdict": "null"
+    },
+    "1h": {
+      "n_iid": 143,
+      "iid_mean_bps": -0.14,
+      "iid_p": 0.9759,
+      "n_non_overlap": 82,
+      "non_overlap_mean_bps": 2.61,
+      "non_overlap_p": 0.6338,
+      "verdict": "null"
+    },
+    "4h": {
+      "n_iid": 143,
+      "iid_mean_bps": -12.17,
+      "iid_p": 0.2943,
+      "n_non_overlap": 58,
+      "non_overlap_mean_bps": 11.72,
+      "non_overlap_p": 0.4724,
+      "verdict": "null"
+    }
+  },
+  "verdict": "FAIL_TO_REJECT_NO_SIGNAL"
+}
