@@ -1,0 +1,107 @@
+{
+  "generated_at": "2026-05-01T12:44:53.659920+00:00",
+  "window_start": "2026-04-06",
+  "n_round_trips": 312,
+  "n_annotated": 312,
+  "n_missing_feats": 0,
+  "thresholds": {
+    "oi_roc_4h": {
+      "p10": -1.384348737023881,
+      "p90": 1.3619550394542859
+    },
+    "oi_value_roc_4h": {
+      "p10": -1.917653963815858,
+      "p90": 1.8153610718793407
+    },
+    "px_roc_4h": {
+      "p10": -0.9309291264334817,
+      "p90": 1.0161924391384303
+    },
+    "oi_roc_24h": {
+      "p10": -4.374804676537149,
+      "p90": 5.18740576280461
+    },
+    "oi_z_7d": {
+      "p10": -1.3718299051541598,
+      "p90": 1.708469900141134
+    }
+  },
+  "baseline_pnl": -44.42,
+  "results": [
+    {
+      "rule": "F1_skip_long_high_oi_roc_24h",
+      "n_skipped": 26,
+      "n_skipped_long": 26,
+      "n_skipped_short": 0,
+      "skipped_pnl": -9.09,
+      "kept_pnl": -35.33,
+      "delta_pnl": 9.09,
+      "ci_5_95": [
+        -110.44,
+        7.8,
+        132.48
+      ],
+      "verdict": "weak+"
+    },
+    {
+      "rule": "F2_skip_long_high_oi_value_roc_4h",
+      "n_skipped": 41,
+      "n_skipped_long": 41,
+      "n_skipped_short": 0,
+      "skipped_pnl": -58.21,
+      "kept_pnl": 13.79,
+      "delta_pnl": 58.21,
+      "ci_5_95": [
+        -184.38,
+        50.2,
+        339.44
+      ],
+      "verdict": "weak+"
+    },
+    {
+      "rule": "F3_skip_short_low_oi_z_7d",
+      "n_skipped": 13,
+      "n_skipped_long": 0,
+      "n_skipped_short": 13,
+      "skipped_pnl": 65.97,
+      "kept_pnl": -110.39,
+      "delta_pnl": -65.97,
+      "ci_5_95": [
+        -135.74,
+        -67.97,
+        12.83
+      ],
+      "verdict": "weak\u2212"
+    },
+    {
+      "rule": "F4_skip_long_oi_up_price_up_4h",
+      "n_skipped": 25,
+      "n_skipped_long": 25,
+      "n_skipped_short": 0,
+      "skipped_pnl": 2.02,
+      "kept_pnl": -46.44,
+      "delta_pnl": -2.02,
+      "ci_5_95": [
+        -117.65,
+        -2.09,
+        115.56
+      ],
+      "verdict": "weak\u2212"
+    },
+    {
+      "rule": "F5_skip_short_oi_down_price_down_4h",
+      "n_skipped": 15,
+      "n_skipped_long": 0,
+      "n_skipped_short": 15,
+      "skipped_pnl": 62.26,
+      "kept_pnl": -106.68,
+      "delta_pnl": -62.26,
+      "ci_5_95": [
+        -144.13,
+        -66.0,
+        35.65
+      ],
+      "verdict": "weak\u2212"
+    }
+  ]
+}

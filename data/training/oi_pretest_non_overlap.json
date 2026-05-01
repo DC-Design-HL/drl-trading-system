@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-05-01T12:34:50.451076+00:00",
+  "bonferroni_alpha": 0.01,
+  "results": [
+    {
+      "feature": "oi_value_roc_4h",
+      "horizon": "24h",
+      "tail": "top",
+      "n_non_overlap": 11,
+      "n_mid": 90,
+      "mean_sample_pct": 0.446,
+      "mean_mid_pct": 0.1348,
+      "delta_bps": 31.12,
+      "p_value": 0.75195,
+      "passes": false
+    },
+    {
+      "feature": "oi_roc_24h",
+      "horizon": "24h",
+      "tail": "top",
+      "n_non_overlap": 11,
+      "n_mid": 90,
+      "mean_sample_pct": -1.3268,
+      "mean_mid_pct": 0.2032,
+      "delta_bps": -153.0,
+      "p_value": 0.16622,
+      "passes": false
+    },
+    {
+      "feature": "oi_z_7d",
+      "horizon": "24h",
+      "tail": "bot",
+      "n_non_overlap": 8,
+      "n_mid": 72,
+      "mean_sample_pct": 0.6719,
+      "mean_mid_pct": -0.0599,
+      "delta_bps": 73.18,
+      "p_value": 0.52041,
+      "passes": false
+    },
+    {
+      "feature": "oi_roc_4h",
+      "horizon": "24h",
+      "tail": "top",
+      "n_non_overlap": 11,
+      "n_mid": 90,
+      "mean_sample_pct": -0.1231,
+      "mean_mid_pct": 0.1362,
+      "delta_bps": -25.93,
+      "p_value": 0.78421,
+      "passes": false
+    },
+    {
+      "feature": "oi_roc_24h",
+      "horizon": "4h",
+      "tail": "top",
+      "n_non_overlap": 69,
+      "n_mid": 554,
+      "mean_sample_pct": -0.1226,
+      "mean_mid_pct": 0.0475,
+      "delta_bps": -17.01,
+      "p_value": 0.16787,
+      "passes": false
+    }
+  ],
+  "passers": []
+}

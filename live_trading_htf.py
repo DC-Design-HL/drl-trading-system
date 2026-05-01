@@ -150,6 +150,17 @@ REVERSAL_BLOCK_LONG_CANARY_SYMBOLS: set = {"XRPUSDT", "BTCUSDT", "ETHUSDT", "SOL
 REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT = -0.5
 _BTC_REGIME_CACHE_TTL_SECONDS = 900
 
+# ── Open-Interest observational logging (Phase 2, 2026-05-01) ────────────
+# Pre-test on 30d × 4 symbols showed a directional pattern (high OI ROC →
+# negative forward 24h returns) that failed Bonferroni under non-overlap
+# subsampling — autocorrelation artifact at our data window. Backtest of
+# 5 candidate filter rules on 312 actual trades gave best directional rule
+# +$58 (CI [-$184, +$339]). Insufficient power to deploy as a guard.
+# Decision (Chen, 2026-05-01): log OI features at every trade open with
+# zero decision-making impact. Re-test in 4-6 weeks against trades whose
+# entry-time features are directly logged (no historical reconstruction).
+_OI_CACHE_TTL_SECONDS = 900
+
 # Actions from PPO (must match HTFTradingEnv)
 ACTION_HOLD = 0
 ACTION_LONG = 1
@@ -519,6 +530,81 @@ def _compute_btc_4h_ema_slope_pct(fetcher) -> Optional[float]:
     except Exception as exc:
         logger.debug("BTC regime slope fetch failed: %s", exc)
         return cached
+
+
+# ── Open-Interest observational logging ─────────────────────────────────
+# Per-symbol cache, shared across symbol threads in the consolidated bot.
+_oi_features_cache: Dict[str, Dict] = {}
+
+
+def _compute_oi_features(symbol: str) -> Optional[Dict]:
+    """Fetch 1h Binance Futures OI hist + 1h klines for `symbol` and return
+    the 5 candidate features for observational logging at trade-open time.
+
+    Phase 2 OI investigation (2026-05-01): the pre-test found a directionally
+    consistent but Bonferroni-failing signal at our 30d × hourly resolution.
+    This helper exists purely to record entry-time OI state on every trade so
+    we can re-test in 4-6 weeks with directly-logged data, no historical
+    reconstruction required.
+
+    Returns a dict with keys: oi_roc_4h, oi_roc_24h, oi_z_7d, oi_value_roc_4h,
+    px_roc_4h, computed_at. Returns None on hard failure (e.g. fetch error
+    with no cache yet) — callers should treat None as "no observation".
+    Never raises.
+    """
+    now = time.time()
+    cached = _oi_features_cache.get(symbol)
+    if cached and (now - cached.get("ts", 0)) < _OI_CACHE_TTL_SECONDS:
+        return cached.get("features")
+
+    try:
+        import urllib.request as _urlreq
+        oi_url = (f"https://fapi.binance.com/futures/data/openInterestHist"
+                  f"?symbol={symbol}&period=1h&limit=200")
+        with _urlreq.urlopen(oi_url, timeout=8) as r:
+            oi_data = json.loads(r.read())
+        kl_url = (f"https://fapi.binance.com/fapi/v1/klines"
+                  f"?symbol={symbol}&interval=1h&limit=200")
+        with _urlreq.urlopen(kl_url, timeout=8) as r:
+            kl_data = json.loads(r.read())
+
+        if not oi_data or not kl_data or len(oi_data) < 25 or len(kl_data) < 25:
+            return cached.get("features") if cached else None
+
+        oi_data.sort(key=lambda d: int(d["timestamp"]))
+        kl_data.sort(key=lambda k: int(k[0]))
+        oi_arr = [float(d["sumOpenInterest"]) for d in oi_data]
+        oi_v_arr = [float(d["sumOpenInterestValue"]) for d in oi_data]
+        px_arr = [float(k[4]) for k in kl_data]
+
+        def _pct(arr, k):
+            if len(arr) <= k: return None
+            base = arr[-(k + 1)]
+            if base == 0: return None
+            return (arr[-1] - base) / base * 100.0
+
+        def _zscore(arr, w):
+            if len(arr) < w: return None
+            window = arr[-w:]
+            m = sum(window) / w
+            var = sum((x - m) ** 2 for x in window) / max(w - 1, 1)
+            sd = var ** 0.5
+            if sd == 0: return None
+            return (arr[-1] - m) / sd
+
+        feats = {
+            "oi_roc_4h":       _pct(oi_arr, 4),
+            "oi_roc_24h":      _pct(oi_arr, 24),
+            "oi_z_7d":         _zscore(oi_arr, 168),
+            "oi_value_roc_4h": _pct(oi_v_arr, 4),
+            "px_roc_4h":       _pct(px_arr, 4),
+            "computed_at":     int(now),
+        }
+        _oi_features_cache[symbol] = {"features": feats, "ts": now}
+        return feats
+    except Exception as exc:
+        logger.debug("OI features fetch failed for %s: %s", symbol, exc)
+        return cached.get("features") if cached else None
 
 
 def _is_usdt_dominance_rising(fetcher) -> Optional[bool]:
@@ -3135,6 +3221,13 @@ class HTFLiveBot:
             self.tp_price, tp_pct * 100,
             self.partial_tp1_price, self.partial_tp2_price, confidence,
         )
+
+        # Phase 2 OI logging — observational only, never blocks. See
+        # _compute_oi_features for context. Helper never raises.
+        try:
+            trade["oi_features"] = _compute_oi_features(self.symbol)
+        except Exception:
+            trade["oi_features"] = None
 
         if not self.dry_run:
             self._mirror_testnet(trade)
