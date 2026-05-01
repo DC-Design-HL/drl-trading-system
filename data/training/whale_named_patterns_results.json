@@ -1,0 +1,125 @@
+{
+  "generated_at": "2026-05-01T06:04:57.865709+00:00",
+  "window": {
+    "start": "2026-01-01T00:00:00+00:00",
+    "end": "2026-04-30T00:00:00+00:00"
+  },
+  "n_patterns_tested": 3,
+  "bonferroni_alpha": 0.0025,
+  "results": [
+    {
+      "name": "P2 burst",
+      "n_events": 103,
+      "horizons": {
+        "15m": {
+          "n_returns": 103,
+          "mean_bps": -0.74,
+          "iid_p": 0.8299,
+          "n_non_overlap": 103,
+          "non_overlap_mean_bps": -0.74,
+          "non_overlap_p": 0.8299
+        },
+        "1h": {
+          "n_returns": 103,
+          "mean_bps": 6.11,
+          "iid_p": 0.2062,
+          "n_non_overlap": 103,
+          "non_overlap_mean_bps": 6.11,
+          "non_overlap_p": 0.2062
+        },
+        "4h": {
+          "n_returns": 103,
+          "mean_bps": 10.58,
+          "iid_p": 0.3549,
+          "n_non_overlap": 58,
+          "non_overlap_mean_bps": 11.51,
+          "non_overlap_p": 0.4691
+        },
+        "24h": {
+          "n_returns": 103,
+          "mean_bps": -29.23,
+          "iid_p": 0.2373,
+          "n_non_overlap": 20,
+          "non_overlap_mean_bps": 15.72,
+          "non_overlap_p": 0.7773
+        }
+      }
+    },
+    {
+      "name": "P3 smart-money divergence",
+      "n_events": 28,
+      "horizons": {
+        "15m": {
+          "n_returns": 28,
+          "mean_bps": -18.79,
+          "iid_p": 0.0362,
+          "n_non_overlap": 28,
+          "non_overlap_mean_bps": -18.79,
+          "non_overlap_p": 0.0362
+        },
+        "1h": {
+          "n_returns": 28,
+          "mean_bps": -0.95,
+          "iid_p": 0.9188,
+          "n_non_overlap": 28,
+          "non_overlap_mean_bps": -0.95,
+          "non_overlap_p": 0.9188
+        },
+        "4h": {
+          "n_returns": 28,
+          "mean_bps": 16.11,
+          "iid_p": 0.4875,
+          "n_non_overlap": 17,
+          "non_overlap_mean_bps": 18.59,
+          "non_overlap_p": 0.6067
+        },
+        "24h": {
+          "n_returns": 28,
+          "mean_bps": 122.57,
+          "iid_p": 0.0239,
+          "n_non_overlap": 11,
+          "non_overlap_mean_bps": 91.23,
+          "non_overlap_p": 0.3675
+        }
+      }
+    },
+    {
+      "name": "P5 exchange rotation",
+      "n_events": 109,
+      "horizons": {
+        "15m": {
+          "n_returns": 109,
+          "mean_bps": 1.18,
+          "iid_p": 0.6536,
+          "n_non_overlap": 109,
+          "non_overlap_mean_bps": 1.18,
+          "non_overlap_p": 0.6536
+        },
+        "1h": {
+          "n_returns": 109,
+          "mean_bps": -3.18,
+          "iid_p": 0.4776,
+          "n_non_overlap": 109,
+          "non_overlap_mean_bps": -3.18,
+          "non_overlap_p": 0.4776
+        },
+        "4h": {
+          "n_returns": 109,
+          "mean_bps": 6.17,
+          "iid_p": 0.5728,
+          "n_non_overlap": 63,
+          "non_overlap_mean_bps": 3.14,
+          "non_overlap_p": 0.8194
+        },
+        "24h": {
+          "n_returns": 109,
+          "mean_bps": 18.95,
+          "iid_p": 0.4206,
+          "n_non_overlap": 19,
+          "non_overlap_mean_bps": 62.95,
+          "non_overlap_p": 0.2612
+        }
+      }
+    }
+  ]
+}
