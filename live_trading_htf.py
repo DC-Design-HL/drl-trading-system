@@ -146,7 +146,7 @@ WHIPSAW_COOLDOWN_HOURS = 2.0
 #
 # Starts as a canary on XRP only (biggest offender: 11 trades, −$109 actual,
 # +$566 projected delta). Expand to BTC/ETH/SOL after 2 weeks of live signal.
-REVERSAL_BLOCK_LONG_CANARY_SYMBOLS: set = {"XRPUSDT"}
+REVERSAL_BLOCK_LONG_CANARY_SYMBOLS: set = {"XRPUSDT", "BTCUSDT", "ETHUSDT", "SOLUSDT"}
 REVERSAL_BLOCK_LONG_REGIME_GATE_MIN_SLOPE_PCT = -0.5
 _BTC_REGIME_CACHE_TTL_SECONDS = 900
 
