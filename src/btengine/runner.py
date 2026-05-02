@@ -82,11 +82,19 @@ class BacktestRunner:
         # The reverse-close-long canary is its own check on REVERSE_CLOSE_LONG
         rcl_guard = ReverseCloseLongGuard()
 
+        # TP override config (Phase 1 sweep support)
+        atr_floor = self.config.exits.atr_floor or {}
         broker = Broker(
             fees_taker=self.config.fees.taker,
             slippage_pct=self.config.fees.slippage_pct,
-            starting_balance=5000.0,  # TODO: pull from config (M2 sizing)
+            starting_balance=5000.0,
             max_concurrent=self.config.sizing.max_concurrent,
+            sl_atr_mult=float(atr_floor.get("sl_mult", 1.5)),
+            tp_atr_mult=float(atr_floor.get("tp_mult", 3.0)),
+            tp_pct_override=self._extras_get("tp_pct_override"),
+            tp_multiplier=float(self._extras_get("tp_multiplier", 1.0)),
+            short_only_tp_override=bool(self._extras_get("short_only_tp_override", False)),
+            conditional_tp_max_confidence=self._extras_get("conditional_tp_max_confidence"),
         )
 
         # 3. Replay
@@ -207,6 +215,12 @@ class BacktestRunner:
             yaml.safe_dump(self.config.raw, f, sort_keys=False)
 
         return summary
+
+    def _extras_get(self, key, default=None):
+        """Read a value from `exits.extras` in the YAML for sweep parameters
+        that don't have first-class schema fields yet."""
+        extras = self.config.raw.get("exits", {}).get("extras", {}) if self.config.raw else {}
+        return extras.get(key, default)
 
     # ── kline + basket helpers ─────────────────────────────────────
     def _load_klines(self) -> tuple[Dict, Dict]:

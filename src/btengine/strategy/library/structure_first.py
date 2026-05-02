@@ -35,6 +35,9 @@ class StructureFirstEntry(EntryRule):
     min_confidence: float = LC.MIN_CONFIDENCE
     htf_intervals: tuple = ("1h", "4h")
     min_primary_bars: int = 30        # need this much history before signaling
+    primary_window: int = 200         # only last N bars passed to MarketStructure
+                                      # (huge speedup vs growing df; swing_lookback=8 only needs ~20 bars)
+    htf_window: int = 200             # cap HTF context size too
     _market_structure: Optional[MarketStructure] = field(default=None, init=False)
 
     def __post_init__(self):
@@ -43,9 +46,14 @@ class StructureFirstEntry(EntryRule):
     def __call__(self, ctx) -> Intent:
         if len(ctx.primary) < self.min_primary_bars:
             return Intent(action="HOLD", reason="warmup")
-        primary = ctx.primary
+        # Cap context to last N bars — MarketStructure only needs recent swings
+        primary = ctx.primary.iloc[-self.primary_window:] if len(ctx.primary) > self.primary_window else ctx.primary
         df_1h = ctx.htf_up_to_now("1h") if "1h" in self.htf_intervals else None
         df_4h = ctx.htf_up_to_now("4h") if "4h" in self.htf_intervals else None
+        if df_1h is not None and len(df_1h) > self.htf_window:
+            df_1h = df_1h.iloc[-self.htf_window:]
+        if df_4h is not None and len(df_4h) > self.htf_window:
+            df_4h = df_4h.iloc[-self.htf_window:]
 
         try:
             sig = self._market_structure.get_signals(

@@ -65,13 +65,44 @@ class Broker:
     def __init__(self, fees_taker: float = LC.TRADING_FEE_TAKER,
                  slippage_pct: float = LC.SLIPPAGE_PCT,
                  starting_balance: float = LC.INITIAL_BALANCE,
-                 max_concurrent: int = 4):
+                 max_concurrent: int = 4,
+                 sl_atr_mult: float = LC.ATR_SL_FLOOR_MULT,
+                 tp_atr_mult: float = LC.ATR_TP_FLOOR_MULT,
+                 base_sl_pct: float = LC.BASE_SL_PCT,
+                 base_tp_pct: float = LC.BASE_TP_PCT,
+                 tp_pct_override: Optional[float] = None,
+                 tp_multiplier: float = 1.0,
+                 short_only_tp_override: bool = False,
+                 conditional_tp_max_confidence: Optional[float] = None):
+        """
+        Constructor parameters that control SL/TP shape:
+          sl_atr_mult, tp_atr_mult: ATR-floor multipliers (default 1.5 / 3.0)
+          base_sl_pct, base_tp_pct: floors below which ATR can't push SL/TP
+          tp_pct_override: if set, force final TP at this absolute pct
+                           (ignores ATR floor — useful for grid sweeps)
+          tp_multiplier:  scale factor applied to whatever final TP we'd
+                           otherwise compute (1.0 = no change, 0.5 = half)
+          short_only_tp_override: if True, the override / multiplier
+                           applies to SHORTs only; LONGs keep their
+                           normal TP. False = symmetric.
+          conditional_tp_max_confidence: if set, the override / multiplier
+                           applies ONLY when entry confidence < this value.
+                           Used for "shrink TP on low-confidence trades".
+        """
         self.fees_taker = fees_taker
         self.slippage_pct = slippage_pct
         self.balance = starting_balance
         self.starting_balance = starting_balance
         self.realized_pnl = 0.0
         self.max_concurrent = max_concurrent
+        self.sl_atr_mult = sl_atr_mult
+        self.tp_atr_mult = tp_atr_mult
+        self.base_sl_pct = base_sl_pct
+        self.base_tp_pct = base_tp_pct
+        self.tp_pct_override = tp_pct_override
+        self.tp_multiplier = float(tp_multiplier)
+        self.short_only_tp_override = bool(short_only_tp_override)
+        self.conditional_tp_max_confidence = conditional_tp_max_confidence
         self.positions: dict[str, Position] = {}
 
     # ── opens ──────────────────────────────────────────────────────
@@ -97,8 +128,22 @@ class Broker:
         # ATR-floored SL/TP
         atr_series = _atr(ctx.primary, period=atr_period).dropna()
         atr_pct = float(atr_series.iloc[-1]) / entry_price if len(atr_series) else 0.0
-        sl_pct = max(LC.BASE_SL_PCT, atr_pct * LC.ATR_SL_FLOOR_MULT)
-        tp_pct = max(LC.BASE_TP_PCT, atr_pct * LC.ATR_TP_FLOOR_MULT)
+        sl_pct = max(self.base_sl_pct, atr_pct * self.sl_atr_mult)
+        tp_pct = max(self.base_tp_pct, atr_pct * self.tp_atr_mult)
+
+        # Apply TP override / multiplier (gated by side + confidence rules)
+        applies_to_side = (
+            (not self.short_only_tp_override) or (side == "SHORT")
+        )
+        applies_to_conf = (
+            self.conditional_tp_max_confidence is None
+            or intent.confidence < self.conditional_tp_max_confidence
+        )
+        if applies_to_side and applies_to_conf:
+            if self.tp_pct_override is not None:
+                tp_pct = float(self.tp_pct_override)
+            elif self.tp_multiplier != 1.0:
+                tp_pct = tp_pct * self.tp_multiplier
 
         if side == "LONG":
             sl_price = entry_price * (1 - sl_pct)
@@ -169,18 +214,18 @@ class Broker:
             pos.partial_tp_level = 2
             pos.trail_check()
 
-        # 3. Trailing stop
-        pos.trail_check()
-        if pos.trailing_active and self._trail_hit(pos, bar_high, bar_low):
-            trades.append(self._close_remainder(pos, ctx, pos.trailing_stop_price, "trail"))
+        # 3. Final TP — exchange-managed, fires whenever price touches.
+        # Must come BEFORE trailing because TP is set at open and lives on
+        # the exchange; bot-side trailing can't override an exchange fill.
+        if self._tp_hit(pos, bar_high, bar_low):
+            trades.append(self._close_remainder(pos, ctx, pos.tp_price, "tp_full"))
             self.positions.pop(ctx.symbol, None)
             return trades
 
-        # 4. Final TP — only relevant if partial-TP-level reached the end and
-        # the position is still open after trailing kicked in. Live's full TP
-        # at tp_price kicks in if trailing isn't yet active.
-        if not pos.trailing_active and self._tp_hit(pos, bar_high, bar_low):
-            trades.append(self._close_remainder(pos, ctx, pos.tp_price, "tp_full"))
+        # 4. Trailing stop — bot-side, fires when peak retraces by distance
+        pos.trail_check()
+        if pos.trailing_active and self._trail_hit(pos, bar_high, bar_low):
+            trades.append(self._close_remainder(pos, ctx, pos.trailing_stop_price, "trail"))
             self.positions.pop(ctx.symbol, None)
             return trades
 

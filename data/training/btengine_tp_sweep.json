@@ -1,0 +1,449 @@
+{
+  "window_days": 30,
+  "window_start": "2026-04-02",
+  "window_end": "2026-05-02",
+  "variants": [
+    {
+      "variant": "baseline",
+      "extras": {},
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 270.4
+    },
+    {
+      "variant": "tp_mult_0.5",
+      "extras": {
+        "tp_multiplier": 0.5
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -808.72,
+      "max_dd_pct": 18.64,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 108,
+          "pnl": 528.05,
+          "wins": 108
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "tp_full": {
+          "n": 1,
+          "pnl": 12.68,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 271.8
+    },
+    {
+      "variant": "tp_mult_0.7",
+      "extras": {
+        "tp_multiplier": 0.7
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 269.0
+    },
+    {
+      "variant": "tp_pct_1.5",
+      "extras": {
+        "tp_pct_override": 0.015
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -808.72,
+      "max_dd_pct": 18.64,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 108,
+          "pnl": 528.05,
+          "wins": 108
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "tp_full": {
+          "n": 1,
+          "pnl": 12.68,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 270.6
+    },
+    {
+      "variant": "tp_pct_2.0",
+      "extras": {
+        "tp_pct_override": 0.02
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 268.1
+    },
+    {
+      "variant": "tp_pct_2.5",
+      "extras": {
+        "tp_pct_override": 0.025
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 270.8
+    },
+    {
+      "variant": "tp_pct_2.0_short",
+      "extras": {
+        "tp_pct_override": 0.02,
+        "short_only_tp_override": true
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 269.3
+    },
+    {
+      "variant": "tp_pct_2.0_lowconf",
+      "extras": {
+        "tp_pct_override": 0.02,
+        "conditional_tp_max_confidence": 0.75
+      },
+      "n_full_closes": 204,
+      "wins": 112,
+      "win_rate_pct": 54.90196078431373,
+      "total_pnl_usd": -810.27,
+      "max_dd_pct": 18.67,
+      "by_reason": {
+        "stagnant": {
+          "n": 51,
+          "pnl": -386.32,
+          "wins": 2
+        },
+        "sl": {
+          "n": 39,
+          "pnl": -929.97,
+          "wins": 0
+        },
+        "trail": {
+          "n": 109,
+          "pnl": 539.18,
+          "wins": 109
+        },
+        "reverse_close_short": {
+          "n": 3,
+          "pnl": -41.02,
+          "wins": 0
+        },
+        "reverse_close_long": {
+          "n": 1,
+          "pnl": 1.93,
+          "wins": 1
+        },
+        "tp_partial_1": {
+          "n": 1,
+          "pnl": 8.45,
+          "wins": 1
+        },
+        "eod": {
+          "n": 1,
+          "pnl": -2.53,
+          "wins": 0
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 1691,
+        "adx": 474,
+        "reverse_close_long_canary": 11
+      },
+      "elapsed_sec": 278.0
+    }
+  ]
+}

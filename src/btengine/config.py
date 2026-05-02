@@ -89,6 +89,9 @@ class ExitsSpec:
     stagnant_hours: float = LC.STAGNANT_HOURS
     stagnant_pct_min: float = LC.STAGNANT_PCT_MIN
     stagnant_pct_max: float = LC.STAGNANT_PCT_MAX
+    # Free-form extras (sweep parameters that aren't promoted to first-class
+    # schema fields yet — e.g. tp_pct_override, tp_multiplier, etc.)
+    extras: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
