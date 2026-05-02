@@ -1,0 +1,38 @@
+# Minimal example config — exercises the M1 dry-run path.
+# Once M3-M5 land, this same file will run a full simulation.
+
+run_id: example_dry_run
+window:
+  start: 2026-04-15
+  end: 2026-05-01
+symbols: [BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT]
+intervals:
+  primary: 15m
+  htf: [1h, 4h]
+seed: 42
+
+strategy: structure_first_v3   # registered in M2; dry-run doesn't actually load it
+
+guards:
+  enabled: [adx, usdtd, funding_long, whale_neutral, ext_pos_news]
+  params:
+    adx: { min_adx: 20, max_adx: 60 }
+    usdtd: { threshold_pct: 0.7 }
+
+sizing:
+  type: fixed_notional
+  usd: 6000
+  max_concurrent: 4
+
+exits:
+  partial_tp: [[1.0, 0.40], [2.0, 0.35]]
+  stagnant_hours: 6
+
+fees:
+  taker: 0.0004
+  maker: 0.0002
+  slippage_pct: 0.0005
+
+output:
+  dir: runs/${run_id}
+  formats: [parquet, json, csv]
