@@ -1,0 +1,578 @@
+{
+  "window_days": 90,
+  "window_start": "2026-02-01",
+  "window_end": "2026-05-02",
+  "variants": [
+    {
+      "variant": "baseline_full",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 860,
+      "wins": 573,
+      "win_rate_pct": 66.62790697674419,
+      "total_pnl_usd": -1245.64,
+      "max_dd_pct": 39.23,
+      "by_reason": {
+        "trail": 565,
+        "sl": 181,
+        "stagnant": 93,
+        "tp_partial_1": 36,
+        "reverse_close_long": 9,
+        "reverse_close_short": 11,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 133,
+          "pnl": -202.24
+        },
+        "XRPUSDT:SHORT": {
+          "n": 213,
+          "pnl": -356.44
+        },
+        "XRPUSDT:LONG": {
+          "n": 255,
+          "pnl": -487.55
+        },
+        "BTCUSDT:LONG": {
+          "n": 259,
+          "pnl": -564.7
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5518,
+        "reverse_close_long_canary": 111,
+        "adx": 1443,
+        "usdtd": 350
+      },
+      "blocked_total": 7422,
+      "elapsed_sec": 1158.5
+    },
+    {
+      "variant": "structure_only",
+      "guards_enabled": [],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 1992,
+      "wins": 1340,
+      "win_rate_pct": 67.26907630522089,
+      "total_pnl_usd": -3007.57,
+      "max_dd_pct": 85.52,
+      "by_reason": {
+        "trail": 1325,
+        "sl": 417,
+        "stagnant": 191,
+        "tp_partial_1": 87,
+        "reverse_close_long": 22,
+        "reverse_close_short": 34,
+        "tp_partial_2": 2,
+        "tp_full": 2,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "BTCUSDT:SHORT": {
+          "n": 151,
+          "pnl": -328.68
+        },
+        "SOLUSDT:SHORT": {
+          "n": 182,
+          "pnl": -386.19
+        },
+        "ETHUSDT:SHORT": {
+          "n": 186,
+          "pnl": -29.95
+        },
+        "XRPUSDT:SHORT": {
+          "n": 252,
+          "pnl": -442.51
+        },
+        "XRPUSDT:LONG": {
+          "n": 343,
+          "pnl": -687.69
+        },
+        "BTCUSDT:LONG": {
+          "n": 319,
+          "pnl": -585.64
+        },
+        "ETHUSDT:LONG": {
+          "n": 310,
+          "pnl": -794.07
+        },
+        "SOLUSDT:LONG": {
+          "n": 249,
+          "pnl": -597.63
+        }
+      },
+      "blocks_by_guard": {
+        "reverse_close_long_canary": 155
+      },
+      "blocked_total": 155,
+      "elapsed_sec": 847.1
+    },
+    {
+      "variant": "drop_blocklist",
+      "guards_enabled": [
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 1536,
+      "wins": 1035,
+      "win_rate_pct": 67.3828125,
+      "total_pnl_usd": -1981.51,
+      "max_dd_pct": 61.16,
+      "by_reason": {
+        "trail": 1022,
+        "sl": 324,
+        "stagnant": 151,
+        "tp_partial_1": 78,
+        "reverse_close_long": 16,
+        "reverse_close_short": 21,
+        "tp_partial_2": 1,
+        "tp_full": 1,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "BTCUSDT:SHORT": {
+          "n": 113,
+          "pnl": -200.09
+        },
+        "SOLUSDT:SHORT": {
+          "n": 132,
+          "pnl": -190.05
+        },
+        "ETHUSDT:SHORT": {
+          "n": 144,
+          "pnl": -51.08
+        },
+        "XRPUSDT:SHORT": {
+          "n": 213,
+          "pnl": -356.44
+        },
+        "XRPUSDT:LONG": {
+          "n": 255,
+          "pnl": -487.55
+        },
+        "BTCUSDT:LONG": {
+          "n": 259,
+          "pnl": -564.7
+        },
+        "SOLUSDT:LONG": {
+          "n": 201,
+          "pnl": -427.59
+        },
+        "ETHUSDT:LONG": {
+          "n": 219,
+          "pnl": -455.27
+        }
+      },
+      "blocks_by_guard": {
+        "adx": 2497,
+        "reverse_close_long_canary": 147,
+        "usdtd": 622
+      },
+      "blocked_total": 3266,
+      "elapsed_sec": 881.2
+    },
+    {
+      "variant": "drop_adx",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 1054,
+      "wins": 701,
+      "win_rate_pct": 66.50853889943073,
+      "total_pnl_usd": -1706.14,
+      "max_dd_pct": 50.33,
+      "by_reason": {
+        "trail": 691,
+        "sl": 218,
+        "stagnant": 116,
+        "tp_partial_1": 40,
+        "reverse_close_long": 12,
+        "reverse_close_short": 16,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 185,
+          "pnl": -400.38
+        },
+        "XRPUSDT:SHORT": {
+          "n": 252,
+          "pnl": -442.51
+        },
+        "XRPUSDT:LONG": {
+          "n": 317,
+          "pnl": -645.06
+        },
+        "BTCUSDT:LONG": {
+          "n": 300,
+          "pnl": -618.78
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5518,
+        "reverse_close_long_canary": 124,
+        "usdtd": 347
+      },
+      "blocked_total": 5989,
+      "elapsed_sec": 850.0
+    },
+    {
+      "variant": "drop_usdtd",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 902,
+      "wins": 605,
+      "win_rate_pct": 67.07317073170732,
+      "total_pnl_usd": -1326.18,
+      "max_dd_pct": 41.28,
+      "by_reason": {
+        "trail": 598,
+        "sl": 188,
+        "stagnant": 93,
+        "tp_partial_1": 31,
+        "reverse_close_long": 11,
+        "reverse_close_short": 11,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 133,
+          "pnl": -202.24
+        },
+        "XRPUSDT:SHORT": {
+          "n": 213,
+          "pnl": -356.44
+        },
+        "XRPUSDT:LONG": {
+          "n": 277,
+          "pnl": -553.18
+        },
+        "BTCUSDT:LONG": {
+          "n": 279,
+          "pnl": -537.34
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5524,
+        "reverse_close_long_canary": 105,
+        "adx": 1427
+      },
+      "blocked_total": 7056,
+      "elapsed_sec": 834.5
+    },
+    {
+      "variant": "adx_strict",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "min_confidence": null,
+      "n_full_closes": 597,
+      "wins": 398,
+      "win_rate_pct": 66.66666666666666,
+      "total_pnl_usd": -812.86,
+      "max_dd_pct": 29.19,
+      "by_reason": {
+        "trail": 392,
+        "sl": 125,
+        "tp_partial_1": 28,
+        "reverse_close_long": 8,
+        "stagnant": 65,
+        "reverse_close_short": 6,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 95,
+          "pnl": -227.89
+        },
+        "XRPUSDT:SHORT": {
+          "n": 154,
+          "pnl": -163.62
+        },
+        "XRPUSDT:LONG": {
+          "n": 160,
+          "pnl": -352.64
+        },
+        "BTCUSDT:LONG": {
+          "n": 188,
+          "pnl": -357.01
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5520,
+        "adx": 3102,
+        "usdtd": 255,
+        "reverse_close_long_canary": 103
+      },
+      "blocked_total": 8980,
+      "elapsed_sec": 834.4
+    },
+    {
+      "variant": "adx_lax",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 15,
+        "max_adx": 70
+      },
+      "min_confidence": null,
+      "n_full_closes": 1009,
+      "wins": 677,
+      "win_rate_pct": 67.09613478691774,
+      "total_pnl_usd": -1444.57,
+      "max_dd_pct": 44.91,
+      "by_reason": {
+        "trail": 669,
+        "sl": 206,
+        "stagnant": 108,
+        "tp_partial_1": 40,
+        "reverse_close_long": 11,
+        "reverse_close_short": 14,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 171,
+          "pnl": -321.0
+        },
+        "XRPUSDT:SHORT": {
+          "n": 241,
+          "pnl": -379.24
+        },
+        "XRPUSDT:LONG": {
+          "n": 304,
+          "pnl": -553.61
+        },
+        "BTCUSDT:LONG": {
+          "n": 293,
+          "pnl": -591.32
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5518,
+        "reverse_close_long_canary": 127,
+        "usdtd": 349,
+        "adx": 390
+      },
+      "blocked_total": 6384,
+      "elapsed_sec": 825.7
+    },
+    {
+      "variant": "confidence_high",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": 0.75,
+      "n_full_closes": 126,
+      "wins": 81,
+      "win_rate_pct": 64.28571428571429,
+      "total_pnl_usd": -284.42,
+      "max_dd_pct": 7.56,
+      "by_reason": {
+        "trail": 79,
+        "stagnant": 16,
+        "sl": 27,
+        "reverse_close_long": 2,
+        "reverse_close_short": 2,
+        "tp_partial_1": 7
+      },
+      "by_symbol_side": {
+        "XRPUSDT:SHORT": {
+          "n": 37,
+          "pnl": -149.7
+        },
+        "XRPUSDT:LONG": {
+          "n": 29,
+          "pnl": -57.52
+        },
+        "BTCUSDT:LONG": {
+          "n": 49,
+          "pnl": -85.17
+        },
+        "SOLUSDT:SHORT": {
+          "n": 11,
+          "pnl": -51.25
+        }
+      },
+      "blocks_by_guard": {
+        "adx": 241,
+        "usdtd": 57,
+        "symbol_blocklist": 774,
+        "reverse_close_long_canary": 8
+      },
+      "blocked_total": 1080,
+      "elapsed_sec": 813.8
+    },
+    {
+      "variant": "confidence_low",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": 0.55,
+      "n_full_closes": 468,
+      "wins": 315,
+      "win_rate_pct": 67.3076923076923,
+      "total_pnl_usd": -794.03,
+      "max_dd_pct": 23.23,
+      "by_reason": {
+        "trail": 310,
+        "tp_partial_1": 17,
+        "sl": 100,
+        "reverse_close_short": 8,
+        "stagnant": 42,
+        "reverse_close_long": 8
+      },
+      "by_symbol_side": {
+        "BTCUSDT:LONG": {
+          "n": 135,
+          "pnl": -84.96
+        },
+        "XRPUSDT:LONG": {
+          "n": 143,
+          "pnl": -313.46
+        },
+        "XRPUSDT:SHORT": {
+          "n": 118,
+          "pnl": -291.35
+        },
+        "SOLUSDT:SHORT": {
+          "n": 72,
+          "pnl": -248.13
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 2852,
+        "adx": 767,
+        "reverse_close_long_canary": 48,
+        "usdtd": 211
+      },
+      "blocked_total": 3878,
+      "elapsed_sec": 822.1
+    },
+    {
+      "variant": "blocklist_only",
+      "guards_enabled": [
+        "symbol_blocklist"
+      ],
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 60
+      },
+      "min_confidence": null,
+      "n_full_closes": 1099,
+      "wins": 736,
+      "win_rate_pct": 66.96997270245679,
+      "total_pnl_usd": -1749.22,
+      "max_dd_pct": 51.64,
+      "by_reason": {
+        "trail": 728,
+        "sl": 223,
+        "stagnant": 117,
+        "tp_partial_1": 36,
+        "reverse_close_long": 14,
+        "reverse_close_short": 16,
+        "eod": 1
+      },
+      "by_symbol_side": {
+        "SOLUSDT:SHORT": {
+          "n": 185,
+          "pnl": -400.38
+        },
+        "XRPUSDT:SHORT": {
+          "n": 252,
+          "pnl": -442.51
+        },
+        "XRPUSDT:LONG": {
+          "n": 343,
+          "pnl": -687.69
+        },
+        "BTCUSDT:LONG": {
+          "n": 319,
+          "pnl": -585.64
+        }
+      },
+      "blocks_by_guard": {
+        "symbol_blocklist": 5524,
+        "reverse_close_long_canary": 118
+      },
+      "blocked_total": 5642,
+      "elapsed_sec": 802.3
+    }
+  ]
+}
