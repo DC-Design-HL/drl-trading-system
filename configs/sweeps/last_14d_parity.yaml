@@ -1,0 +1,35 @@
+# Replay the last 14 days of live operation through btengine.
+# Used by tests/test_btengine_m5_parity.py to assert the framework
+# produces sane numbers compared to the SQLite trade log.
+
+run_id: last_14d_parity
+window:
+  start: 2026-04-18
+  end: 2026-05-01
+symbols: [BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT]
+intervals:
+  primary: 15m
+  htf: [1h, 4h]
+seed: 42
+
+strategy: structure_first_v3
+
+guards:
+  enabled: [symbol_blocklist, adx]
+  params:
+    adx: { min_adx: 20, max_adx: 60 }
+
+sizing:
+  type: fixed_notional
+  usd: 1500
+  max_concurrent: 4
+
+exits:
+  partial_tp: [[1.0, 0.40], [2.0, 0.35]]
+
+fees:
+  taker: 0.0004
+  slippage_pct: 0.0005
+
+output:
+  dir: runs/${run_id}
