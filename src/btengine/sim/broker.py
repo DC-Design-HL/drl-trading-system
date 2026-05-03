@@ -73,7 +73,10 @@ class Broker:
                  tp_pct_override: Optional[float] = None,
                  tp_multiplier: float = 1.0,
                  short_only_tp_override: bool = False,
-                 conditional_tp_max_confidence: Optional[float] = None):
+                 conditional_tp_max_confidence: Optional[float] = None,
+                 stagnant_hours: float = LC.STAGNANT_HOURS,
+                 stagnant_pct_min: float = LC.STAGNANT_PCT_MIN,
+                 stagnant_pct_max: float = LC.STAGNANT_PCT_MAX):
         """
         Constructor parameters that control SL/TP shape:
           sl_atr_mult, tp_atr_mult: ATR-floor multipliers (default 1.5 / 3.0)
@@ -103,6 +106,9 @@ class Broker:
         self.tp_multiplier = float(tp_multiplier)
         self.short_only_tp_override = bool(short_only_tp_override)
         self.conditional_tp_max_confidence = conditional_tp_max_confidence
+        self.stagnant_hours = float(stagnant_hours)
+        self.stagnant_pct_min = float(stagnant_pct_min)
+        self.stagnant_pct_max = float(stagnant_pct_max)
         self.positions: dict[str, Position] = {}
 
     # ── opens ──────────────────────────────────────────────────────
@@ -229,8 +235,11 @@ class Broker:
             self.positions.pop(ctx.symbol, None)
             return trades
 
-        # 5. Stagnant exit
-        if self._stagnant_hit(pos, ctx):
+        # 5. Stagnant exit (uses broker-level config, not module-level)
+        if self._stagnant_hit_with_config(pos, ctx,
+                                           self.stagnant_hours,
+                                           self.stagnant_pct_min,
+                                           self.stagnant_pct_max):
             trades.append(self._close_remainder(pos, ctx, ctx.current_close, "stagnant"))
             self.positions.pop(ctx.symbol, None)
             return trades
@@ -327,9 +336,18 @@ class Broker:
 
     @staticmethod
     def _stagnant_hit(pos: Position, ctx: Ctx) -> bool:
+        """Legacy module-level constants — kept for backward compat."""
+        return Broker._stagnant_hit_with_config(
+            pos, ctx, LC.STAGNANT_HOURS, LC.STAGNANT_PCT_MIN, LC.STAGNANT_PCT_MAX,
+        )
+
+    @staticmethod
+    def _stagnant_hit_with_config(pos: Position, ctx: Ctx,
+                                   stagnant_hours: float,
+                                   pct_min: float, pct_max: float) -> bool:
         elapsed_h = (ctx.now_ms - pos.open_ts_ms) / 3_600_000.0
-        if elapsed_h < LC.STAGNANT_HOURS: return False
+        if elapsed_h < stagnant_hours: return False
         cur = ctx.current_close
         pnl_pct = (cur - pos.entry_price) / pos.entry_price if pos.is_long \
                   else (pos.entry_price - cur) / pos.entry_price
-        return LC.STAGNANT_PCT_MIN <= pnl_pct <= LC.STAGNANT_PCT_MAX
+        return pct_min <= pnl_pct <= pct_max

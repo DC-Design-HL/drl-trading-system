@@ -20,8 +20,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 from .config import BacktestConfig
-from .data import KlineCache
+from .data import KlineCache, NewsFeed
 from .guards import build_guard_chain, ReverseCloseLongGuard
 from .results import (compute_summary, write_blocked_parquet, write_equity_csv,
                        write_summary_json, write_trades_parquet)
@@ -70,8 +72,24 @@ class BacktestRunner:
         for w in self.warnings:
             logger.warning("config: %s", w)
 
-        # 1. Pre-load klines
+        # 1. Pre-load klines + optional auxiliary feeds
         primary, htf = self._load_klines()
+
+        # Optional news feed: load if file exists. Fail-open if missing.
+        news_feed = None
+        news_path = (REPO_ROOT / "logs" / "news_pending_alerts.jsonl")
+        if news_path.exists():
+            try:
+                news_feed = NewsFeed(news_path)
+                cov = news_feed.coverage_window()
+                if cov:
+                    from datetime import datetime as _dt, timezone as _tz
+                    lo = _dt.fromtimestamp(cov[0]/1000, tz=_tz.utc).isoformat()
+                    hi = _dt.fromtimestamp(cov[1]/1000, tz=_tz.utc).isoformat()
+                    logger.info("News feed coverage: %s → %s", lo, hi)
+            except Exception as exc:
+                logger.warning("News feed load failed (fail-open): %s", exc)
+                news_feed = None
 
         # 2. Build strategy + guards + broker
         strategy_cls = get_strategy(self.config.strategy)
@@ -95,6 +113,9 @@ class BacktestRunner:
             tp_multiplier=float(self._extras_get("tp_multiplier", 1.0)),
             short_only_tp_override=bool(self._extras_get("short_only_tp_override", False)),
             conditional_tp_max_confidence=self._extras_get("conditional_tp_max_confidence"),
+            stagnant_hours=float(self.config.exits.stagnant_hours),
+            stagnant_pct_min=float(self.config.exits.stagnant_pct_min),
+            stagnant_pct_max=float(self.config.exits.stagnant_pct_max),
         )
 
         # 3. Replay
@@ -126,6 +147,15 @@ class BacktestRunner:
             ctx.extras["btc_4h_slope_pct"] = self._btc_4h_slope_pct(
                 ctx.now_ms, btc_4h_df,
             )
+
+            # News sentiment lookup (None if no feed loaded or no data
+            # in trailing window — ExtPosNewsGuard fails open on None)
+            if news_feed is not None:
+                from . import live_constants as _LC
+                ctx.extras["recent_max_news_sentiment"] = news_feed.recent_max_sentiment(
+                    ctx.symbol, ctx.now_ms,
+                    lookback_hours=_LC.EXT_POS_NEWS_LOOKBACK_HOURS,
+                )
 
             # 1) Update broker (exits)
             closed = broker.on_bar(ctx)
