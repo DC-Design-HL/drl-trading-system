@@ -922,9 +922,24 @@ class HTFLiveBot:
                 "source": "htf_agent",
             }
             shared_state["assets"] = assets
-            shared_state["total_balance"] = self.balance + sum(
-                a.get("pnl", 0) for a in assets.values()
-            )
+            # Source-of-truth: query exchange for the SHARED USDT balance
+            # rather than `self.balance + sum(per-symbol pnl)`. The latter is
+            # buggy when 4 symbols share one wallet — each bot tracks its own
+            # `self.balance` independently and the saved total_balance would
+            # be whoever-saved-last's stale per-symbol view. (Fixed 2026-05-03.)
+            try:
+                real_balance = self._get_real_balance()
+                if real_balance and real_balance > 0:
+                    shared_state["total_balance"] = real_balance
+                else:
+                    # Fallback to legacy compute if exchange unreachable
+                    shared_state["total_balance"] = self.balance + sum(
+                        a.get("pnl", 0) for a in assets.values()
+                    )
+            except Exception:
+                shared_state["total_balance"] = self.balance + sum(
+                    a.get("pnl", 0) for a in assets.values()
+                )
             self.storage.save_state(shared_state)
         except Exception as exc:
             logger.debug("Failed to update shared state: %s", exc)
