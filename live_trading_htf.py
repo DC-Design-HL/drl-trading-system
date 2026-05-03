@@ -342,12 +342,19 @@ RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = re
 # In ranging markets, trend-following signals produce whipsaws.
 # Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
 ADX_GUARD_ENABLED = True
-ADX_GUARD_MIN = 20                  # Block all trades when ADX below this
-# ADX exhaustion: ADX>60 means the trend is overextended. Backtest
-# (docs/adx-exhaustion-guard-proposal.md, 53 trades): ADX>60 cluster has
-# 25% WR, -$67 PnL across 8 trades. Blocking saves +$81 net, asymmetric
-# risk/reward (2/8 winners avg +$6 vs 6/8 losers avg -$13). Deployed 2026-04-25.
-ADX_GUARD_MAX = 60                  # Block all trades when ADX above this
+# 2026-05-03 — Tightened bounds [20, 60] → [25, 50] per 90d ablation.
+# At [25, 50]: btengine showed +$433/90d (~$144/month) vs [20, 60].
+# At [15, 70] (lax): -$199/90d. Monotonic — tighter is better in our
+# data window. The original [20, 60] was conservative; this canary
+# variant trades fewer entries (-30% expected) for higher per-trade EV.
+# Reverts: change back to 20/60 in this file and restart.
+# See: data/training/btengine_signal_ablation_90d.json
+ADX_GUARD_MIN = 25                  # Block all trades when ADX below this
+# ADX exhaustion: ADX>60 was deployed 2026-04-25 based on 53-trade study;
+# 90d ablation (2026-05-03) showed [25, 50] cap is strictly better than
+# [25, 60] in this data window — overextended-trend exits start losing
+# above ~50, not 60. Tightened to 50.
+ADX_GUARD_MAX = 50                  # Block all trades when ADX above this
 
 # ── Rescue Rule ──
 # Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.

@@ -55,8 +55,8 @@ STAGNANT_PCT_MAX = 0.005    # +0.5%
 
 # ── Entry / regime guards ──────────────────────────────────────────────
 MIN_CONFIDENCE = 0.55  # Raised 0.45 → 0.55 on 2026-05-03 per 90d ablation
-ADX_GUARD_MIN = 20
-ADX_GUARD_MAX = 60
+ADX_GUARD_MIN = 25  # Tightened 20→25 on 2026-05-03 per 90d ablation
+ADX_GUARD_MAX = 50  # Tightened 60→50 on 2026-05-03 per 90d ablation
 RSI_GUARD_OB_THRESHOLD = 70   # OB threshold for SHORT entries
 RSI_GUARD_OS_THRESHOLD = 30   # OS threshold for LONG entries
 RSI_GUARD_EXTREME_OB = 80
