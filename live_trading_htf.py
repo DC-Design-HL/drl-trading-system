@@ -167,8 +167,20 @@ ACTION_LONG = 1
 ACTION_SHORT = 2
 ACTION_LABELS = {ACTION_HOLD: "HOLD", ACTION_LONG: "LONG", ACTION_SHORT: "SHORT"}
 
-# Minimum confidence to act on a signal
-MIN_CONFIDENCE = 0.45
+# Minimum confidence to act on a signal.
+#
+# 2026-05-03 — Raised 0.45 → 0.55 based on 90d btengine ablation:
+# raising to 0.55 saves ~$150/month vs default; raising to 0.75 saves
+# ~$320/month but cuts trades 85% (too aggressive for first step).
+# 0.55 is the conservative canary; can move to 0.65/0.75 after 1-2
+# weeks of live validation. See:
+#   - docs/backtest_redesign_proposal.md
+#   - data/training/btengine_signal_ablation_90d.json
+#   - memory project_signal_ablation_90d_may02.md
+# Structure-first SKIP wrapper removed at the same time — see comment
+# at the use site (~line 2925) for why this gate now applies in both
+# model-first and structure-first modes.
+MIN_CONFIDENCE = 0.55
 
 # Per-symbol minimum confidence overrides (symbols with poor low-conf performance)
 SYMBOL_MIN_CONFIDENCE = {
@@ -2920,12 +2932,19 @@ class HTFLiveBot:
                 return None
 
         # ── Guard: confidence threshold (per-symbol or global) ──
-        # SKIP in structure-first mode — BOS confidence != model confidence
-        if not STRUCTURE_FIRST_MODE:
-            min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
-            if action != ACTION_HOLD and confidence < min_conf:
-                logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
-                return None
+        # 2026-05-03: Now applies in BOTH model-first and structure-first
+        # modes. Previously skipped in structure-first because the
+        # original threshold (0.45) was calibrated for model output and
+        # below the BOS-confidence base (0.5), making the gate a no-op
+        # in practice. With MIN_CONFIDENCE raised to 0.55 (from 90d
+        # ablation finding) the gate is now meaningful in both modes —
+        # it filters BOS+HTF signals where HTF confirmation is weak
+        # (the 0.5-0.55 band corresponds to "BOS exists but no strong
+        # multi-timeframe alignment").
+        min_conf = SYMBOL_MIN_CONFIDENCE.get(self.symbol, MIN_CONFIDENCE)
+        if action != ACTION_HOLD and confidence < min_conf:
+            logger.info("Low confidence %.2f < %.2f (%s) — HOLD", confidence, min_conf, self.symbol)
+            return None
 
         # ── Guard: per-symbol directional confidence floor ──
         # SKIP in structure-first mode — these are model-confidence calibrated
