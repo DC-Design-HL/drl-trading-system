@@ -1,0 +1,193 @@
+{
+  "window_days": 90,
+  "window_start": "2026-02-03",
+  "window_end": "2026-05-04",
+  "variants": [
+    {
+      "variant": "dev_equivalent",
+      "strategy": "model_first_v1",
+      "min_confidence": 0.45,
+      "guards_enabled": [
+        "adx"
+      ],
+      "n_full_closes": 4570,
+      "wins": 2384,
+      "wr_pct": 52.16630196936543,
+      "total_pnl": -9325.18,
+      "max_dd_pct": 238.22,
+      "blocked_total": 11711,
+      "blocks_by_guard": {
+        "adx": 6491,
+        "reverse_close_long_canary": 5220
+      },
+      "by_reason": {
+        "trail": 2217,
+        "reverse_close_short": 1039,
+        "sl": 499,
+        "tp_partial_1": 120,
+        "stagnant": 235,
+        "reverse_close_long": 570,
+        "tp_partial_2": 6,
+        "tp_full": 6,
+        "eod": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 1600,
+          "wins": 881,
+          "wr": 55.1,
+          "pnl": -2670.46
+        },
+        {
+          "month": "2026-03",
+          "n": 1723,
+          "wins": 924,
+          "wr": 53.6,
+          "pnl": -4180.56
+        },
+        {
+          "month": "2026-04",
+          "n": 1179,
+          "wins": 550,
+          "wr": 46.6,
+          "pnl": -3436.27
+        },
+        {
+          "month": "2026-05",
+          "n": 68,
+          "wins": 29,
+          "wr": 42.6,
+          "pnl": -145.38
+        }
+      ],
+      "elapsed_sec": 1988.1
+    },
+    {
+      "variant": "model_first_with_current_guards",
+      "strategy": "model_first_v1",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "n_full_closes": 1564,
+      "wins": 820,
+      "wr_pct": 52.42966751918159,
+      "total_pnl": -3793.2,
+      "max_dd_pct": 94.59,
+      "blocked_total": 19899,
+      "blocks_by_guard": {
+        "symbol_blocklist": 11632,
+        "adx": 6740,
+        "usdtd": 111,
+        "reverse_close_long_canary": 1108,
+        "ext_pos_news": 308
+      },
+      "by_reason": {
+        "trail": 775,
+        "sl": 185,
+        "reverse_close_short": 384,
+        "tp_partial_1": 34,
+        "stagnant": 90,
+        "reverse_close_long": 126,
+        "tp_partial_2": 1,
+        "tp_full": 1,
+        "eod": 3
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 493,
+          "wins": 277,
+          "wr": 56.2,
+          "pnl": -1151.32
+        },
+        {
+          "month": "2026-03",
+          "n": 626,
+          "wins": 340,
+          "wr": 54.3,
+          "pnl": -1510.87
+        },
+        {
+          "month": "2026-04",
+          "n": 411,
+          "wins": 191,
+          "wr": 46.5,
+          "pnl": -1333.27
+        },
+        {
+          "month": "2026-05",
+          "n": 34,
+          "wins": 12,
+          "wr": 35.3,
+          "pnl": -101.6
+        }
+      ],
+      "elapsed_sec": 1940.1
+    },
+    {
+      "variant": "structure_first_current",
+      "strategy": "structure_first_v3",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "n_full_closes": 325,
+      "wins": 214,
+      "wr_pct": 65.84615384615384,
+      "total_pnl": -600.23,
+      "max_dd_pct": 17.95,
+      "blocked_total": 5042,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 1717,
+        "reverse_close_long_canary": 46,
+        "usdtd": 168,
+        "ext_pos_news": 178
+      },
+      "by_reason": {
+        "trail": 213,
+        "sl": 71,
+        "tp_partial_1": 12,
+        "stagnant": 31,
+        "reverse_close_long": 6,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 148,
+          "wins": 108,
+          "wr": 73.0,
+          "pnl": -134.91
+        },
+        {
+          "month": "2026-03",
+          "n": 105,
+          "wins": 69,
+          "wr": 65.7,
+          "pnl": -176.24
+        },
+        {
+          "month": "2026-04",
+          "n": 72,
+          "wins": 37,
+          "wr": 51.4,
+          "pnl": -390.69
+        }
+      ],
+      "elapsed_sec": 849.6
+    }
+  ]
+}

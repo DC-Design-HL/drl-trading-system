@@ -1,0 +1,91 @@
+{
+  "results": [
+    {
+      "days": 25,
+      "window": [
+        "2026-04-09",
+        "2026-05-04"
+      ],
+      "n_full_closes": 36,
+      "wins": 18,
+      "wr_pct": 50.0,
+      "total_pnl": -147.72,
+      "max_dd_pct": 3.48,
+      "blocked": 1633,
+      "blocks_by_guard": {
+        "symbol_blocklist": 746,
+        "adx": 662,
+        "ext_pos_news": 178,
+        "usdtd": 47
+      },
+      "by_reason": {
+        "stagnant": 11,
+        "trail": 18,
+        "sl": 6,
+        "reverse_close_short": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-04",
+          "n": 36,
+          "wins": 18,
+          "wr": 50.0,
+          "pnl": -147.72
+        }
+      ],
+      "elapsed_sec": 245.4
+    },
+    {
+      "days": 90,
+      "window": [
+        "2026-02-03",
+        "2026-05-04"
+      ],
+      "n_full_closes": 325,
+      "wins": 214,
+      "wr_pct": 65.84615384615384,
+      "total_pnl": -600.23,
+      "max_dd_pct": 17.95,
+      "blocked": 5042,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 1717,
+        "reverse_close_long_canary": 46,
+        "usdtd": 168,
+        "ext_pos_news": 178
+      },
+      "by_reason": {
+        "trail": 213,
+        "sl": 71,
+        "tp_partial_1": 12,
+        "stagnant": 31,
+        "reverse_close_long": 6,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 148,
+          "wins": 108,
+          "wr": 73.0,
+          "pnl": -134.91
+        },
+        {
+          "month": "2026-03",
+          "n": 105,
+          "wins": 69,
+          "wr": 65.7,
+          "pnl": -176.24
+        },
+        {
+          "month": "2026-04",
+          "n": 72,
+          "wins": 37,
+          "wr": 51.4,
+          "pnl": -390.69
+        }
+      ],
+      "elapsed_sec": 882.4
+    }
+  ]
+}
