@@ -1,0 +1,1257 @@
+{
+  "window_days": 90,
+  "window_start": "2026-02-03",
+  "window_end": "2026-05-04",
+  "variants": [
+    {
+      "variant": "baseline_current",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 325,
+      "wins": 214,
+      "wr_pct": 65.84615384615384,
+      "total_pnl": -600.23,
+      "max_dd_pct": 17.95,
+      "blocked_total": 5042,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 1717,
+        "reverse_close_long_canary": 46,
+        "usdtd": 168,
+        "ext_pos_news": 178
+      },
+      "by_reason": {
+        "trail": 213,
+        "sl": 71,
+        "tp_partial_1": 12,
+        "stagnant": 31,
+        "reverse_close_long": 6,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 148,
+          "wins": 108,
+          "wr": 73.0,
+          "pnl": -134.91
+        },
+        {
+          "month": "2026-03",
+          "n": 105,
+          "wins": 69,
+          "wr": 65.7,
+          "pnl": -176.24
+        },
+        {
+          "month": "2026-04",
+          "n": 72,
+          "wins": 37,
+          "wr": 51.4,
+          "pnl": -390.69
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 85,
+          "wins": 56,
+          "wr": 65.9,
+          "pnl": -76.11
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 61,
+          "wins": 37,
+          "wr": 60.7,
+          "pnl": -255.88
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 84,
+          "wins": 54,
+          "wr": 64.3,
+          "pnl": -180.75
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 95,
+          "wins": 67,
+          "wr": 70.5,
+          "pnl": -189.09
+        }
+      ],
+      "elapsed_sec": 823.2
+    },
+    {
+      "variant": "conf_0.65",
+      "min_confidence": 0.65,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 228,
+      "wins": 152,
+      "wr_pct": 66.66666666666666,
+      "total_pnl": -366.6,
+      "max_dd_pct": 12.48,
+      "blocked_total": 3676,
+      "blocks_by_guard": {
+        "symbol_blocklist": 1960,
+        "adx": 1394,
+        "reverse_close_long_canary": 46,
+        "usdtd": 114,
+        "ext_pos_news": 162
+      },
+      "by_reason": {
+        "trail": 151,
+        "sl": 49,
+        "tp_partial_1": 11,
+        "stagnant": 25,
+        "reverse_close_long": 1,
+        "reverse_close_short": 2
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 99,
+          "wins": 74,
+          "wr": 74.7,
+          "pnl": -78.63
+        },
+        {
+          "month": "2026-03",
+          "n": 74,
+          "wins": 48,
+          "wr": 64.9,
+          "pnl": -137.49
+        },
+        {
+          "month": "2026-04",
+          "n": 55,
+          "wins": 30,
+          "wr": 54.5,
+          "pnl": -243.64
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 58,
+          "wins": 40,
+          "wr": 69.0,
+          "pnl": -28.78
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 40,
+          "wins": 24,
+          "wr": 60.0,
+          "pnl": -197.46
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 67,
+          "wins": 42,
+          "wr": 62.7,
+          "pnl": -177.36
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 63,
+          "wins": 46,
+          "wr": 73.0,
+          "pnl": -56.17
+        }
+      ],
+      "elapsed_sec": 812.3
+    },
+    {
+      "variant": "conf_0.75",
+      "min_confidence": 0.75,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 74,
+      "wins": 46,
+      "wr_pct": 62.16216216216216,
+      "total_pnl": -216.44,
+      "max_dd_pct": 5.45,
+      "blocked_total": 1406,
+      "blocks_by_guard": {
+        "adx": 542,
+        "usdtd": 44,
+        "symbol_blocklist": 775,
+        "reverse_close_long_canary": 8,
+        "ext_pos_news": 37
+      },
+      "by_reason": {
+        "trail": 46,
+        "stagnant": 8,
+        "sl": 18,
+        "reverse_close_long": 1,
+        "tp_partial_1": 5,
+        "reverse_close_short": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 27,
+          "wins": 16,
+          "wr": 59.3,
+          "pnl": -138.72
+        },
+        {
+          "month": "2026-03",
+          "n": 31,
+          "wins": 21,
+          "wr": 67.7,
+          "pnl": -64.91
+        },
+        {
+          "month": "2026-04",
+          "n": 16,
+          "wins": 9,
+          "wr": 56.2,
+          "pnl": -55.13
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 21,
+          "wins": 12,
+          "wr": 57.1,
+          "pnl": -85.99
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 9,
+          "wins": 6,
+          "wr": 66.7,
+          "pnl": -25.84
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 20,
+          "wins": 14,
+          "wr": 70.0,
+          "pnl": -14.64
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 24,
+          "wins": 14,
+          "wr": 58.3,
+          "pnl": -132.28
+        }
+      ],
+      "elapsed_sec": 807.4
+    },
+    {
+      "variant": "conf_0.85",
+      "min_confidence": 0.85,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 17,
+      "wins": 8,
+      "wr_pct": 47.05882352941176,
+      "total_pnl": -72.35,
+      "max_dd_pct": 1.9,
+      "blocked_total": 695,
+      "blocks_by_guard": {
+        "adx": 216,
+        "usdtd": 12,
+        "symbol_blocklist": 454,
+        "ext_pos_news": 13
+      },
+      "by_reason": {
+        "trail": 8,
+        "stagnant": 6,
+        "sl": 3,
+        "tp_partial_1": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 3,
+          "wins": 2,
+          "wr": 66.7,
+          "pnl": -0.79
+        },
+        {
+          "month": "2026-03",
+          "n": 8,
+          "wins": 4,
+          "wr": 50.0,
+          "pnl": -41.01
+        },
+        {
+          "month": "2026-04",
+          "n": 6,
+          "wins": 2,
+          "wr": 33.3,
+          "pnl": -38.99
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 11,
+          "wins": 5,
+          "wr": 45.5,
+          "pnl": -64.65
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 3,
+          "wins": 1,
+          "wr": 33.3,
+          "pnl": -15.36
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 3,
+          "wins": 2,
+          "wr": 66.7,
+          "pnl": -0.79
+        }
+      ],
+      "elapsed_sec": 837.4
+    },
+    {
+      "variant": "conf_0.95",
+      "min_confidence": 0.95,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 3,
+      "wins": 2,
+      "wr_pct": 66.66666666666666,
+      "total_pnl": -4.44,
+      "max_dd_pct": 0.17,
+      "blocked_total": 17,
+      "blocks_by_guard": {
+        "adx": 1,
+        "symbol_blocklist": 16
+      },
+      "by_reason": {
+        "trail": 2,
+        "stagnant": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 3,
+          "wins": 2,
+          "wr": 66.7,
+          "pnl": -4.44
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 3,
+          "wins": 2,
+          "wr": 66.7,
+          "pnl": -4.44
+        }
+      ],
+      "elapsed_sec": 835.2
+    },
+    {
+      "variant": "adx_30_45",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 30,
+        "max_adx": 45
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 202,
+      "wins": 126,
+      "wr_pct": 62.37623762376238,
+      "total_pnl": -480.14,
+      "max_dd_pct": 14.25,
+      "blocked_total": 5675,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 2501,
+        "usdtd": 99,
+        "reverse_close_long_canary": 31,
+        "ext_pos_news": 111
+      },
+      "by_reason": {
+        "sl": 45,
+        "trail": 124,
+        "tp_partial_1": 10,
+        "stagnant": 26,
+        "reverse_close_long": 4,
+        "reverse_close_short": 3
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 86,
+          "wins": 62,
+          "wr": 72.1,
+          "pnl": -37.44
+        },
+        {
+          "month": "2026-03",
+          "n": 66,
+          "wins": 40,
+          "wr": 60.6,
+          "pnl": -242.55
+        },
+        {
+          "month": "2026-04",
+          "n": 50,
+          "wins": 24,
+          "wr": 48.0,
+          "pnl": -284.86
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 61,
+          "wins": 37,
+          "wr": 60.7,
+          "pnl": -135.5
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 38,
+          "wins": 21,
+          "wr": 55.3,
+          "pnl": -211.61
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 49,
+          "wins": 33,
+          "wr": 67.3,
+          "pnl": -59.98
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 54,
+          "wins": 35,
+          "wr": 64.8,
+          "pnl": -157.77
+        }
+      ],
+      "elapsed_sec": 844.8
+    },
+    {
+      "variant": "adx_30_50",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 30,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 237,
+      "wins": 156,
+      "wr_pct": 65.82278481012658,
+      "total_pnl": -381.95,
+      "max_dd_pct": 13.06,
+      "blocked_total": 5556,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 2333,
+        "usdtd": 129,
+        "reverse_close_long_canary": 31,
+        "ext_pos_news": 130
+      },
+      "by_reason": {
+        "sl": 49,
+        "trail": 154,
+        "tp_partial_1": 10,
+        "stagnant": 27,
+        "reverse_close_long": 4,
+        "reverse_close_short": 3
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 112,
+          "wins": 85,
+          "wr": 75.9,
+          "pnl": 42.05
+        },
+        {
+          "month": "2026-03",
+          "n": 72,
+          "wins": 45,
+          "wr": 62.5,
+          "pnl": -208.36
+        },
+        {
+          "month": "2026-04",
+          "n": 53,
+          "wins": 26,
+          "wr": 49.1,
+          "pnl": -300.34
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 71,
+          "wins": 45,
+          "wr": 63.4,
+          "pnl": -93.94
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 37,
+          "wins": 20,
+          "wr": 54.1,
+          "pnl": -215.63
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 59,
+          "wins": 43,
+          "wr": 72.9,
+          "pnl": 1.91
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 70,
+          "wins": 48,
+          "wr": 68.6,
+          "pnl": -158.99
+        }
+      ],
+      "elapsed_sec": 863.0
+    },
+    {
+      "variant": "adx_25_45",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 45
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 290,
+      "wins": 184,
+      "wr_pct": 63.44827586206897,
+      "total_pnl": -698.97,
+      "max_dd_pct": 19.32,
+      "blocked_total": 5166,
+      "blocks_by_guard": {
+        "symbol_blocklist": 2933,
+        "adx": 1890,
+        "reverse_close_long_canary": 46,
+        "usdtd": 138,
+        "ext_pos_news": 159
+      },
+      "by_reason": {
+        "trail": 183,
+        "sl": 67,
+        "tp_partial_1": 12,
+        "stagnant": 30,
+        "reverse_close_long": 6,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 122,
+          "wins": 85,
+          "wr": 69.7,
+          "pnl": -214.39
+        },
+        {
+          "month": "2026-03",
+          "n": 99,
+          "wins": 64,
+          "wr": 64.6,
+          "pnl": -210.43
+        },
+        {
+          "month": "2026-04",
+          "n": 69,
+          "wins": 35,
+          "wr": 50.7,
+          "pnl": -375.76
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 75,
+          "wins": 48,
+          "wr": 64.0,
+          "pnl": -117.67
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 62,
+          "wins": 38,
+          "wr": 61.3,
+          "pnl": -252.41
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 74,
+          "wins": 44,
+          "wr": 59.5,
+          "pnl": -242.63
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 79,
+          "wins": 54,
+          "wr": 68.4,
+          "pnl": -187.87
+        }
+      ],
+      "elapsed_sec": 866.2
+    },
+    {
+      "variant": "conf_0.75_adx_30_45",
+      "min_confidence": 0.75,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 30,
+        "max_adx": 45
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 40,
+      "wins": 19,
+      "wr_pct": 47.5,
+      "total_pnl": -236.94,
+      "max_dd_pct": 5.22,
+      "blocked_total": 1577,
+      "blocks_by_guard": {
+        "adx": 743,
+        "usdtd": 25,
+        "symbol_blocklist": 775,
+        "reverse_close_long_canary": 8,
+        "ext_pos_news": 26
+      },
+      "by_reason": {
+        "stagnant": 7,
+        "sl": 13,
+        "reverse_close_long": 1,
+        "trail": 19,
+        "tp_partial_1": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 13,
+          "wins": 5,
+          "wr": 38.5,
+          "pnl": -129.22
+        },
+        {
+          "month": "2026-03",
+          "n": 19,
+          "wins": 11,
+          "wr": 57.9,
+          "pnl": -98.45
+        },
+        {
+          "month": "2026-04",
+          "n": 8,
+          "wins": 3,
+          "wr": 37.5,
+          "pnl": -43.13
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 14,
+          "wins": 6,
+          "wr": 42.9,
+          "pnl": -78.45
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 3,
+          "wins": 2,
+          "wr": 66.7,
+          "pnl": -9.76
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 11,
+          "wins": 6,
+          "wr": 54.5,
+          "pnl": -65.76
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 12,
+          "wins": 5,
+          "wr": 41.7,
+          "pnl": -116.84
+        }
+      ],
+      "elapsed_sec": 848.7
+    },
+    {
+      "variant": "conf_0.85_adx_30_45",
+      "min_confidence": 0.85,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 30,
+        "max_adx": 45
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 13,
+      "wins": 5,
+      "wr_pct": 38.46153846153847,
+      "total_pnl": -84.62,
+      "max_dd_pct": 1.85,
+      "blocked_total": 731,
+      "blocks_by_guard": {
+        "adx": 261,
+        "usdtd": 8,
+        "symbol_blocklist": 454,
+        "ext_pos_news": 8
+      },
+      "by_reason": {
+        "stagnant": 5,
+        "trail": 5,
+        "sl": 3,
+        "tp_partial_1": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 1,
+          "wins": 0,
+          "wr": 0.0,
+          "pnl": -15.12
+        },
+        {
+          "month": "2026-03",
+          "n": 8,
+          "wins": 4,
+          "wr": 50.0,
+          "pnl": -44.12
+        },
+        {
+          "month": "2026-04",
+          "n": 4,
+          "wins": 1,
+          "wr": 25.0,
+          "pnl": -33.84
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 10,
+          "wins": 4,
+          "wr": 40.0,
+          "pnl": -69.16
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 2,
+          "wins": 1,
+          "wr": 50.0,
+          "pnl": -8.8
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 1,
+          "wins": 0,
+          "wr": 0.0,
+          "pnl": -15.12
+        }
+      ],
+      "elapsed_sec": 830.2
+    },
+    {
+      "variant": "xrp_sol_only",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "XRPUSDT",
+        "SOLUSDT"
+      ],
+      "n_full_closes": 238,
+      "wins": 157,
+      "wr_pct": 65.96638655462185,
+      "total_pnl": -541.56,
+      "max_dd_pct": 14.42,
+      "blocked_total": 2135,
+      "blocks_by_guard": {
+        "adx": 1134,
+        "usdtd": 88,
+        "symbol_blocklist": 816,
+        "ext_pos_news": 97
+      },
+      "by_reason": {
+        "trail": 157,
+        "sl": 57,
+        "tp_partial_1": 7,
+        "reverse_close_long": 4,
+        "stagnant": 16,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 114,
+          "wins": 81,
+          "wr": 71.1,
+          "pnl": -175.78
+        },
+        {
+          "month": "2026-03",
+          "n": 65,
+          "wins": 45,
+          "wr": 69.2,
+          "pnl": -90.14
+        },
+        {
+          "month": "2026-04",
+          "n": 59,
+          "wins": 31,
+          "wr": 52.5,
+          "pnl": -334.98
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 61,
+          "wins": 37,
+          "wr": 60.7,
+          "pnl": -255.88
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 80,
+          "wins": 51,
+          "wr": 63.7,
+          "pnl": -162.2
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 97,
+          "wins": 69,
+          "wr": 71.1,
+          "pnl": -182.83
+        }
+      ],
+      "elapsed_sec": 360.2
+    },
+    {
+      "variant": "xrp_only",
+      "min_confidence": 0.55,
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "XRPUSDT"
+      ],
+      "n_full_closes": 178,
+      "wins": 120,
+      "wr_pct": 67.41573033707866,
+      "total_pnl": -276.52,
+      "max_dd_pct": 8.69,
+      "blocked_total": 1080,
+      "blocks_by_guard": {
+        "adx": 898,
+        "usdtd": 87,
+        "ext_pos_news": 95
+      },
+      "by_reason": {
+        "trail": 120,
+        "sl": 41,
+        "tp_partial_1": 7,
+        "reverse_close_long": 4,
+        "stagnant": 12,
+        "reverse_close_short": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 99,
+          "wins": 72,
+          "wr": 72.7,
+          "pnl": -100.17
+        },
+        {
+          "month": "2026-03",
+          "n": 46,
+          "wins": 32,
+          "wr": 69.6,
+          "pnl": -54.27
+        },
+        {
+          "month": "2026-04",
+          "n": 33,
+          "wins": 16,
+          "wr": 48.5,
+          "pnl": -181.43
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 81,
+          "wins": 51,
+          "wr": 63.0,
+          "pnl": -153.04
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 97,
+          "wins": 69,
+          "wr": 71.1,
+          "pnl": -182.83
+        }
+      ],
+      "elapsed_sec": 173.7
+    },
+    {
+      "variant": "drop_blocklist_conf_075",
+      "min_confidence": 0.75,
+      "guards_enabled": [
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "symbols": [
+        "BTCUSDT",
+        "ETHUSDT",
+        "SOLUSDT",
+        "XRPUSDT"
+      ],
+      "n_full_closes": 140,
+      "wins": 95,
+      "wr_pct": 67.85714285714286,
+      "total_pnl": -170.51,
+      "max_dd_pct": 6.34,
+      "blocked_total": 1042,
+      "blocks_by_guard": {
+        "adx": 902,
+        "usdtd": 58,
+        "reverse_close_long_canary": 8,
+        "ext_pos_news": 74
+      },
+      "by_reason": {
+        "trail": 95,
+        "stagnant": 13,
+        "sl": 30,
+        "reverse_close_long": 1,
+        "tp_partial_1": 8,
+        "reverse_close_short": 1
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 31,
+          "wins": 18,
+          "wr": 58.1,
+          "pnl": -162.74
+        },
+        {
+          "month": "2026-03",
+          "n": 57,
+          "wins": 39,
+          "wr": 68.4,
+          "pnl": -98.99
+        },
+        {
+          "month": "2026-04",
+          "n": 51,
+          "wins": 38,
+          "wr": 74.5,
+          "pnl": 27.44
+        },
+        {
+          "month": "2026-05",
+          "n": 1,
+          "wins": 0,
+          "wr": 0.0,
+          "pnl": -3.88
+        }
+      ],
+      "by_sym_side": [
+        {
+          "symbol": "BTCUSDT",
+          "side": "LONG",
+          "n": 21,
+          "wins": 12,
+          "wr": 57.1,
+          "pnl": -85.99
+        },
+        {
+          "symbol": "BTCUSDT",
+          "side": "SHORT",
+          "n": 4,
+          "wins": 2,
+          "wr": 50.0,
+          "pnl": -21.39
+        },
+        {
+          "symbol": "ETHUSDT",
+          "side": "LONG",
+          "n": 37,
+          "wins": 32,
+          "wr": 86.5,
+          "pnl": 133.88
+        },
+        {
+          "symbol": "ETHUSDT",
+          "side": "SHORT",
+          "n": 7,
+          "wins": 3,
+          "wr": 42.9,
+          "pnl": -67.71
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "LONG",
+          "n": 18,
+          "wins": 12,
+          "wr": 66.7,
+          "pnl": -24.2
+        },
+        {
+          "symbol": "SOLUSDT",
+          "side": "SHORT",
+          "n": 9,
+          "wins": 6,
+          "wr": 66.7,
+          "pnl": -25.84
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "LONG",
+          "n": 20,
+          "wins": 14,
+          "wr": 70.0,
+          "pnl": -14.64
+        },
+        {
+          "symbol": "XRPUSDT",
+          "side": "SHORT",
+          "n": 24,
+          "wins": 14,
+          "wr": 58.3,
+          "pnl": -132.28
+        }
+      ],
+      "elapsed_sec": 851.5
+    }
+  ]
+}
