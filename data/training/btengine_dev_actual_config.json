@@ -1,0 +1,188 @@
+{
+  "window_days": 90,
+  "window_start": "2026-02-04",
+  "window_end": "2026-05-05",
+  "variants": [
+    {
+      "variant": "dev_actual",
+      "guards_enabled": [
+        "adx"
+      ],
+      "min_confidence": 0.0,
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 999
+      },
+      "sizing_usd": 1500,
+      "n_full_closes": 1792,
+      "wins": 1184,
+      "wr_pct": 66.07142857142857,
+      "total_pnl": -2932.69,
+      "max_dd_pct": 82.45,
+      "blocked_total": 2982,
+      "by_reason": {
+        "trail": 1165,
+        "sl": 375,
+        "tp_partial_1": 76,
+        "reverse_close_long": 23,
+        "reverse_close_short": 29,
+        "stagnant": 198,
+        "tp_partial_2": 2,
+        "tp_full": 2
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 721,
+          "wins": 516,
+          "wr": 71.6,
+          "pnl": -724.06
+        },
+        {
+          "month": "2026-03",
+          "n": 564,
+          "wins": 367,
+          "wr": 65.1,
+          "pnl": -1294.51
+        },
+        {
+          "month": "2026-04",
+          "n": 465,
+          "wins": 274,
+          "wr": 58.9,
+          "pnl": -1573.97
+        },
+        {
+          "month": "2026-05",
+          "n": 42,
+          "wins": 27,
+          "wr": 64.3,
+          "pnl": -85.47
+        }
+      ],
+      "elapsed_sec": 1441.5
+    },
+    {
+      "variant": "dev_actual_plus_news",
+      "guards_enabled": [
+        "adx",
+        "ext_pos_news"
+      ],
+      "min_confidence": 0.0,
+      "adx_params": {
+        "min_adx": 20,
+        "max_adx": 999
+      },
+      "sizing_usd": 1500,
+      "n_full_closes": 1792,
+      "wins": 1184,
+      "wr_pct": 66.07142857142857,
+      "total_pnl": -2932.69,
+      "max_dd_pct": 82.45,
+      "blocked_total": 2982,
+      "by_reason": {
+        "trail": 1165,
+        "sl": 375,
+        "tp_partial_1": 76,
+        "reverse_close_long": 23,
+        "reverse_close_short": 29,
+        "stagnant": 198,
+        "tp_partial_2": 2,
+        "tp_full": 2
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 721,
+          "wins": 516,
+          "wr": 71.6,
+          "pnl": -724.06
+        },
+        {
+          "month": "2026-03",
+          "n": 564,
+          "wins": 367,
+          "wr": 65.1,
+          "pnl": -1294.51
+        },
+        {
+          "month": "2026-04",
+          "n": 465,
+          "wins": 274,
+          "wr": 58.9,
+          "pnl": -1573.97
+        },
+        {
+          "month": "2026-05",
+          "n": 42,
+          "wins": 27,
+          "wr": 64.3,
+          "pnl": -85.47
+        }
+      ],
+      "elapsed_sec": 938.9
+    },
+    {
+      "variant": "feature_consolidation_prior",
+      "guards_enabled": [
+        "symbol_blocklist",
+        "adx",
+        "usdtd",
+        "funding_long",
+        "whale_neutral",
+        "ext_pos_news"
+      ],
+      "min_confidence": 0.55,
+      "adx_params": {
+        "min_adx": 25,
+        "max_adx": 50
+      },
+      "sizing_usd": 1500,
+      "n_full_closes": 342,
+      "wins": 224,
+      "wr_pct": 65.49707602339181,
+      "total_pnl": -734.22,
+      "max_dd_pct": 20.25,
+      "blocked_total": 4841,
+      "by_reason": {
+        "trail": 221,
+        "tp_partial_1": 13,
+        "sl": 76,
+        "stagnant": 34,
+        "reverse_close_long": 7,
+        "reverse_close_short": 4
+      },
+      "by_month": [
+        {
+          "month": "2026-02",
+          "n": 135,
+          "wins": 97,
+          "wr": 71.9,
+          "pnl": -175.69
+        },
+        {
+          "month": "2026-03",
+          "n": 105,
+          "wins": 69,
+          "wr": 65.7,
+          "pnl": -176.24
+        },
+        {
+          "month": "2026-04",
+          "n": 96,
+          "wins": 54,
+          "wr": 56.2,
+          "pnl": -467.76
+        },
+        {
+          "month": "2026-05",
+          "n": 6,
+          "wins": 4,
+          "wr": 66.7,
+          "pnl": -24.59
+        }
+      ],
+      "elapsed_sec": 920.3
+    }
+  ]
+}

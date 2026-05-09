@@ -1,14 +1,17 @@
 """structure_first_v3 — port of live's STRUCTURE_FIRST_MODE entry path.
 
 Wraps `src.signals.bos_choch.MarketStructure` as an EntryRule. Uses the
-ctx's primary dataframe (typically 15m) as the structure timeframe and
-`ctx.htf['1h']` / `ctx.htf['4h']` as multi-timeframe confirmation.
+ctx's `5m` HTF dataframe (when available) for structure detection — to
+match live's `_fetch_structure_candles()` which fetches 5m candles —
+falling back to the primary timeframe if 5m is not loaded.
 
-Phase 1 deviation from live: the live bot uses 5m for structure
-detection. Here we use the primary timeframe (15m by default) for both
-structure and entry decisions. This matches `backtest_realistic.py`.
-The Ctx supports a 5m-structure variant if needed in Phase 2 (just pass
-df_primary_5m on the ctx and read it here).
+`ctx.htf['1h']` and `ctx.htf['4h']` provide multi-timeframe confirmation.
+
+2026-05-06 fix: previously used `ctx.primary` (15m by default) for
+structure detection, while live uses 5m. Live therefore emitted ~5×
+more BOS/CHOCH signals than the backtest, so backtest absolute PnL
+projections were biased pessimistic by an unknown factor. To use the
+fix, configs must include `5m` in `intervals.htf`.
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ class StructureFirstEntry(EntryRule):
     primary_window: int = 200         # only last N bars passed to MarketStructure
                                       # (huge speedup vs growing df; swing_lookback=8 only needs ~20 bars)
     htf_window: int = 200             # cap HTF context size too
+    structure_timeframe: str = "5m"   # match live; fall back to primary if not in ctx.htf
+    structure_window: int = 600       # ~50h of 5m bars; matches live structure history
     _market_structure: Optional[MarketStructure] = field(default=None, init=False)
 
     def __post_init__(self):
@@ -46,8 +51,19 @@ class StructureFirstEntry(EntryRule):
     def __call__(self, ctx) -> Intent:
         if len(ctx.primary) < self.min_primary_bars:
             return Intent(action="HOLD", reason="warmup")
-        # Cap context to last N bars — MarketStructure only needs recent swings
-        primary = ctx.primary.iloc[-self.primary_window:] if len(ctx.primary) > self.primary_window else ctx.primary
+
+        # Structure timeframe: prefer 5m from ctx.htf (matches live);
+        # fall back to primary if 5m is not loaded.
+        df_struct = ctx.htf_up_to_now(self.structure_timeframe)
+        if df_struct is None or len(df_struct) < self.min_primary_bars:
+            # Fallback: use primary timeframe (legacy behaviour)
+            df_struct = ctx.primary.iloc[-self.primary_window:] \
+                if len(ctx.primary) > self.primary_window else ctx.primary
+        else:
+            # Cap to last N bars for MarketStructure speed
+            if len(df_struct) > self.structure_window:
+                df_struct = df_struct.iloc[-self.structure_window:]
+
         df_1h = ctx.htf_up_to_now("1h") if "1h" in self.htf_intervals else None
         df_4h = ctx.htf_up_to_now("4h") if "4h" in self.htf_intervals else None
         if df_1h is not None and len(df_1h) > self.htf_window:
@@ -57,7 +73,7 @@ class StructureFirstEntry(EntryRule):
 
         try:
             sig = self._market_structure.get_signals(
-                df_primary=primary, df_1h=df_1h, df_4h=df_4h,
+                df_primary=df_struct, df_1h=df_1h, df_4h=df_4h,
             )
         except Exception as exc:
             logger.debug("MarketStructure failed at %s %s: %s",

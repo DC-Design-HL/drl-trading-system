@@ -23,7 +23,11 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 from .config import BacktestConfig
-from .data import KlineCache, NewsFeed
+from .data import KlineCache
+try:
+    from .data import NewsFeed  # optional — module may not exist on this branch checkout
+except ImportError:
+    NewsFeed = None
 from .guards import build_guard_chain, ReverseCloseLongGuard
 from .results import (compute_summary, write_blocked_parquet, write_equity_csv,
                        write_summary_json, write_trades_parquet)
@@ -78,7 +82,7 @@ class BacktestRunner:
         # Optional news feed: load if file exists. Fail-open if missing.
         news_feed = None
         news_path = (REPO_ROOT / "logs" / "news_pending_alerts.jsonl")
-        if news_path.exists():
+        if news_path.exists() and NewsFeed is not None:
             try:
                 news_feed = NewsFeed(news_path)
                 cov = news_feed.coverage_window()

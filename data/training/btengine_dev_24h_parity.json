@@ -1,0 +1,23 @@
+{
+  "btengine_full_window": {
+    "n_full_closes": 11,
+    "wr": 81.81818181818183,
+    "pnl": 25.84,
+    "by_reason": {
+      "trail": 8,
+      "stagnant": 1,
+      "eod": 2
+    }
+  },
+  "live_post_deploy": {
+    "n_full_closes": 13,
+    "wr": 61.5,
+    "pnl": 5.51,
+    "by_reason": {
+      "STAGNANT_EXIT": 6,
+      "SL": 4,
+      "REVERSE_CLOSE_LONG": 1,
+      "REVERSE_CLOSE_SHORT": 2
+    }
+  }
+}
