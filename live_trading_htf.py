@@ -21,7 +21,7 @@ import json
 import logging
 import argparse
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 
@@ -160,6 +160,45 @@ SYMBOL_DIRECTIONAL_CONF: dict = {
     "ETHUSDT": {"LONG": 0.95},
     "SOLUSDT": {"LONG": 0.95},
 }
+
+# ── Per-symbol-side blocklist ──────────────────────────────────────────
+# Surgical port (2026-05-11) of the Apr 27 Option-A SYMBOL_SIDE_BLOCKLIST.
+# Loss-attribution agent showed SOL LONG was 69% of the bleed since the
+# May 9 dev rollback (-$52.53 across 4/6 trades, including single losers
+# of -$38.05 and -$25.77). The original Apr 27 blocklist had 4 entries;
+# this surgical restore takes only SOL LONG — the empirically loudest one.
+# Add ETH LONG / ETH SHORT / BTC SHORT back later if their per-symbol PnL
+# turns net-negative on fresh data.
+SYMBOL_SIDE_BLOCKLIST: set = {
+    ("SOLUSDT", "LONG"),
+}
+
+# ── USDT Dominance (USDT.D) Filter ──
+# When stablecoin dominance is rising, capital is fleeing crypto → bad time
+# to LONG. Synthetic proxy: inverse momentum of the 4-symbol crypto basket.
+# If the basket dropped > USDT_D_THRESHOLD_PCT over USDT_D_LOOKBACK_HOURS,
+# treat USDT.D as "rising" and block LONG entries. SHORTs are unaffected.
+# Backtest evidence (248 trades): "ADX 15-40 + USDT.D 2h rising blocks LONG"
+# lifted WR 58.5% → 65.8% and pnl +$265 → +$431 (+62%, +7.3 pp WR).
+# Threshold sensitivity (152 trades over 20d): -0.7% blocks 13 trades,
+# lifts allowed-set WR 54.6% → 56.1%, +$23 over 20d at 1× sizing.
+USDT_D_GUARD_ENABLED = True
+USDT_D_LOOKBACK_HOURS = 2
+USDT_D_THRESHOLD_PCT = 0.7
+USDT_D_PROXY_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
+_USDT_D_CACHE_TTL_SECONDS = 600
+_usdt_d_cache: dict = {"ts": 0, "rising": False, "basket_change_pct": 0.0}
+
+# ── ext_pos_news fade guard ──
+# Block LONG entries when trailing-window news sentiment is extreme-positive.
+# Empirically: sentiment > +0.5 fades −13.7 bps @ 60m (p=2.5e-6, Bonferroni-OK)
+# and −35.0 bps @ 240m (p=2.4e-7). Validated by independent forward-return
+# analysis (commit cba9f35). Source: news_pending_alerts.jsonl + news_events DB.
+EXT_POS_NEWS_GUARD_ENABLED = True
+EXT_POS_NEWS_SENTIMENT_THRESHOLD = 0.5
+EXT_POS_NEWS_LOOKBACK_MINUTES = 240
+_EXT_POS_NEWS_CACHE_TTL_SECONDS = 60
+_ext_pos_news_cache: dict = {"ts": 0, "has_extreme_pos": False, "max_sentiment": 0.0}
 
 # Ranging regime filter: raise confidence threshold when ADX is low
 RANGING_MIN_CONFIDENCE = 0.80  # Need higher conviction in ranging markets
@@ -402,6 +441,117 @@ def _compute_btc_4h_ema_slope_pct(fetcher) -> Optional[float]:
     except Exception as exc:
         logger.debug("BTC regime slope fetch failed: %s", exc)
         return cached
+
+
+def _is_usdt_dominance_rising(fetcher) -> Optional[bool]:
+    """Return True if USDT.D proxy is RISING over USDT_D_LOOKBACK_HOURS.
+
+    Synthetic proxy: average % change of the 4-symbol crypto basket over
+    the lookback window. If the basket dropped > USDT_D_THRESHOLD_PCT,
+    USDT.D is treated as rising (capital fleeing crypto). Cached across
+    all 4 bot threads. Returns None only on hard failure (no cache yet).
+    """
+    if not USDT_D_GUARD_ENABLED:
+        return False
+    now = time.time()
+    cached = _usdt_d_cache.get("rising")
+    if _usdt_d_cache.get("ts") and (now - _usdt_d_cache["ts"]) < _USDT_D_CACHE_TTL_SECONDS:
+        return cached
+    try:
+        per_sym = {}
+        for sym in USDT_D_PROXY_SYMBOLS:
+            df = fetcher.fetch_asset(sym, "1h", days=1)
+            if df is None or len(df) < USDT_D_LOOKBACK_HOURS + 1:
+                per_sym[sym] = None
+                continue
+            closes = df["close"].astype(float).values
+            t_now = float(closes[-1])
+            t_lookback = float(closes[-(USDT_D_LOOKBACK_HOURS + 1)])
+            if t_lookback <= 0:
+                per_sym[sym] = None
+                continue
+            per_sym[sym] = (t_now - t_lookback) / t_lookback * 100.0
+        valid = [v for v in per_sym.values() if v is not None]
+        if not valid:
+            logger.warning(
+                "USDT.D proxy: all %d symbol fetches returned no data — fail-open",
+                len(USDT_D_PROXY_SYMBOLS),
+            )
+            return None
+        avg_basket_change = sum(valid) / len(valid)
+        rising = avg_basket_change <= -USDT_D_THRESHOLD_PCT
+        logger.info(
+            "USDT.D proxy: basket %+.3f%% over %dh (threshold -%.2f%%) → rising=%s",
+            avg_basket_change, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT, rising,
+        )
+        _usdt_d_cache["rising"] = rising
+        _usdt_d_cache["basket_change_pct"] = avg_basket_change
+        _usdt_d_cache["ts"] = now
+        return rising
+    except Exception as exc:
+        logger.warning("USDT.D proxy fetch failed: %s — fail-open", exc)
+        return None
+
+
+def _check_extreme_pos_news() -> bool:
+    """Return True if trailing-window news has at least one sentiment > threshold.
+
+    Reads logs/news_pending_alerts.jsonl (durable). Cache TTL 60s so the
+    4 symbol threads share one scan per minute. Fail-open: returns False
+    on any read error (allows trade).
+    """
+    if not EXT_POS_NEWS_GUARD_ENABLED:
+        return False
+    now = time.time()
+    if _ext_pos_news_cache.get("ts") and (now - _ext_pos_news_cache["ts"]) < _EXT_POS_NEWS_CACHE_TTL_SECONDS:
+        return bool(_ext_pos_news_cache.get("has_extreme_pos"))
+    try:
+        path = Path(__file__).resolve().parent / "logs" / "news_pending_alerts.jsonl"
+        if not path.exists():
+            _ext_pos_news_cache["ts"] = now
+            _ext_pos_news_cache["has_extreme_pos"] = False
+            return False
+        cutoff = datetime.now(timezone.utc).timestamp() - EXT_POS_NEWS_LOOKBACK_MINUTES * 60
+        max_sent = 0.0
+        found = False
+        # Read last ~2KB worth of lines (most recent news appended at end)
+        with path.open() as f:
+            try:
+                f.seek(0, 2)
+                end = f.tell()
+                f.seek(max(0, end - 200_000), 0)
+                f.readline()  # discard partial
+            except Exception:
+                pass
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pub = item.get("published_at") or item.get("timestamp")
+                if not pub:
+                    continue
+                try:
+                    pub_ts = datetime.fromisoformat(pub.replace("Z", "+00:00")).timestamp()
+                except (ValueError, AttributeError):
+                    continue
+                if pub_ts < cutoff:
+                    continue
+                sent = float(item.get("sentiment_score") or 0.0)
+                if sent > max_sent:
+                    max_sent = sent
+                if sent > EXT_POS_NEWS_SENTIMENT_THRESHOLD:
+                    found = True
+        _ext_pos_news_cache["ts"] = now
+        _ext_pos_news_cache["has_extreme_pos"] = found
+        _ext_pos_news_cache["max_sentiment"] = max_sent
+        return found
+    except Exception as exc:
+        logger.debug("ext_pos_news scan failed: %s — fail-open", exc)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1095,6 +1245,56 @@ class HTFLiveBot:
             )
 
         return not blocked
+
+    def _check_usdt_d_guard(self, action: int) -> bool:
+        """USDT.D filter: block LONGs when stablecoin dominance is rising.
+
+        Returns True if ALLOWED, False if BLOCKED. Only affects LONG entries.
+        Fail-open: if the proxy can't be computed, allow the trade.
+        """
+        if not USDT_D_GUARD_ENABLED or action != ACTION_LONG:
+            return True
+        rising = _is_usdt_dominance_rising(self.fetcher)
+        basket_pct = _usdt_d_cache.get("basket_change_pct")
+        if rising is None:
+            logger.warning(
+                "🛡️ USDT.D guard: proxy unavailable for %s LONG — allowing (fail-open)",
+                self.symbol,
+            )
+            return True
+        if rising:
+            logger.info(
+                "🛡️ USDT.D FILTER BLOCK: %s LONG blocked — crypto basket %+.3f%% over %dh "
+                "(below -%.2f%% threshold = USDT.D rising)",
+                self.symbol, basket_pct or 0.0, USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
+            )
+            return False
+        logger.info(
+            "🛡️ USDT.D guard PASS: %s LONG — basket %+.3f%% over %dh (above -%.2f%% threshold)",
+            self.symbol, basket_pct if basket_pct is not None else 0.0,
+            USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
+        )
+        return True
+
+    def _check_ext_pos_news_guard(self, action: int) -> bool:
+        """Block LONG entries when trailing-window news sentiment is extreme-positive.
+
+        Empirically: sentiment > +0.5 fades −13.7 bps @ 60m (p=2.5e-6) and
+        −35.0 bps @ 240m (p=2.4e-7). Returns True if ALLOWED, False if BLOCKED.
+        Only affects LONG entries. Fail-open on read errors.
+        """
+        if not EXT_POS_NEWS_GUARD_ENABLED or action != ACTION_LONG:
+            return True
+        if _check_extreme_pos_news():
+            max_s = _ext_pos_news_cache.get("max_sentiment", 0.0)
+            logger.info(
+                "🛡️ EXT_POS_NEWS BLOCK: %s LONG blocked — extreme-positive news "
+                "(max sentiment %.2f > %.2f in trailing %dm)",
+                self.symbol, max_s, EXT_POS_NEWS_SENTIMENT_THRESHOLD,
+                EXT_POS_NEWS_LOOKBACK_MINUTES,
+            )
+            return False
+        return True
 
     def _check_rsi_adx_guard(self, action: int, confidence: float) -> bool:
         """
@@ -1994,10 +2194,21 @@ class HTFLiveBot:
                 except Exception as exc:
                     logger.debug("Structure-first S5 ADX check failed: %s", exc)
 
+        # Per-symbol-side blocklist gate (see SYMBOL_SIDE_BLOCKLIST near top of file).
+        # Block entries on combos that have negative historical or recent expectancy.
+        side_str = "LONG" if direction == ACTION_LONG else "SHORT"
+        if (self.symbol, side_str) in SYMBOL_SIDE_BLOCKLIST:
+            logger.info(
+                "🚫 Structure-first: skipping %s %s — combo is in SYMBOL_SIDE_BLOCKLIST "
+                "(historical net-negative expectancy)",
+                self.symbol, side_str,
+            )
+            return None
+
         logger.info(
             "Structure-first %s: %s | trend=%s last_signal=%s",
             sym_cfg,
-            "LONG" if direction == ACTION_LONG else "SHORT",
+            side_str,
             trend, last_dir,
         )
         return direction
@@ -2526,6 +2737,26 @@ class HTFLiveBot:
                             return None
             except Exception as exc:
                 logger.debug("Exhaustion filter check failed: %s", exc)
+
+        # ── Guard: USDT.D rising → block LONG ──
+        # Block LONG entries when stablecoin dominance is rising (capital
+        # fleeing crypto). SHORTs unaffected. Validated +$166/30d on 248-trade
+        # backtest (WR 58.5% → 65.8%). See USDT_D_* constants for threshold.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_usdt_d_guard(action):
+                return None
+
+        # ── Guard: ext_pos_news fade → block LONG ──
+        # Block LONG entries when trailing 4h news has extreme-positive sentiment.
+        # Bonferroni-validated: extreme-positive fades −13.7 bps @ 60m (p=2.5e-6),
+        # −35.0 bps @ 240m (p=2.4e-7). SHORTs unaffected.
+        if action != ACTION_HOLD and (self.position == 0 or
+            (self.position == 1 and action == ACTION_SHORT) or
+            (self.position == -1 and action == ACTION_LONG)):
+            if not self._check_ext_pos_news_guard(action):
+                return None
 
         # ── Guard: Orderbook Guard (Golden Guard) ──
         # Blocks trades when orderbook bias contradicts trade direction.
