@@ -200,6 +200,31 @@ EXT_POS_NEWS_LOOKBACK_MINUTES = 240
 _EXT_POS_NEWS_CACHE_TTL_SECONDS = 60
 _ext_pos_news_cache: dict = {"ts": 0, "has_extreme_pos": False, "max_sentiment": 0.0}
 
+# ── Phase 2: Per-symbol performance scaling ──
+# Halve position size when the symbol's recent win rate falls below threshold.
+# Motivation: May 9-11 attribution showed SOL LONG bled -$52 across 4/6 losses,
+# including single losers of -$38 and -$26. The blocklist now stops SOL LONG
+# entirely, but BTC/ETH/XRP can develop similar cold streaks. This scaler is
+# the safety net: if a symbol's last 10 closes are <40% WR, halve its sizing
+# until it recovers. No upsize on hot streaks (avoid chasing variance).
+SYMBOL_SIZE_SCALING_ENABLED = True
+SYMBOL_SIZE_WR_THRESHOLD = 0.40   # WR below this → 0.5× sizing
+SYMBOL_SIZE_DOWNSCALE_FACTOR = 0.5
+SYMBOL_SIZE_LOOKBACK_TRADES = 10
+SYMBOL_SIZE_MIN_TRADES = 5        # if fewer closes than this → 1.0×
+_SYMBOL_SIZE_CACHE_TTL_SECONDS = 60
+_symbol_size_cache: dict = {}     # keyed by symbol: {ts, multiplier, wr, n}
+
+# ── Phase 3: Regime-aware partial TP schedule ──
+# Static schedule: 40% at 1R + 35% at 2R + 25% trails. Override per regime:
+#   trending_*  → 25% at 1R + 75% trails (let trend run, max upside capture)
+#   ranging     → 50% at 0.8R + 50% at 1R (mean-rev: take it earlier, all closed by 1R)
+#   high_volatility → tighten TRAILING_DISTANCE_POST_TP1 from 0.8% to 0.4%
+#                     (chop preserves more capital, avoid giving back gains)
+# Falls back to static schedule if regime detector returns UNKNOWN or fails.
+REGIME_TP_SCHEDULE_ENABLED = True
+REGIME_TP_TRAILING_DISTANCE_VOLATILE = 0.004   # 0.4% — tighter than default 0.8%
+
 # Ranging regime filter: raise confidence threshold when ADX is low
 RANGING_MIN_CONFIDENCE = 0.80  # Need higher conviction in ranging markets
 RANGING_ADX_THRESHOLD = 20.0   # ADX below this = ranging
@@ -493,6 +518,47 @@ def _is_usdt_dominance_rising(fetcher) -> Optional[bool]:
         return None
 
 
+def _get_recent_symbol_wr(symbol: str) -> Tuple[Optional[float], int]:
+    """Return (win_rate, n_closes) for the last SYMBOL_SIZE_LOOKBACK_TRADES
+    CLOSE_* trades on the given symbol. Returns (None, 0) on read failure.
+
+    Cached for _SYMBOL_SIZE_CACHE_TTL_SECONDS to avoid hammering the DB
+    on every iteration.
+    """
+    now = time.time()
+    cached = _symbol_size_cache.get(symbol)
+    if cached and (now - cached["ts"]) < _SYMBOL_SIZE_CACHE_TTL_SECONDS:
+        return cached["wr"], cached["n"]
+    try:
+        import sqlite3
+        db_path = Path(__file__).resolve().parent / "data" / "trading.db"
+        if not db_path.exists():
+            return None, 0
+        conn = sqlite3.connect(str(db_path))
+        try:
+            c = conn.cursor()
+            c.execute(
+                "SELECT pnl FROM trades WHERE is_testnet=1 AND symbol=? "
+                "AND action LIKE 'CLOSE%' ORDER BY timestamp DESC LIMIT ?",
+                (symbol, SYMBOL_SIZE_LOOKBACK_TRADES),
+            )
+            rows = c.fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None, 0
+        pnls = [r[0] for r in rows if r[0] is not None]
+        if not pnls:
+            return None, 0
+        wins = sum(1 for p in pnls if p > 0)
+        wr = wins / len(pnls)
+        _symbol_size_cache[symbol] = {"ts": now, "wr": wr, "n": len(pnls)}
+        return wr, len(pnls)
+    except Exception as exc:
+        logger.debug("recent-symbol-WR lookup failed for %s: %s", symbol, exc)
+        return None, 0
+
+
 def _check_extreme_pos_news() -> bool:
     """Return True if trailing-window news has at least one sentiment > threshold.
 
@@ -602,6 +668,15 @@ class HTFLiveBot:
         self.partial_tp_level = 0       # 0=none, 1=Level1 filled (40%), 2=Level2 filled (35%)
         self.partial_tp1_price = 0.0    # Level 1 TP price: entry ± 1.0 × sl_pct
         self.partial_tp2_price = 0.0    # Level 2 TP price: entry ± 2.0 × sl_pct
+
+        # Phase 3: Regime-aware partial TP schedule (set per-trade at open).
+        # Defaults match the static schedule that was live before Phase 3.
+        self.tp1_fraction = 0.40        # fraction of initial units closed at TP1
+        self.tp2_fraction = 0.35        # fraction of initial units closed at TP2
+        self.tp1_r_multiple = 1.0       # TP1 distance in R-multiples of SL
+        self.tp2_r_multiple = 2.0       # TP2 distance in R-multiples of SL
+        self.trailing_distance_override = None  # None → use TRAILING_DISTANCE_POST_TP1
+        self.regime_tp_mode = "default"  # human-readable label for logging
 
         # Phase 1 §3.4: Entry time tracking for time-based stagnant exit
         self.position_entry_time = 0.0
@@ -782,6 +857,12 @@ class HTFLiveBot:
             "partial_tp_level": self.partial_tp_level,
             "partial_tp1_price": self.partial_tp1_price,
             "partial_tp2_price": self.partial_tp2_price,
+            "tp1_fraction": self.tp1_fraction,
+            "tp2_fraction": self.tp2_fraction,
+            "tp1_r_multiple": self.tp1_r_multiple,
+            "tp2_r_multiple": self.tp2_r_multiple,
+            "trailing_distance_override": self.trailing_distance_override,
+            "regime_tp_mode": self.regime_tp_mode,
             "position_entry_time": self.position_entry_time,
             "last_close_direction": self.last_close_direction,
             "last_close_pnl": self.last_close_pnl,
@@ -851,6 +932,13 @@ class HTFLiveBot:
             self.partial_tp_level = int(state.get("partial_tp_level", 0))
             self.partial_tp1_price = float(state.get("partial_tp1_price", 0.0))
             self.partial_tp2_price = float(state.get("partial_tp2_price", 0.0))
+            self.tp1_fraction = float(state.get("tp1_fraction", 0.40))
+            self.tp2_fraction = float(state.get("tp2_fraction", 0.35))
+            self.tp1_r_multiple = float(state.get("tp1_r_multiple", 1.0))
+            self.tp2_r_multiple = float(state.get("tp2_r_multiple", 2.0))
+            _tdo = state.get("trailing_distance_override")
+            self.trailing_distance_override = float(_tdo) if _tdo is not None else None
+            self.regime_tp_mode = state.get("regime_tp_mode", "default")
             self.position_entry_time = float(state.get("position_entry_time", 0.0))
             self.last_close_direction = int(state.get("last_close_direction", 0))
             self.last_close_pnl = float(state.get("last_close_pnl", 0.0))
@@ -1275,6 +1363,64 @@ class HTFLiveBot:
             USDT_D_LOOKBACK_HOURS, USDT_D_THRESHOLD_PCT,
         )
         return True
+
+    def _apply_regime_tp_schedule(self, regime_name: Optional[str], direction: int) -> None:
+        """Set partial-TP fractions, R-multiples, and trailing distance based on regime.
+
+        Mutates self.tp1_fraction / tp2_fraction / tp1_r_multiple / tp2_r_multiple /
+        trailing_distance_override / regime_tp_mode.
+
+        Schedules:
+          - trending_with (LONG in trending_up / SHORT in trending_down):
+              25% at 1R, skip TP2 (let 75% trail) — preserve trend runners
+          - ranging:
+              40% at 0.8R + 40% at 1R, 20% trails — mean-rev: capture earlier
+          - high_volatility:
+              keep 40/35 schedule but tighten post-TP1 trail 0.8% → 0.4%
+          - default / unknown:
+              preserve pre-Phase-3 static schedule (40% at 1R + 35% at 2R)
+        """
+        # Reset to defaults each call
+        self.tp1_fraction = 0.40
+        self.tp2_fraction = 0.35
+        self.tp1_r_multiple = 1.0
+        self.tp2_r_multiple = 2.0
+        self.trailing_distance_override = None
+        self.regime_tp_mode = "default"
+
+        if not REGIME_TP_SCHEDULE_ENABLED or not regime_name:
+            return
+
+        regime_name = str(regime_name).lower()
+        is_with_trend = (
+            (direction == 1 and regime_name == "trending_up") or
+            (direction == -1 and regime_name == "trending_down")
+        )
+
+        if is_with_trend:
+            self.tp1_fraction = 0.25
+            self.tp2_fraction = 0.00  # zero fraction → execution code falls through
+            self.regime_tp_mode = "trending_with"
+            logger.info(
+                "📊 TP schedule: trending_with — 25%% at 1R + 75%% trails (regime=%s direction=%d)",
+                regime_name, direction,
+            )
+        elif regime_name == "ranging":
+            self.tp1_fraction = 0.40
+            self.tp2_fraction = 0.40
+            self.tp1_r_multiple = 0.8
+            self.tp2_r_multiple = 1.0
+            self.regime_tp_mode = "ranging"
+            logger.info(
+                "📊 TP schedule: ranging — 40%% at 0.8R + 40%% at 1R + 20%% trails",
+            )
+        elif regime_name == "high_volatility":
+            self.trailing_distance_override = REGIME_TP_TRAILING_DISTANCE_VOLATILE
+            self.regime_tp_mode = "high_volatility"
+            logger.info(
+                "📊 TP schedule: high_volatility — default fractions, trailing tightened to %.2f%%",
+                REGIME_TP_TRAILING_DISTANCE_VOLATILE * 100,
+            )
 
     def _check_ext_pos_news_guard(self, action: int) -> bool:
         """Block LONG entries when trailing-window news sentiment is extreme-positive.
@@ -2398,7 +2544,12 @@ class HTFLiveBot:
         if profit_pct >= TRAILING_BREAKEVEN_PCT:
             # After TP1, widen trailing distance to let winners run longer.
             # Backtested Apr 6-14: 0.5%→0.8% post-TP1 added +$181 across 120 trades.
-            trail_dist = TRAILING_DISTANCE_POST_TP1 if self.partial_tp_level >= 1 else TRAILING_DISTANCE_PCT
+            # Phase 3: high_volatility regime overrides trailing distance to be tighter
+            # (defaults to TRAILING_DISTANCE_POST_TP1 when no override is set).
+            if self.partial_tp_level >= 1:
+                trail_dist = self.trailing_distance_override or TRAILING_DISTANCE_POST_TP1
+            else:
+                trail_dist = TRAILING_DISTANCE_PCT
             if self.position == 1:
                 trailing_sl = self.peak_price * (1.0 - trail_dist)
                 # Never let trailing SL go below entry (minimum breakeven)
@@ -2820,6 +2971,34 @@ class HTFLiveBot:
         risk_pool = self.session_balance * RISK_POOL_PCT
         dollar_risk = risk_pool / RISK_BUDGET_PARTS
 
+        # Phase 2: Per-symbol performance scaling
+        # If this symbol's recent WR is below threshold, halve sizing.
+        # Conservative: no upsize when WR is high (avoid chasing variance).
+        size_multiplier = 1.0
+        if SYMBOL_SIZE_SCALING_ENABLED:
+            wr, n_closes = _get_recent_symbol_wr(self.symbol)
+            if wr is not None and n_closes >= SYMBOL_SIZE_MIN_TRADES:
+                if wr < SYMBOL_SIZE_WR_THRESHOLD:
+                    size_multiplier = SYMBOL_SIZE_DOWNSCALE_FACTOR
+                    logger.info(
+                        "📉 SYMBOL_SIZE downscale: %s recent WR=%.0f%% over %d closes "
+                        "(< %.0f%% threshold) → sizing %.1f×",
+                        self.symbol, wr * 100, n_closes,
+                        SYMBOL_SIZE_WR_THRESHOLD * 100, size_multiplier,
+                    )
+                else:
+                    logger.info(
+                        "📊 SYMBOL_SIZE normal: %s recent WR=%.0f%% over %d closes "
+                        "(≥ %.0f%% threshold) → sizing 1.0×",
+                        self.symbol, wr * 100, n_closes, SYMBOL_SIZE_WR_THRESHOLD * 100,
+                    )
+            elif wr is None or n_closes < SYMBOL_SIZE_MIN_TRADES:
+                logger.debug(
+                    "SYMBOL_SIZE: %s has only %d closes (< %d min) → sizing 1.0×",
+                    self.symbol, n_closes, SYMBOL_SIZE_MIN_TRADES,
+                )
+        dollar_risk = dollar_risk * size_multiplier
+
         # Step 2: Calculate notional from dollar risk and SL%
         # (regime-adaptive SL is calculated below, use base for sizing)
         sl_pct_for_sizing = STOP_LOSS_PCT
@@ -2897,20 +3076,29 @@ class HTFLiveBot:
 
         self.sl_pct = sl_pct  # Phase 1 §3.3: store for partial TP R-multiple calculations
 
+        # Phase 3: Pick the partial-TP schedule from the regime detected above
+        # (reuse regime_name from the SL/TP multiplier block — falls back to "default"
+        # if regime_detector unavailable or returned UNKNOWN). Defaults preserve the
+        # pre-Phase-3 static schedule (40% at 1R + 35% at 2R + 25% trails).
+        regime_for_schedule = None
+        try:
+            regime_for_schedule = locals().get("regime_name")
+        except Exception:
+            regime_for_schedule = None
+        self._apply_regime_tp_schedule(regime_for_schedule, direction)
+
         if direction == 1:
             self.sl_price = price * (1.0 - sl_pct)
             self.tp_price = price * (1.0 + tp_pct)
             action_str = "OPEN_LONG"
-            # Phase 1 §3.3: Partial TP prices (1R and 2R targets)
-            self.partial_tp1_price = price * (1.0 + 1.0 * sl_pct)
-            self.partial_tp2_price = price * (1.0 + 2.0 * sl_pct)
+            self.partial_tp1_price = price * (1.0 + self.tp1_r_multiple * sl_pct)
+            self.partial_tp2_price = price * (1.0 + self.tp2_r_multiple * sl_pct)
         else:
             self.sl_price = price * (1.0 + sl_pct)
             self.tp_price = price * (1.0 - tp_pct)
             action_str = "OPEN_SHORT"
-            # Phase 1 §3.3: Partial TP prices (1R and 2R targets)
-            self.partial_tp1_price = price * (1.0 - 1.0 * sl_pct)
-            self.partial_tp2_price = price * (1.0 - 2.0 * sl_pct)
+            self.partial_tp1_price = price * (1.0 - self.tp1_r_multiple * sl_pct)
+            self.partial_tp2_price = price * (1.0 - self.tp2_r_multiple * sl_pct)
 
         # Phase 1 §3.3: Reset partial TP tracking for new trade
         self.initial_position_units = self.position_units
@@ -3180,7 +3368,7 @@ class HTFLiveBot:
             if self.position != 0 and self.position_price > 0 and self.initial_position_units > 0:
                 if self.position == 1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
                     if current_price >= self.partial_tp1_price:
-                        partial_units = self.initial_position_units * 0.40
+                        partial_units = self.initial_position_units * self.tp1_fraction
                         partial_units = min(partial_units, self.position_units)
                         if partial_units > 0:
                             partial_pnl = (self.partial_tp1_price - self.position_price) * partial_units
@@ -3227,7 +3415,7 @@ class HTFLiveBot:
 
                 elif self.position == 1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
                     if current_price >= self.partial_tp2_price:
-                        partial_units = self.initial_position_units * 0.35
+                        partial_units = self.initial_position_units * self.tp2_fraction
                         partial_units = min(partial_units, self.position_units)
                         if partial_units > 0:
                             partial_pnl = (self.partial_tp2_price - self.position_price) * partial_units
@@ -3282,7 +3470,7 @@ class HTFLiveBot:
 
                 elif self.position == -1 and self.partial_tp_level < 1 and self.partial_tp1_price > 0:
                     if current_price <= self.partial_tp1_price:
-                        partial_units = self.initial_position_units * 0.40
+                        partial_units = self.initial_position_units * self.tp1_fraction
                         partial_units = min(partial_units, self.position_units)
                         if partial_units > 0:
                             partial_pnl = (self.position_price - self.partial_tp1_price) * partial_units
@@ -3328,7 +3516,7 @@ class HTFLiveBot:
 
                 elif self.position == -1 and self.partial_tp_level == 1 and self.partial_tp2_price > 0:
                     if current_price <= self.partial_tp2_price:
-                        partial_units = self.initial_position_units * 0.35
+                        partial_units = self.initial_position_units * self.tp2_fraction
                         partial_units = min(partial_units, self.position_units)
                         if partial_units > 0:
                             partial_pnl = (self.position_price - self.partial_tp2_price) * partial_units
