@@ -1,0 +1,41 @@
+{
+  "model": "HistGradientBoostingClassifier",
+  "target": "y_long_fade",
+  "n_features": 38,
+  "best_params": {
+    "max_depth": 7,
+    "learning_rate": 0.05,
+    "max_iter": 200
+  },
+  "best_val_pr_auc": 0.32553216472388713,
+  "splits": {
+    "train": {
+      "split": "train",
+      "n": 1290,
+      "positive_rate": 0.34031007751937986,
+      "pr_auc": 0.9722248956948029,
+      "roc_auc": 0.980936269536844,
+      "brier": 0.07932272646481106,
+      "precision_at_recall_0.5": 0.995475113122172
+    },
+    "val": {
+      "split": "val",
+      "n": 276,
+      "positive_rate": 0.32971014492753625,
+      "pr_auc": 0.32553216472388713,
+      "roc_auc": 0.5236115236115235,
+      "brier": 0.2610708384540289,
+      "precision_at_recall_0.5": 0.323943661971831
+    },
+    "test": {
+      "split": "test",
+      "n": 277,
+      "positive_rate": 0.06498194945848375,
+      "pr_auc": 0.08538264583058429,
+      "roc_auc": 0.5999570999571,
+      "brier": 0.21263001874883627,
+      "precision_at_recall_0.5": 0.08653846153846154
+    }
+  },
+  "top_features": {}
+}
