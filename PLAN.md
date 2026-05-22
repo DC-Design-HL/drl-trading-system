@@ -1,6 +1,10 @@
 # PLAN.md — Autonomous Self-Improving Trading Service
 
-**Status:** Draft, awaiting Chen's approval before any implementation.
+**Status:** Approved 2026-05-22 by Chen.
+M1–M4 shipped on `feature/autonomous-loop` (commits d07ec08, c1e58b0,
+04b9e31, 6069965). Loop operational since 20:18 UTC with experiment #2
+sitting at the `paper` stage. M5 pending (autonomous canary + auto-
+rollback). M6 pending (trainer-handoff).
 **Authored:** 2026-05-22
 **Scope:** Extend the existing DRL trading system into a self-directing
 loop that proposes, validates, deploys, and (when needed) rolls back its
@@ -529,30 +533,28 @@ system the spec asks for.
 
 ---
 
-## 12. Open Questions
+## 12. Open Questions — RESOLVED 2026-05-22
 
-These are decisions I can't make alone — flagging them, **none block
-M1**, but I need answers before M4.
+All three resolved on the approval round.
 
-1. **Canary promotion**: should it require a Chen-approved PR merge to
-   `dev`, or auto-merge after passing paper? My recommendation: **manual
-   PR approval through M5; auto-merge only after the first 3 successful
-   end-to-end loops to build trust.** Acceptable?
+1. **Canary promotion** → **manual PR approval through M5; auto-merge
+   only after the first 3 successful end-to-end loops.** (Chen approved
+   the recommendation by saying "go" without addressing.) Implication:
+   the `awaiting_canary_approval` stage in `orchestrator.py:638` remains
+   a hard manual gate until M5 + 3 clean loops have landed.
 
-2. **Agent cost cap**: I'll instrument token-cost tracking but I don't
-   know your spend tolerance. Default proposal: **$15/day soft cap, $30
-   hard cap → halt agent spawning and Telegram-ping**. Want to set
-   different numbers?
+2. **Agent cost cap** → **$15/day soft cap, $30 hard cap.** Already
+   wired in `llm_client.py:36-37` with `check_budget()` enforcement
+   before every LLM call. (Chen approved the recommendation by saying
+   "go" without addressing.)
 
-3. **Capital wallet for canary**: do we run canary on the live testnet
-   wallet alongside the production strategy (multiplexed), or on a
-   separate testnet wallet? My recommendation: **separate testnet
-   wallet** to avoid confounding. Need you to create one or confirm I
-   should.
-
-I'll proceed with my recommendations on (1) and (2) if you say "go"
-without addressing them. (3) requires you to create the wallet or say
-multiplex.
+3. **Capital wallet for canary** → **MULTIPLEX on the production testnet
+   wallet** (Chen, 2026-05-22 20:21). No separate wallet. Implication
+   for M5: canary trades must be attribution-tagged at the storage
+   layer (a new `experiment_id` column on `trades` or a side-table) so
+   they can be separated from production trades during canary
+   evaluation. Without attribution, canary PnL cannot be cleanly
+   computed against its 3% rollback threshold.
 
 ---
 
