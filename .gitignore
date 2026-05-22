@@ -70,4 +70,8 @@ rendered*.js
 data/trading.db
 data/trading.db-shm
 data/trading.db-wal
+
+# Self-improvement runtime artifacts (regenerable from data/trading.db)
+data/self_improve/
+logs/decisions/
 supervisor/supervisord.log

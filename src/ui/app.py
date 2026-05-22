@@ -33,6 +33,12 @@ from src.ui.design_system import (
     card_container, loading_card, error_card, position_badge, metric_row,
     progress_bar, _pnl_color, _pnl_sign, _format_number, _esc,
 )
+try:
+    from src.ui.self_improvement_tab import render as render_self_improvement_tab
+    _HAS_SELF_IMPROVE_TAB = True
+except Exception:  # noqa: BLE001 — tab is optional; surface error in the tab body
+    _HAS_SELF_IMPROVE_TAB = False
+    render_self_improvement_tab = None  # type: ignore[assignment]
 
 # True when running as a client-only HF Space (API_SERVER_URL points at remote server)
 IS_CLIENT_MODE = bool(os.environ.get('API_SERVER_URL'))
@@ -2095,8 +2101,8 @@ def main():
         current_price = float(df.iloc[-1]['close']) if not df.empty else 0
         
         # Tabs
-        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_usdt_dom, tab_news = st.tabs([
-            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "💵 USDT.D", "📰 News"
+        tab_chart, tab_live_portfolio, tab_performance, tab_whales, tab_testnet, tab_htf, tab_backtest, tab_usdt_dom, tab_news, tab_self_improve = st.tabs([
+            "📊 Live Chart", "💼 Live Portfolio", "📈 Performance", "🐋 On-Chain Whales", "🧪 Testnet", "🔮 HTF Agent", "🔬 Backtest", "💵 USDT.D", "📰 News", "🤖 Self-Improvement"
         ])
         
         with tab_chart:
@@ -3576,6 +3582,20 @@ def main():
 
             except Exception as _news_err:
                 st.warning(f"News data unavailable: {_news_err}")
+
+        with tab_self_improve:
+            if _HAS_SELF_IMPROVE_TAB and render_self_improvement_tab is not None:
+                try:
+                    render_self_improvement_tab()
+                except Exception as _si_err:  # noqa: BLE001
+                    st.error(
+                        f"Self-Improvement tab failed to render: {_si_err}"
+                    )
+            else:
+                st.warning(
+                    "Self-Improvement module not available. Ensure "
+                    "`src/ui/self_improvement_tab.py` is importable."
+                )
 
     with col_sidebar:
         st.markdown("### 🎯 Agent Status")
