@@ -48,3 +48,7 @@ pymongo
 python-dotenv
 dnspython
 certifi
+
+# Anthropic Python SDK — used by the self-improvement plane's
+# LLM-backed agents (Risk Officer, Reviewer, Researcher).
+anthropic>=0.55.0
