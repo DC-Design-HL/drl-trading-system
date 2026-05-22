@@ -169,8 +169,20 @@ SYMBOL_DIRECTIONAL_CONF: dict = {
 # this surgical restore takes only SOL LONG — the empirically loudest one.
 # Add ETH LONG / ETH SHORT / BTC SHORT back later if their per-symbol PnL
 # turns net-negative on fresh data.
+#
+# 2026-05-20 — XRP LONG + SHORT added. Since May-1 reset (19 days, n=36
+# closes): WR 41.7%, net -$196.11, PF 0.29 LONG / 0.42 SHORT. 33/36 entries
+# had model confidence <0.55 (avg 0.51 — coin-flip). Backtest of every
+# alternative (raise SYMBOL_MIN_CONFIDENCE floor from 0.45 to 0.55/0.60/
+# 0.65/0.70) showed the floor ≥0.65 case ties full-blocklist at +$196
+# saved; the 3 highest-conf XRP trades (0.60-0.65 band) still net -$13,
+# so no confidence cutoff produces a net-positive slice. Full blocklist
+# chosen (Option B) — paused pending XRP model retraining on Mac (per
+# the train-on-Mac hard rule). Reversible: remove these two entries.
 SYMBOL_SIDE_BLOCKLIST: set = {
     ("SOLUSDT", "LONG"),
+    ("XRPUSDT", "LONG"),
+    ("XRPUSDT", "SHORT"),
 }
 
 # ── USDT Dominance (USDT.D) Filter ──

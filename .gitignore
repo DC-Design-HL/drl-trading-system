@@ -54,9 +54,12 @@ var/
 venv/
 wheels/
 
-# Test files
+# Test files — ignore ad-hoc test scripts anywhere EXCEPT inside the
+# tests/ tree, which is the canonical test suite.
 test_*.py
 test_*.js
+!tests/test_*.py
+!tests/**/test_*.py
 backfill_context.py
 
 # Data files (local only)
