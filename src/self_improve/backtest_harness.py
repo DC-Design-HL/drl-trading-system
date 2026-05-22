@@ -80,12 +80,21 @@ class BacktestRequest:
         floors. Takes precedence over MIN_CONFIDENCE for the symbols
         listed.
 
+      SYMBOL_DIRECTIONAL_CONF: dict[str, dict[str, float]] — per-
+        (symbol, side) confidence floors. Matches the live bot's
+        `SYMBOL_DIRECTIONAL_CONF` constant in `live_trading_htf.py` so
+        the Researcher can propose the same key it sees in the source.
+        Shape: {"BTCUSDT": {"SHORT": 0.85}, "ETHUSDT": {"LONG": 0.95}}.
+        Takes precedence over SYMBOL_MIN_CONFIDENCE because it's
+        side-specific.
+
       SYMBOL_SIDE_BLOCKLIST_ADD: iterable of [symbol, side] pairs — extra
         (symbol, side) combos to block beyond whatever was historically
         blocked when the OPEN was logged. Sides are 'LONG' / 'SHORT'.
 
-    Any keys not recognized are stored and echoed back in the result for
-    audit, but have no behavioral effect in M2.
+    Unknown keys are NOT silently accepted — `run_backtest` emits one
+    warning per unrecognized key so a typo or schema drift surfaces
+    instead of producing a no-op backtest that looks like a pass.
     """
 
     start_date: str          # ISO8601 — only closes since this date are considered
@@ -255,18 +264,42 @@ def pair_open_close(
 # ─────────────────────────────────────────────────────────────────────────
 
 
+# Override keys the harness knows how to apply. Used both by _block_reason
+# (to look up thresholds) and by run_backtest (to detect unknown keys and
+# warn). Keep this in sync with the docstring on BacktestRequest.
+RECOGNIZED_OVERRIDE_KEYS: frozenset[str] = frozenset({
+    "MIN_CONFIDENCE",
+    "SYMBOL_MIN_CONFIDENCE",
+    "SYMBOL_DIRECTIONAL_CONF",
+    "SYMBOL_SIDE_BLOCKLIST_ADD",
+})
+
+
 def _block_reason(
     pair: TradePair, overrides: dict[str, Any]
 ) -> Optional[str]:
     """Return a human-readable block reason if the pair would be blocked,
     else None. Returns the FIRST matching reason — deterministic order:
-    blocklist → per-symbol-confidence → global-confidence."""
+    blocklist → directional → per-symbol-confidence → global-confidence."""
 
     blocklist = overrides.get("SYMBOL_SIDE_BLOCKLIST_ADD")
     if blocklist:
         as_set = {(s.upper(), side.upper()) for s, side in blocklist}
         if (pair.symbol.upper(), pair.side.upper()) in as_set:
             return f"blocklist:{pair.symbol}/{pair.side}"
+
+    # Per-(symbol, side) confidence floor — matches live bot's
+    # SYMBOL_DIRECTIONAL_CONF. Side-specific so it precedes the
+    # symbol-only floor below.
+    directional = overrides.get("SYMBOL_DIRECTIONAL_CONF") or {}
+    sym_dir_cfg = directional.get(pair.symbol)
+    if sym_dir_cfg:
+        threshold = sym_dir_cfg.get(pair.side.upper())
+        if threshold is not None and pair.confidence < float(threshold):
+            return (
+                f"directional_floor:{pair.symbol}/{pair.side} "
+                f"conf={pair.confidence:.3f}<{float(threshold):.3f}"
+            )
 
     per_sym = overrides.get("SYMBOL_MIN_CONFIDENCE") or {}
     if pair.symbol in per_sym:
@@ -306,6 +339,18 @@ def run_backtest(req: BacktestRequest) -> BacktestResult:
     db_path = Path(req.db_path)
     if not db_path.exists():
         raise FileNotFoundError(f"trading DB not found at {db_path}")
+
+    # Loud-fail on unrecognized override keys. Silently ignoring them
+    # produces a backtest that looks like a candidate run but is
+    # actually baseline — see experiment #1 incident 2026-05-22.
+    unknown_keys = sorted(set(req.config_overrides) - RECOGNIZED_OVERRIDE_KEYS)
+    for key in unknown_keys:
+        warnings.append(
+            f"unrecognized override key {key!r} — has no behavioral "
+            f"effect; backtest is running against baseline behavior "
+            f"for this key. Recognized keys: "
+            f"{sorted(RECOGNIZED_OVERRIDE_KEYS)}"
+        )
 
     with sqlite3.connect(str(db_path)) as conn:
         pairs = pair_open_close(

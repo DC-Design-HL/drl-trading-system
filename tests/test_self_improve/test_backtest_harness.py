@@ -233,6 +233,124 @@ def test_blocklist_does_not_block_other_sides(tmp_path: Path) -> None:
     assert res.n_blocked_pairs == 0
 
 
+def _build_mixed_side_scenario(tmp_path: Path) -> Path:
+    """A scenario with both LONG and SHORT trades on BTC at varying
+    confidences — used to exercise SYMBOL_DIRECTIONAL_CONF, which is
+    side-specific.
+
+      * BTC LONG,  conf=0.70, pnl=+8
+      * BTC LONG,  conf=0.92, pnl=+15
+      * BTC SHORT, conf=0.70, pnl=-6
+      * BTC SHORT, conf=0.90, pnl=+12
+    """
+    db = tmp_path / "trades.db"
+    _new_trades_db(db)
+    rows = [
+        ("2026-05-10T00:00:00", "2026-05-10T01:00:00", "LONG",  0.70, 8.0),
+        ("2026-05-11T00:00:00", "2026-05-11T01:00:00", "LONG",  0.92, 15.0),
+        ("2026-05-12T00:00:00", "2026-05-12T01:00:00", "SHORT", 0.70, -6.0),
+        ("2026-05-13T00:00:00", "2026-05-13T01:00:00", "SHORT", 0.90, 12.0),
+    ]
+    for ts_open, ts_close, side, conf, pnl in rows:
+        open_action = f"OPEN_{side}"
+        close_action = f"CLOSE_{side}"
+        _insert(db, ts=ts_open, symbol="BTCUSDT", action=open_action, confidence=conf)
+        _insert(db, ts=ts_close, symbol="BTCUSDT", action=close_action, pnl=pnl, reason="TP")
+    return db
+
+
+def test_directional_floor_blocks_only_target_side(tmp_path: Path) -> None:
+    """SYMBOL_DIRECTIONAL_CONF on BTC SHORT @0.85 should block the
+    low-conf SHORT (0.70) but neither LONG nor the high-conf SHORT."""
+    db = _build_mixed_side_scenario(tmp_path)
+    req = BacktestRequest(
+        start_date="2026-05-01T00:00:00",
+        end_date="2026-05-31T00:00:00",
+        config_overrides={
+            "SYMBOL_DIRECTIONAL_CONF": {"BTCUSDT": {"SHORT": 0.85}},
+        },
+        db_path=str(db),
+    )
+    res = run_backtest(req)
+    # Exactly the 0.70 SHORT is blocked
+    assert res.n_blocked_pairs == 1
+    blocked = res.blocked_trades[0]
+    assert blocked["symbol"] == "BTCUSDT"
+    assert blocked["side"] == "SHORT"
+    assert blocked["confidence"] == pytest.approx(0.70)
+    assert "directional_floor" in blocked["reason"]
+    # Net of kept: +8 (LONG@0.70) + 15 (LONG@0.92) + 12 (SHORT@0.90) = +35
+    assert res.portfolio_metrics["net_pnl_usd"] == pytest.approx(35.0)
+
+
+def test_directional_floor_other_side_unaffected(tmp_path: Path) -> None:
+    """Setting BTC SHORT floor must not affect BTC LONG."""
+    db = _build_mixed_side_scenario(tmp_path)
+    req = BacktestRequest(
+        start_date="2026-05-01T00:00:00",
+        end_date="2026-05-31T00:00:00",
+        config_overrides={
+            # Aggressive 0.99 floor — would kill every LONG if it leaked
+            "SYMBOL_DIRECTIONAL_CONF": {"BTCUSDT": {"SHORT": 0.99}},
+        },
+        db_path=str(db),
+    )
+    res = run_backtest(req)
+    # Both SHORTs gone, both LONGs kept
+    assert res.n_blocked_pairs == 2
+    kept_sides = {p["side"] for p in res.trade_log}
+    assert kept_sides == {"LONG"}
+
+
+def test_directional_floor_precedes_per_symbol_floor(tmp_path: Path) -> None:
+    """When both SYMBOL_DIRECTIONAL_CONF and SYMBOL_MIN_CONFIDENCE apply,
+    the side-specific reason should be the one reported."""
+    db = _build_mixed_side_scenario(tmp_path)
+    req = BacktestRequest(
+        start_date="2026-05-01T00:00:00",
+        end_date="2026-05-31T00:00:00",
+        config_overrides={
+            "SYMBOL_DIRECTIONAL_CONF": {"BTCUSDT": {"SHORT": 0.85}},
+            "SYMBOL_MIN_CONFIDENCE": {"BTCUSDT": 0.80},
+        },
+        db_path=str(db),
+    )
+    res = run_backtest(req)
+    short_blocked = [b for b in res.blocked_trades if b["side"] == "SHORT"]
+    assert short_blocked, "expected the low-conf SHORT to be blocked"
+    assert "directional_floor" in short_blocked[0]["reason"]
+
+
+def test_unknown_override_key_emits_warning(tmp_path: Path) -> None:
+    """Regression: unrecognized keys must not silently degrade to no-op.
+
+    The 2026-05-22 experiment #1 incident showed the Researcher proposing
+    a real config name the harness didn't implement; harness silently
+    treated it as baseline and the gate passed trivially. From now on
+    unknown keys MUST surface in result.warnings so the orchestrator can
+    reject the experiment."""
+    db = _build_simple_scenario(tmp_path)
+    req = BacktestRequest(
+        start_date="2026-05-01T00:00:00",
+        end_date="2026-05-31T00:00:00",
+        config_overrides={
+            "DEFINITELY_NOT_A_REAL_KEY": {"foo": "bar"},
+            "ANOTHER_FAKE": 0.5,
+        },
+        db_path=str(db),
+    )
+    res = run_backtest(req)
+    unknown_warnings = [
+        w for w in res.warnings if w.startswith("unrecognized override key")
+    ]
+    assert len(unknown_warnings) == 2
+    joined = " ".join(unknown_warnings)
+    assert "DEFINITELY_NOT_A_REAL_KEY" in joined
+    assert "ANOTHER_FAKE" in joined
+    # And the harness should still have run baseline behavior (4 kept)
+    assert res.n_kept_pairs == 4
+
+
 def test_per_symbol_then_global_then_blocklist_order(tmp_path: Path) -> None:
     """Combine multiple overrides — blocklist hit reported first."""
     db = _build_simple_scenario(tmp_path)

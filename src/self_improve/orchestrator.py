@@ -401,6 +401,32 @@ def _advance_proposed(
         capital_base=CAPITAL_BASE,
     )
     result = run_backtest(req)
+    # Schema-drift guard: if the harness flagged any unrecognized override
+    # key, the backtest is silently the baseline and the gate would
+    # trivially pass. Reject and surface — caught by the experiment #1
+    # post-mortem (2026-05-22).
+    unrecognized_warnings = [
+        w for w in result.warnings if w.startswith("unrecognized override key")
+    ]
+    if unrecognized_warnings:
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason=(
+                "harness schema mismatch — proposal contains keys the "
+                "backtest harness does not implement: "
+                + "; ".join(unrecognized_warnings)
+            ),
+            backtest_result_json=json.dumps(result.to_json()),
+        )
+        _log_decision(
+            conn, agent="orchestrator",
+            decision_type="reject",
+            summary=f"Rejected experiment #{exp_id} (schema mismatch)",
+            rationale="; ".join(unrecognized_warnings),
+            experiment_id=exp_id, outcome="rejected",
+        )
+        return f"exp {exp_id}: rejected — schema mismatch"
+
     # Risk Officer review after backtest
     proposal = Proposal(
         description=proposal_blob.get("description", ""),
