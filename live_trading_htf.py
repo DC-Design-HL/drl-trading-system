@@ -185,6 +185,92 @@ SYMBOL_SIDE_BLOCKLIST: set = {
     ("XRPUSDT", "SHORT"),
 }
 
+# ── Self-improvement runtime overrides (autonomous loop) ─────────────────
+# The autonomous loop (src/self_improve) writes an override file when an
+# experiment is promoted to canary/live. It is applied ONCE at process
+# startup, below, after the baseline constants above are defined.
+#
+# Three hard safety properties, by construction:
+#   1. Only entry-suppression gates can be overridden — the same 4 keys the
+#      backtest/paper harness validates (RECOGNIZED_OVERRIDE_KEYS). Sizing,
+#      SL/TP, and risk-per-trade are NEVER touched by this path, so the
+#      worst an autonomous change can do is block more entries.
+#   2. Monotonic tightening only — an override may RAISE a confidence floor
+#      or ADD a blocklist entry, never lower a floor or remove a block. A
+#      corrupt/buggy/hostile override file therefore cannot make the bot
+#      more aggressive than its committed baseline.
+#   3. Kill switch — if data/self_improve/AUTONOMY_DISABLED exists, all
+#      overrides are ignored regardless of the override file. Roll back any
+#      live change instantly: `touch` the kill switch (or delete the
+#      override file) and restart.
+_RUNTIME_OVERRIDE_FILE = Path(__file__).parent / "data" / "self_improve" / "active_overrides.json"
+_AUTONOMY_KILL_SWITCH = Path(__file__).parent / "data" / "self_improve" / "AUTONOMY_DISABLED"
+
+
+def _apply_runtime_overrides() -> dict:
+    """Apply autonomous-loop config overrides from the runtime file.
+
+    Thin wrapper: reads + validates the file, delegates the monotonic
+    tightening to src.self_improve.runtime_overrides.tighten_overrides
+    (pure, unit-tested), then assigns the result to the live globals.
+    Returns a summary dict for logging. No-op returns {} (or
+    {"disabled": True} when the kill switch is set).
+    """
+    global MIN_CONFIDENCE, SYMBOL_MIN_CONFIDENCE
+    global SYMBOL_DIRECTIONAL_CONF, SYMBOL_SIDE_BLOCKLIST
+
+    # Escape hatch used by the apply layer / tests to read pristine baseline
+    # constants without applying any override.
+    if os.environ.get("DRL_SKIP_RUNTIME_OVERRIDES") == "1":
+        return {}
+    if _AUTONOMY_KILL_SWITCH.exists():
+        return {"disabled": True, "reason": "AUTONOMY_DISABLED kill switch present"}
+    if not _RUNTIME_OVERRIDE_FILE.exists():
+        return {}
+    try:
+        payload = json.loads(_RUNTIME_OVERRIDE_FILE.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        return {"error": f"could not read override file: {exc}"}
+
+    try:
+        from src.self_improve.runtime_overrides import tighten_overrides
+    except Exception as exc:  # pragma: no cover - import safety net
+        return {"error": f"could not import runtime_overrides: {exc}"}
+
+    overrides = payload.get("config_changes", payload) if isinstance(payload, dict) else {}
+    result = tighten_overrides(
+        overrides=overrides if isinstance(overrides, dict) else {},
+        min_confidence=MIN_CONFIDENCE,
+        symbol_min_confidence=SYMBOL_MIN_CONFIDENCE,
+        symbol_directional_conf=SYMBOL_DIRECTIONAL_CONF,
+        symbol_side_blocklist=SYMBOL_SIDE_BLOCKLIST,
+    )
+    MIN_CONFIDENCE = result["min_confidence"]
+    SYMBOL_MIN_CONFIDENCE = result["symbol_min_confidence"]
+    SYMBOL_DIRECTIONAL_CONF = result["symbol_directional_conf"]
+    SYMBOL_SIDE_BLOCKLIST = result["symbol_side_blocklist"]
+    return {
+        "experiment_id": payload.get("experiment_id") if isinstance(payload, dict) else None,
+        "applied": result["applied"],
+        "skipped": result["skipped"],
+    }
+
+
+_RUNTIME_OVERRIDE_SUMMARY = _apply_runtime_overrides()
+if _RUNTIME_OVERRIDE_SUMMARY.get("applied"):
+    logger.warning(
+        "[self-improve] runtime overrides applied (exp #%s): %s",
+        _RUNTIME_OVERRIDE_SUMMARY.get("experiment_id"),
+        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["applied"]),
+    )
+if _RUNTIME_OVERRIDE_SUMMARY.get("skipped"):
+    logger.warning(
+        "[self-improve] runtime overrides SKIPPED: %s",
+        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["skipped"]),
+    )
+if _RUNTIME_OVERRIDE_SUMMARY.get("disabled"):
+    logger.info("[self-improve] overrides disabled by kill switch")
+
 # ── USDT Dominance (USDT.D) Filter ──
 # When stablecoin dominance is rising, capital is fleeing crypto → bad time
 # to LONG. Synthetic proxy: inverse momentum of the 4-symbol crypto basket.

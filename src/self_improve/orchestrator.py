@@ -9,19 +9,28 @@ State machine (see PLAN.md §6):
                                           test fail)
               rolled_back ←──── (post-live, if metrics degrade)
 
-In M4 the loop stops at `awaiting_canary_approval` — that's the manual
-canary gate. The orchestrator posts a Telegram message with the full
-proposal + backtest + paper results and **does nothing else** until
-Chen approves out-of-band (e.g. by replying on Telegram, which the
-human operator translates into a SQL update on the experiments row).
+Autonomous mode (since 2026-05-28): the loop advances past
+`awaiting_canary_approval` on its own when autonomy is ARMED. Arming is a
+deliberate one-file act (`data/self_improve/AUTONOMY_ARMED`, written with
+Chen's go-ahead). When NOT armed the loop holds at the canary gate exactly
+as before — it researches, backtests and paper-trades, but never touches
+the running bots. The kill switch (`AUTONOMY_DISABLED`) freezes everything
+instantly and also makes the live bot ignore any applied override.
+
+The apply mechanism is a runtime override FILE (data/self_improve/
+active_overrides.json), not a git merge: the live bot reads it at startup
+(monotonic-tightening only — see live_apply / runtime_overrides). Apply =
+write file + restart; rollback = delete file + restart. The circuit
+breaker reverts automatically if a live change bleeds past the §8 limits.
 
 The orchestrator is cron-triggered. Each tick:
 
-  1. Load any in-progress experiments (stage in {'proposed', 'backtest',
-     'paper', 'awaiting_canary_approval'}) — advance them.
-  2. If no in-progress experiments AND recent triggers fired AND today's
-     LLM budget hasn't been blown AND we haven't already proposed today,
-     spawn a new Researcher run.
+  1. Advance any pre-live experiment (stage in {'proposed', 'backtest',
+     'paper', 'awaiting_canary_approval', 'canary'}).
+  2. Monitor every 'live' experiment with the circuit breaker; auto-revert
+     on a §8 breach.
+  3. If nothing is pre-live AND triggers fired AND not rate-limited, spawn
+     a new Researcher run.
 
 Pipeline functions are idempotent — they update one experiment per
 tick. If a tick fails partway, the next tick picks up where it left off.
@@ -41,6 +50,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .backtest_harness import BacktestRequest, run_backtest
+from .live_apply import (
+    CANARY_HOURS,
+    apply_live,
+    is_armed,
+    is_killed,
+    measure_since,
+    revert_live,
+)
 from .llm_client import LLMClient, default_client
 from .paper_trader import evaluate_paper_period
 from .researcher import ResearcherContext, propose
@@ -50,6 +67,9 @@ UTC = timezone.utc
 
 # How long an experiment stays in the 'paper' stage before evaluation
 PAPER_DAYS = 7
+
+# Self-improvement runtime dir (override file + arm/kill flags live here)
+_SELF_IMPROVE_DIR = Path("data/self_improve")
 
 # Look back this far when assembling Researcher context
 RECENT_CLOSES_WINDOW_DAYS = 30
@@ -90,6 +110,17 @@ def _telegram_post(text: str) -> None:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_dt(s: str) -> datetime:
+    """Parse an ISO timestamp, assuming UTC if it's naive. Keeps the
+    autonomous loop from crashing on a stray tz-naive row (all rows the loop
+    writes are aware, but defensive parsing avoids a crash-loop on legacy or
+    manually-inserted data)."""
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
 
 
 def _log_decision(
@@ -346,17 +377,52 @@ class TickResult:
 
 
 def _check_existing_pipeline(conn: sqlite3.Connection) -> list[tuple]:
-    """Return experiments still in the pipeline (not terminal)."""
+    """Return PRE-LIVE experiments (block new proposals while in flight).
+
+    A 'live' experiment is intentionally excluded — once a change is live it
+    is monitored separately by the circuit breaker and must NOT keep the
+    loop from proposing the next improvement."""
     return conn.execute(
         """
         SELECT id, stage, proposal, branch, ts_promoted_paper,
-               backtest_result_json
+               backtest_result_json, ts_promoted_canary, ts_promoted_live
         FROM experiments
         WHERE stage IN ('proposed', 'backtest', 'paper',
-                        'awaiting_canary_approval')
+                        'awaiting_canary_approval', 'canary')
         ORDER BY id
         """
     ).fetchall()
+
+
+def _check_live_experiments(conn: sqlite3.Connection) -> list[tuple]:
+    """Return experiments currently applied to the running bots (stage=live).
+    Monitored by the circuit breaker every tick."""
+    return conn.execute(
+        """
+        SELECT id, stage, proposal, branch, ts_promoted_paper,
+               backtest_result_json, ts_promoted_canary, ts_promoted_live
+        FROM experiments
+        WHERE stage = 'live'
+        ORDER BY id
+        """
+    ).fetchall()
+
+
+def _load_config_changes(conn: sqlite3.Connection, exp_id: int) -> dict[str, Any]:
+    """Read the proposal's config_changes blob from the decisions table."""
+    payload = conn.execute(
+        "SELECT diff_or_config_blob FROM decisions WHERE experiment_id=? "
+        "AND decision_type='strategy_propose' ORDER BY id LIMIT 1",
+        (exp_id,),
+    ).fetchone()
+    if not payload or not payload[0]:
+        return {}
+    try:
+        blob = json.loads(payload[0])
+    except json.JSONDecodeError:
+        return {}
+    cc = blob.get("config_changes", {})
+    return cc if isinstance(cc, dict) else {}
 
 
 def _advance_proposed(
@@ -367,7 +433,7 @@ def _advance_proposed(
 ) -> str:
     """proposed → backtest. Run the harness on the proposal, advance or
     reject based on backtest gate."""
-    exp_id, stage, proposal_text, branch, _, _ = exp_row
+    exp_id, stage, proposal_text, branch = exp_row[0], exp_row[1], exp_row[2], exp_row[3]
     # Read the original proposal payload from decisions table
     payload = conn.execute(
         "SELECT diff_or_config_blob FROM decisions WHERE experiment_id=? "
@@ -498,10 +564,10 @@ def _advance_paper(
     conn: sqlite3.Connection, exp_row: tuple
 ) -> str:
     """paper → awaiting_canary_approval. Run paper-trader evaluation."""
-    exp_id, stage, _, _, ts_promoted_paper, backtest_json = exp_row
+    exp_id, ts_promoted_paper, backtest_json = exp_row[0], exp_row[4], exp_row[5]
     if not ts_promoted_paper:
         return f"exp {exp_id}: no ts_promoted_paper — skipping"
-    promoted = datetime.fromisoformat(ts_promoted_paper)
+    promoted = _parse_dt(ts_promoted_paper)
     now = datetime.now(UTC)
     if (now - promoted).total_seconds() < PAPER_DAYS * 86400:
         return f"exp {exp_id}: still in paper window ({(now - promoted).days}d/{PAPER_DAYS}d)"
@@ -553,12 +619,181 @@ def _advance_paper(
             f"🤖 Experiment #{exp_id} PASSED paper gate. "
             f"delta_pnl ${result.delta_pnl:+.2f} over {PAPER_DAYS}d, "
             f"Sharpe {result.candidate_sharpe:.2f}. "
-            f"Awaiting your canary approval — proposal in "
-            f"`experiments` row #{exp_id} in trading.db, branch: "
-            f"`auto/experiment-{exp_id}`."
+            f"Next: canary gate (auto-applies live if autonomy is armed)."
         )
         return f"exp {exp_id}: paper passed → awaiting canary approval"
     return f"exp {exp_id}: paper failed → rejected"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Canary / live stages — the only path that touches the running bots
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _trip_and_revert(
+    conn: sqlite3.Connection,
+    exp_id: int,
+    reading: Any,
+    *,
+    base_dir: Path,
+    repo: Path,
+    dry_run: bool,
+    stage_label: str,
+) -> str:
+    """Circuit breaker fired: clear the override, restart to baseline, mark
+    the experiment rolled_back, and alert. Reverting clears ALL autonomous
+    overrides (fail safe to the human-committed config)."""
+    res = revert_live(reason=reading.reason, base_dir=base_dir, repo=repo, dry_run=dry_run)
+    _set_experiment_stage(
+        conn, exp_id, "rolled_back",
+        rollback_reason=f"circuit breaker ({stage_label}): {reading.reason}",
+    )
+    _log_decision(
+        conn, agent="orchestrator", decision_type="rollback",
+        summary=f"Circuit breaker reverted experiment #{exp_id}",
+        rationale=reading.reason,
+        expected_impact=res.reason,
+        experiment_id=exp_id, outcome="rolled_back",
+        notes=json.dumps(reading.to_json()),
+    )
+    _telegram_post(
+        f"🛑 Experiment #{exp_id} CIRCUIT BREAKER tripped in {stage_label}.\n"
+        f"{reading.reason}\n"
+        f"Auto-reverted to committed baseline ({'restart ok' if res.restarted else res.reason}). "
+        f"Autonomous overrides cleared."
+    )
+    return f"exp {exp_id}: circuit breaker TRIPPED in {stage_label} → reverted"
+
+
+def _advance_awaiting_canary(
+    conn: sqlite3.Connection,
+    exp_row: tuple,
+    *,
+    base_dir: Path,
+    repo: Path,
+    dry_run: bool,
+) -> str:
+    """awaiting_canary_approval → canary. Apply the override live (write
+    file + restart) IF autonomy is armed. Otherwise hold (the pre-2026-05-28
+    manual-gate behavior)."""
+    exp_id = exp_row[0]
+    if is_killed(base_dir):
+        return f"exp {exp_id}: canary gate held — kill switch (AUTONOMY_DISABLED) present"
+    if not is_armed(base_dir):
+        return f"exp {exp_id}: held at canary gate (autonomy disarmed)"
+
+    cc = _load_config_changes(conn, exp_id)
+    if not cc:
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason="canary apply: no config_changes found",
+        )
+        return f"exp {exp_id}: rejected — no config_changes to apply"
+
+    res = apply_live(
+        experiment_id=exp_id, config_changes=cc,
+        base_dir=base_dir, repo=repo, dry_run=dry_run,
+    )
+    if not res.ok:
+        detail = res.reason + (("; " + "; ".join(res.violations)) if res.violations else "")
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason=f"canary apply refused: {detail}",
+        )
+        _log_decision(
+            conn, agent="orchestrator", decision_type="reject",
+            summary=f"Canary apply refused for experiment #{exp_id}",
+            rationale=detail, experiment_id=exp_id, outcome="rejected",
+        )
+        _telegram_post(
+            f"⚠️ Experiment #{exp_id} canary apply REFUSED: {detail}"
+        )
+        return f"exp {exp_id}: canary apply refused — {res.reason}"
+
+    _set_experiment_stage(conn, exp_id, "canary")
+    _log_decision(
+        conn, agent="orchestrator", decision_type="promote",
+        summary=f"Experiment #{exp_id} → canary (applied LIVE)",
+        rationale=res.reason, expected_impact=json.dumps(res.to_json()),
+        experiment_id=exp_id, outcome="approved",
+    )
+    _telegram_post(
+        f"🤖 Experiment #{exp_id} applied LIVE as canary "
+        f"({'restart ok' if res.restarted else res.reason}). "
+        f"Monitoring {CANARY_HOURS:.0f}h with the circuit breaker; "
+        f"auto-reverts on a §8 breach."
+    )
+    return f"exp {exp_id}: applied live → canary"
+
+
+def _advance_canary(
+    conn: sqlite3.Connection,
+    exp_row: tuple,
+    *,
+    base_dir: Path,
+    repo: Path,
+    capital: float,
+    dry_run: bool,
+) -> str:
+    """canary → live (after a clean CANARY_HOURS window) or → rolled_back
+    (circuit breaker)."""
+    exp_id, ts_canary = exp_row[0], exp_row[6]
+    if not ts_canary:
+        return f"exp {exp_id}: canary missing ts_promoted_canary — skip"
+
+    reading = measure_since(conn, since_iso=ts_canary, capital=capital)
+    if reading.tripped:
+        return _trip_and_revert(
+            conn, exp_id, reading, base_dir=base_dir, repo=repo,
+            dry_run=dry_run, stage_label="canary",
+        )
+
+    promoted = _parse_dt(ts_canary)
+    elapsed_h = (datetime.now(UTC) - promoted).total_seconds() / 3600.0
+    if elapsed_h >= CANARY_HOURS:
+        _set_experiment_stage(conn, exp_id, "live")
+        _log_decision(
+            conn, agent="orchestrator", decision_type="promote",
+            summary=f"Experiment #{exp_id} → live (canary clean {CANARY_HOURS:.0f}h)",
+            rationale=f"realized ${reading.realized_pnl:+.2f} over {reading.n_closes} "
+                      f"closes, max DD {reading.max_drawdown_pct:.2f}%",
+            experiment_id=exp_id, outcome="approved",
+        )
+        _telegram_post(
+            f"✅ Experiment #{exp_id} cleared the {CANARY_HOURS:.0f}h canary "
+            f"(realized ${reading.realized_pnl:+.2f}, {reading.n_closes} closes) "
+            f"→ promoted to LIVE. Still circuit-breaker monitored."
+        )
+        return f"exp {exp_id}: canary clean → live"
+    return (
+        f"exp {exp_id}: canary monitoring ({elapsed_h:.1f}h/{CANARY_HOURS:.0f}h, "
+        f"pnl ${reading.realized_pnl:+.2f}, n={reading.n_closes})"
+    )
+
+
+def _monitor_live(
+    conn: sqlite3.Connection,
+    exp_row: tuple,
+    *,
+    base_dir: Path,
+    repo: Path,
+    capital: float,
+    dry_run: bool,
+) -> str:
+    """Circuit-breaker watch over a live experiment. Reverts on a breach."""
+    exp_id, ts_live = exp_row[0], exp_row[7]
+    if not ts_live:
+        return f"exp {exp_id}: live missing ts_promoted_live — skip"
+    reading = measure_since(conn, since_iso=ts_live, capital=capital)
+    if reading.tripped:
+        return _trip_and_revert(
+            conn, exp_id, reading, base_dir=base_dir, repo=repo,
+            dry_run=dry_run, stage_label="live",
+        )
+    return (
+        f"exp {exp_id}: live healthy (pnl ${reading.realized_pnl:+.2f}, "
+        f"n={reading.n_closes}, DD {reading.max_drawdown_pct:.2f}%)"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -584,7 +819,7 @@ def _should_propose(
         ).fetchone()
         last = row[0] if row else None
         if last:
-            last_dt = datetime.fromisoformat(last)
+            last_dt = _parse_dt(last)
             if (datetime.now(UTC) - last_dt).total_seconds() < 86400:
                 return (False, "no triggers + last researcher < 24h ago")
         return (True, "T6 quiet tick: no triggers but >24h since last run")
@@ -596,7 +831,7 @@ def _should_propose(
     ).fetchone()
     last = row[0] if row else None
     if last:
-        last_dt = datetime.fromisoformat(last)
+        last_dt = _parse_dt(last)
         if (datetime.now(UTC) - last_dt).total_seconds() < 6 * 3600:
             return (False, "last proposal < 6h ago; rate-limit")
     return (True, f"triggers fired: {[t['id'] for t in triggers]}")
@@ -614,6 +849,10 @@ def run_tick(
     *,
     db_path: str | Path = _DB,
     client: LLMClient | None = None,
+    base_dir: str | Path = _SELF_IMPROVE_DIR,
+    repo: str | Path = ".",
+    capital: float = CAPITAL_BASE,
+    dry_run: bool = False,
 ) -> TickResult:
     actions: list[str] = []
     advanced = 0
@@ -621,12 +860,14 @@ def run_tick(
     db = Path(db_path)
     if not db.exists():
         return TickResult(actions, error=f"db not found at {db}")
+    base_dir = Path(base_dir)
+    repo = Path(repo)
 
     cli = client or default_client(db_path)
     with sqlite3.connect(str(db)) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 
-        # 1. Advance any in-flight experiments
+        # 1. Advance any pre-live experiment one stage.
         in_flight = _check_existing_pipeline(conn)
         for row in in_flight:
             exp_id, stage = row[0], row[1]
@@ -636,7 +877,14 @@ def run_tick(
                 elif stage == "paper":
                     msg = _advance_paper(conn, row)
                 elif stage == "awaiting_canary_approval":
-                    msg = f"exp {exp_id}: held at canary gate (manual)"
+                    msg = _advance_awaiting_canary(
+                        conn, row, base_dir=base_dir, repo=repo, dry_run=dry_run
+                    )
+                elif stage == "canary":
+                    msg = _advance_canary(
+                        conn, row, base_dir=base_dir, repo=repo,
+                        capital=capital, dry_run=dry_run,
+                    )
                 else:
                     msg = f"exp {exp_id}: stage={stage} (no auto-advance)"
             except Exception as exc:  # noqa: BLE001
@@ -648,7 +896,19 @@ def run_tick(
             actions.append(msg)
             advanced += 1
 
-        # 2. Decide whether to propose anything new
+        # 2. Monitor every live experiment with the circuit breaker.
+        for row in _check_live_experiments(conn):
+            exp_id = row[0]
+            try:
+                msg = _monitor_live(
+                    conn, row, base_dir=base_dir, repo=repo,
+                    capital=capital, dry_run=dry_run,
+                )
+            except Exception as exc:  # noqa: BLE001
+                msg = f"exp {exp_id}: ERROR monitoring live: {exc}"
+            actions.append(msg)
+
+        # 3. Decide whether to propose anything new
         triggers = _load_recent_triggers(conn)
         should, reason = _should_propose(conn, triggers=triggers)
         actions.append(f"researcher gate: {reason}")
