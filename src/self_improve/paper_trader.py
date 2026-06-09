@@ -11,8 +11,18 @@ portfolio (no override).
 Pass criteria (PLAN.md §6 — "Paper gate"):
 
   * ≥ 15 closes in the window (statistical signal)
-  * Sharpe is within ±25% of the original backtest's Sharpe
+  * Paper Sharpe ≥ backtest Sharpe − 25% (asymmetric — see below)
   * Zero daily-loss-limit breaches (max DD < 5% on any single day)
+  * Candidate PnL not materially worse than baseline (within $50)
+
+Asymmetric Sharpe-drift gate (revised 2026-06-09): the original gate
+rejected any |drift| > 25% in either direction, which also rejected
+positive surprises (paper better than backtest by >25%). That penalized
+upside variance equally with downside. The revised gate fails only when
+paper is meaningfully WORSE than backtest — the absolute-PnL gate below
+still catches lucky-but-not-improving candidates, so positive Sharpe
+drift on its own is no longer a fail. The downside half stays at 25%
+to catch model-vs-reality regressions early.
 
 We can't run a true shadow-execution loop in M4 — that's M5 work — but
 for tightening-only proposals this replay-against-future mode answers
@@ -32,7 +42,7 @@ UTC = timezone.utc
 
 # PLAN.md §6 — "Paper gate"
 MIN_PAPER_CLOSES = 15
-SHARPE_TOLERANCE = 0.25      # ±25% from backtest Sharpe
+SHARPE_TOLERANCE = 0.25      # max acceptable DOWNSIDE drift from backtest Sharpe
 DD_DAILY_LIMIT_PCT = 5.0     # halt threshold from §8
 
 
@@ -118,20 +128,21 @@ def evaluate_paper_period(
             f"{DD_DAILY_LIMIT_PCT:.2f}%"
         )
 
-    # Sharpe tolerance vs the original backtest. The "backtest Sharpe"
-    # is the candidate's Sharpe in a PAST period; the "paper Sharpe" is
-    # its Sharpe in the FORWARD period. We accept the gate if the
-    # forward Sharpe is within ±25% — i.e. the strategy didn't fall off
-    # a cliff vs the past.
+    # Asymmetric Sharpe-drift gate (see module docstring).
+    # The "backtest Sharpe" is the candidate's Sharpe in a PAST period;
+    # the "paper Sharpe" is its Sharpe in the FORWARD period. We fail
+    # only when paper is materially WORSE than backtest — positive
+    # divergence is allowed (the absolute-PnL gate below still catches
+    # lucky candidates that don't actually improve over baseline).
     if backtest_sharpe_reference != 0:
         delta_pct = (
             (candidate_sharpe - backtest_sharpe_reference)
             / abs(backtest_sharpe_reference)
         )
-        if abs(delta_pct) > SHARPE_TOLERANCE:
+        if delta_pct < -SHARPE_TOLERANCE:
             reasons.append(
-                f"Sharpe drift {delta_pct * 100:+.1f}% exceeds ±"
-                f"{SHARPE_TOLERANCE * 100:.0f}% tolerance "
+                f"Sharpe regression {delta_pct * 100:+.1f}% exceeds "
+                f"-{SHARPE_TOLERANCE * 100:.0f}% downside tolerance "
                 f"(backtest={backtest_sharpe_reference:.2f}, "
                 f"paper={candidate_sharpe:.2f})"
             )

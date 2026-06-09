@@ -233,6 +233,30 @@ def test_blocklist_does_not_block_other_sides(tmp_path: Path) -> None:
     assert res.n_blocked_pairs == 0
 
 
+def test_blocklist_accepts_naked_key_alias(tmp_path: Path) -> None:
+    """SYMBOL_SIDE_BLOCKLIST (without _ADD suffix) is an accepted alias.
+
+    Regression for exp #8 (2026-05-31): the researcher proposed the live
+    bot's natural variable name `SYMBOL_SIDE_BLOCKLIST`, which the harness
+    rejected as unknown. Both forms must work and behave identically.
+    """
+    db = _build_simple_scenario(tmp_path)
+    req = BacktestRequest(
+        start_date="2026-05-01T00:00:00",
+        end_date="2026-05-31T00:00:00",
+        config_overrides={
+            "SYMBOL_SIDE_BLOCKLIST": [["XRPUSDT", "LONG"]],
+        },
+        db_path=str(db),
+    )
+    res = run_backtest(req)
+    assert res.n_blocked_pairs == 2
+    assert all(b["symbol"] == "XRPUSDT" for b in res.blocked_trades)
+    # And no schema-mismatch warning for the alias key.
+    assert not any("SYMBOL_SIDE_BLOCKLIST" in w and "unrecognized" in w
+                   for w in res.warnings)
+
+
 def _build_mixed_side_scenario(tmp_path: Path) -> Path:
     """A scenario with both LONG and SHORT trades on BTC at varying
     confidences — used to exercise SYMBOL_DIRECTIONAL_CONF, which is

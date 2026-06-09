@@ -100,6 +100,17 @@ def test_tighten_unions_blocklist_add():
     assert ("SOLUSDT", "LONG") in r["symbol_side_blocklist"]
 
 
+def test_tighten_accepts_blocklist_naked_key_alias():
+    """SYMBOL_SIDE_BLOCKLIST (live bot's variable name) aliases _ADD."""
+    ov = {"SYMBOL_SIDE_BLOCKLIST": [["BTCUSDT", "SHORT"]]}
+    r = tighten_overrides(overrides=ov, **BASELINE)
+    assert ("BTCUSDT", "SHORT") in r["symbol_side_blocklist"]
+    assert any("SYMBOL_SIDE_BLOCKLIST+" in line for line in r["applied"])
+    # No "unknown key" entry for the alias.
+    assert not any("unknown key" in s and "SYMBOL_SIDE_BLOCKLIST" in s
+                   for s in r["skipped"])
+
+
 def test_pure_noop_is_not_a_valid_promotion():
     noop = {"SYMBOL_DIRECTIONAL_CONF": {"ETHUSDT": {"LONG": 0.95}}}
     violations = check_tightening_only(overrides=noop, **BASELINE)

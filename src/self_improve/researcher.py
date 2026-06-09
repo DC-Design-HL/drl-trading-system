@@ -57,31 +57,39 @@ FORBIDDEN_AREAS = {
 }
 
 ALLOWED_AREAS_HINT = """\
-You may propose changes in these areas:
+You may propose changes in EXACTLY these four entry-suppression knobs.
+This is the safety boundary enforced by the runtime apply layer
+(src/self_improve/runtime_overrides.py): anything outside this list
+cannot be promoted to live, so proposing it wastes the experiment slot.
 
-  * Per-symbol confidence floors (SYMBOL_MIN_CONFIDENCE dict)
-  * Symbol-side blocklist additions (SYMBOL_SIDE_BLOCKLIST)
-  * Per-symbol directional confidence floors (SYMBOL_DIRECTIONAL_CONF)
-  * Stagnant exit band (STAGNANT_HOURS, STAGNANT_PCT_MIN, _PCT_MAX)
-  * Whipsaw cooldown duration (WHIPSAW_COOLDOWN_HOURS)
-  * Anti-overtrading cooldowns (COOLDOWN_SECONDS, MIN_HOLD_SECONDS)
-  * Trailing distance (TRAILING_DISTANCE_PCT, TRAILING_DISTANCE_POST_TP1)
-  * USDT.D guard thresholds (USDT_D_THRESHOLD_PCT, USDT_D_LOOKBACK_HOURS)
-  * Extreme news guard thresholds
-  * Ranging-regime guards (RANGING_MIN_CONFIDENCE, RANGING_ADX_THRESHOLD)
-  * REVERSE_CLOSE_LONG canary parameters
-  * Per-symbol size scaling thresholds
+  * MIN_CONFIDENCE — global confidence floor (float, raise only)
+  * SYMBOL_MIN_CONFIDENCE — per-symbol confidence floors (dict, raise only)
+  * SYMBOL_DIRECTIONAL_CONF — per (symbol, side) directional floors
+    (nested dict, raise only)
+  * SYMBOL_SIDE_BLOCKLIST — additions to the (symbol, side) blocklist
+    (list of [symbol, side] pairs, add only — never remove)
 
-You MAY NOT modify:
+All four are MONOTONIC TIGHTENING ONLY: raise a floor, add a block.
+You cannot lower a floor or remove a block — the apply layer refuses.
 
-  * FIXED_MAX_NOTIONAL — position size limits (Chen-only)
-  * STOP_LOSS_PCT, TAKE_PROFIT_PCT — risk logic (Chen-only)
-  * MAX_LEVERAGE — risk logic (Chen-only)
-  * Daily-loss / max-drawdown halt thresholds (Chen-only)
-  * Adding a new symbol or venue (escalate to Chen)
+You MAY NOT propose:
 
-If your hypothesis requires changing a forbidden area, set verdict to
-"escalate" and explain WHY in `escalation_reason`.
+  * Sizing, leverage, SL/TP, daily-loss / max-drawdown halts
+    (FIXED_MAX_NOTIONAL, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
+    MAX_LEVERAGE, etc.) — Chen-only, escalate.
+  * Exit-side knobs (STAGNANT_HOURS, TRAILING_*, WHIPSAW_*,
+    COOLDOWN_SECONDS, MIN_HOLD_SECONDS) — outside the auto-apply
+    boundary because they have no natural monotonic-safety direction.
+    If you have a strong hypothesis here, ESCALATE.
+  * Indicator-stack tuning (USDT.D thresholds, ranging guards,
+    REVERSE_CLOSE_LONG canary, per-symbol size scaling) — same
+    reason as above, escalate.
+  * Adding a new symbol or venue — escalate.
+
+If your hypothesis requires changing anything outside the four
+applyable knobs, set verdict to "escalate" and explain WHY in
+`escalation_reason`. Do not silently fall back to proposing a
+weaker version of an unsupported knob.
 """
 
 

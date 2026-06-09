@@ -272,6 +272,7 @@ RECOGNIZED_OVERRIDE_KEYS: frozenset[str] = frozenset({
     "SYMBOL_MIN_CONFIDENCE",
     "SYMBOL_DIRECTIONAL_CONF",
     "SYMBOL_SIDE_BLOCKLIST_ADD",
+    "SYMBOL_SIDE_BLOCKLIST",  # alias of SYMBOL_SIDE_BLOCKLIST_ADD
 })
 
 
@@ -282,7 +283,10 @@ def _block_reason(
     else None. Returns the FIRST matching reason — deterministic order:
     blocklist → directional → per-symbol-confidence → global-confidence."""
 
-    blocklist = overrides.get("SYMBOL_SIDE_BLOCKLIST_ADD")
+    blocklist = (
+        overrides.get("SYMBOL_SIDE_BLOCKLIST_ADD")
+        or overrides.get("SYMBOL_SIDE_BLOCKLIST")
+    )
     if blocklist:
         as_set = {(s.upper(), side.upper()) for s, side in blocklist}
         if (pair.symbol.upper(), pair.side.upper()) in as_set:

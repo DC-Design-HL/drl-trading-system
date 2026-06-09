@@ -26,6 +26,7 @@ APPLYABLE_KEYS: frozenset[str] = frozenset({
     "SYMBOL_MIN_CONFIDENCE",
     "SYMBOL_DIRECTIONAL_CONF",
     "SYMBOL_SIDE_BLOCKLIST_ADD",
+    "SYMBOL_SIDE_BLOCKLIST",  # alias of SYMBOL_SIDE_BLOCKLIST_ADD
 })
 
 
@@ -136,9 +137,13 @@ def tighten_overrides(
         else:
             skipped.append("SYMBOL_DIRECTIONAL_CONF not a dict")
 
-    # 4. SYMBOL_SIDE_BLOCKLIST_ADD — union only.
-    if "SYMBOL_SIDE_BLOCKLIST_ADD" in overrides:
-        adds = overrides["SYMBOL_SIDE_BLOCKLIST_ADD"]
+    # 4. SYMBOL_SIDE_BLOCKLIST_ADD (or SYMBOL_SIDE_BLOCKLIST alias) — union only.
+    _blocklist_src_key = (
+        "SYMBOL_SIDE_BLOCKLIST_ADD" if "SYMBOL_SIDE_BLOCKLIST_ADD" in overrides
+        else ("SYMBOL_SIDE_BLOCKLIST" if "SYMBOL_SIDE_BLOCKLIST" in overrides else None)
+    )
+    if _blocklist_src_key is not None:
+        adds = overrides[_blocklist_src_key]
         if isinstance(adds, (list, tuple)):
             for entry in adds:
                 if isinstance(entry, (list, tuple)) and len(entry) == 2:
@@ -147,9 +152,9 @@ def tighten_overrides(
                         new_block.add(pair)
                         applied.append(f"SYMBOL_SIDE_BLOCKLIST+{pair}")
                 else:
-                    skipped.append(f"SYMBOL_SIDE_BLOCKLIST_ADD bad entry {entry!r}")
+                    skipped.append(f"{_blocklist_src_key} bad entry {entry!r}")
         else:
-            skipped.append("SYMBOL_SIDE_BLOCKLIST_ADD not a list")
+            skipped.append(f"{_blocklist_src_key} not a list")
 
     # Unknown keys — schema-drift signal (mirrors backtest harness).
     for key in sorted(set(overrides) - APPLYABLE_KEYS):
