@@ -94,15 +94,33 @@ class ForwardSimConfig:
         default_factory=dict
     )
     blocklist: frozenset[tuple[str, str]] = DEFAULT_BLOCKLIST
-    # Knobs that arrive in chunks C-E; kept here so the dataclass is the
-    # single source of truth from the start.
+    # Exit + sizing constants — mirror live_trading_htf defaults.
     stop_loss_pct: float = 0.015
     take_profit_pct: float = 0.030
-    trailing_distance_pct: float = 0.003
+    trailing_breakeven_pct: float = 0.008
+    trailing_distance_pct: float = 0.005
+    trailing_distance_post_tp1: float = 0.008
+    tp1_r_multiple: float = 1.0
+    tp2_r_multiple: float = 2.0
+    tp1_fraction: float = 0.40
+    tp2_fraction: float = 0.35
     stagnant_hours: float = 6.0
+    stagnant_pct_min: float = -0.010
+    stagnant_pct_max: float = 0.005
+    # Costs (chunks C/E).
     taker_fee_pct: float = 0.0004
     slippage_bps: float = 1.0
     capital_base: float = 5000.0
+    # Fixed-dollar-risk sizing (mirrors live live_trading_htf.RISK_POOL_PCT /
+    # RISK_BUDGET_PARTS). With capital 5000 → risk_pool 500 → per-trade
+    # risk 25, notional = 25 / 0.015 = $1,666 (capped at FIXED_MAX_NOTIONAL).
+    risk_pool_pct: float = 0.10
+    risk_budget_parts: int = 20
+    fixed_max_notional: float = 3000.0
+    # Max time to hold a position before forcing exit (safety net for the
+    # sim — live has no hard timeout, but a single trade should not run
+    # forever in the sim if for some reason no exit triggers).
+    max_hold_hours: float = 168.0
 
 
 @dataclass
@@ -119,17 +137,47 @@ class EntryEvent:
 
 
 @dataclass
+class TradeResult:
+    """Outcome of one simulated trade — entry + exits."""
+
+    symbol: str
+    side: str                   # 'LONG' | 'SHORT'
+    confidence: float
+    entry_ts: pd.Timestamp
+    entry_price: float
+    exit_ts: pd.Timestamp
+    exit_price: float
+    notional_at_entry: float
+    realized_pnl_usd: float     # NET of fees + funding + slippage
+    gross_pnl_usd: float        # before costs (for attribution)
+    fees_usd: float
+    funding_usd: float
+    slippage_usd: float
+    close_reason: str           # 'SL' | 'TP' | 'TRAIL' | 'STAGNANT' | 'MAX_HOLD' | 'EOD'
+    partial_tp_hits: int        # 0, 1, or 2
+    mfe_pct: float              # best favourable price during the trade
+    mae_pct: float              # worst adverse price during the trade
+    hold_bars_5m: int
+
+
+@dataclass
 class SymbolForwardResult:
     """Per-symbol output of one forward-sim run."""
 
     symbol: str
     n_decisions: int            # iterations evaluated
     entries: list[EntryEvent]
+    trades: list[TradeResult] = field(default_factory=list)
     skipped_by_blocklist: int = 0
     skipped_by_struct_floor: int = 0
     skipped_by_trend: int = 0
     skipped_by_s5_unimplemented: int = 0
+    skipped_by_open_position: int = 0   # already in a trade — live can't double up
     runtime_seconds: float = 0.0
+
+    @property
+    def net_pnl_usd(self) -> float:
+        return float(sum(t.realized_pnl_usd for t in self.trades))
 
 
 @dataclass
@@ -159,10 +207,13 @@ class ForwardSimResult:
                     "symbol": r.symbol,
                     "n_decisions": r.n_decisions,
                     "n_entries": len(r.entries),
+                    "n_trades": len(r.trades),
+                    "net_pnl_usd": r.net_pnl_usd,
                     "skipped_by_blocklist": r.skipped_by_blocklist,
                     "skipped_by_struct_floor": r.skipped_by_struct_floor,
                     "skipped_by_trend": r.skipped_by_trend,
                     "skipped_by_s5_unimplemented": r.skipped_by_s5_unimplemented,
+                    "skipped_by_open_position": r.skipped_by_open_position,
                     "runtime_seconds": r.runtime_seconds,
                     "entries": [
                         {
@@ -174,6 +225,27 @@ class ForwardSimResult:
                             "last_signal_direction": e.last_signal_direction,
                         }
                         for e in r.entries
+                    ],
+                    "trades": [
+                        {
+                            "side": t.side,
+                            "entry_ts": t.entry_ts.isoformat(),
+                            "exit_ts": t.exit_ts.isoformat(),
+                            "entry_price": t.entry_price,
+                            "exit_price": t.exit_price,
+                            "confidence": t.confidence,
+                            "notional_at_entry": t.notional_at_entry,
+                            "realized_pnl_usd": t.realized_pnl_usd,
+                            "gross_pnl_usd": t.gross_pnl_usd,
+                            "fees_usd": t.fees_usd,
+                            "slippage_usd": t.slippage_usd,
+                            "close_reason": t.close_reason,
+                            "partial_tp_hits": t.partial_tp_hits,
+                            "mfe_pct": t.mfe_pct,
+                            "mae_pct": t.mae_pct,
+                            "hold_bars_5m": t.hold_bars_5m,
+                        }
+                        for t in r.trades
                     ],
                 }
                 for sym, r in self.per_symbol.items()
@@ -248,6 +320,271 @@ def derive_direction(
     if trend in ("bullish", "bearish") and last_dir != trend:
         return None, "trend_last_signal_disagree"
     return None, "trend_ranging_or_no_signal"
+
+
+# ─── Position-exit simulation (bar-by-bar) ────────────────────────────
+
+
+def _compute_levels(entry: float, side: str,
+                    cfg: ForwardSimConfig) -> dict[str, float]:
+    """Initial SL / TP / partial-TP price levels for a given entry."""
+    if side == "LONG":
+        sl = entry * (1.0 - cfg.stop_loss_pct)
+        tp = entry * (1.0 + cfg.take_profit_pct)
+        tp1 = entry * (1.0 + cfg.tp1_r_multiple * cfg.stop_loss_pct)
+        tp2 = entry * (1.0 + cfg.tp2_r_multiple * cfg.stop_loss_pct)
+    else:
+        sl = entry * (1.0 + cfg.stop_loss_pct)
+        tp = entry * (1.0 - cfg.take_profit_pct)
+        tp1 = entry * (1.0 - cfg.tp1_r_multiple * cfg.stop_loss_pct)
+        tp2 = entry * (1.0 - cfg.tp2_r_multiple * cfg.stop_loss_pct)
+    return {"sl": sl, "tp": tp, "tp1": tp1, "tp2": tp2}
+
+
+def _compute_notional(cfg: ForwardSimConfig) -> float:
+    """Fixed-dollar-risk sizing — same shape as live _open_position.
+
+    notional = (capital × pool% / parts) / SL%, capped at FIXED_MAX_NOTIONAL.
+    The sim does not compound: every trade uses the same capital_base,
+    so PnL is comparable across windows.
+    """
+    risk_pool = cfg.capital_base * cfg.risk_pool_pct
+    dollar_risk = risk_pool / cfg.risk_budget_parts
+    notional = dollar_risk / cfg.stop_loss_pct
+    return min(notional, cfg.fixed_max_notional)
+
+
+def simulate_position(
+    *,
+    symbol: str,
+    side: str,
+    entry_ts: pd.Timestamp,
+    entry_price: float,
+    confidence: float,
+    df_5m: pd.DataFrame,
+    cfg: ForwardSimConfig,
+) -> Optional[TradeResult]:
+    """Walk 5m bars forward from entry_ts and apply the live exit stack.
+
+    Exit precedence per bar (mirroring live _check_sl_tp + _manage_position):
+      1. Hard SL hit                    → close, reason="SL"
+      2. Hard TP hit                    → close, reason="TP"
+      3. Partial TP1 hit (first time)   → close `tp1_fraction`, move SL to BE
+      4. Partial TP2 hit (after TP1)    → close `tp2_fraction`
+      5. Trailing SL (post-breakeven)   → may tighten SL toward peak
+      6. Stagnant exit                  → close after stagnant_hours in band
+      7. Max hold                       → safety net
+
+    Intrabar rule: if both SL and TP are inside the bar's range, SL fires
+    first (conservative). Same convention spec'd in PROFITABILITY_PLAN.md.
+    """
+    fwd = df_5m[df_5m.index > entry_ts]
+    if fwd.empty:
+        return None
+
+    levels = _compute_levels(entry_price, side, cfg)
+    sl = levels["sl"]
+    tp = levels["tp"]
+    tp1 = levels["tp1"]
+    tp2 = levels["tp2"]
+    notional = _compute_notional(cfg)
+    initial_units = notional / max(entry_price, 1e-9)
+    remaining_units = initial_units
+    realized_gross = 0.0
+    partial_hits = 0
+    peak = entry_price  # for trailing
+    trough = entry_price
+    mfe_pct = 0.0
+    mae_pct = 0.0
+    stagnant_start: Optional[pd.Timestamp] = None
+    max_hold = pd.Timedelta(hours=cfg.max_hold_hours)
+    stagnant_window = pd.Timedelta(hours=cfg.stagnant_hours)
+
+    hold_bars = 0
+    close_reason: Optional[str] = None
+    close_price = entry_price
+    close_ts = entry_ts
+
+    for ts, row in fwd.iterrows():
+        hold_bars += 1
+        high = float(row["high"])
+        low = float(row["low"])
+        close = float(row["close"])
+
+        # Update MFE / MAE — instantaneous best / worst since entry.
+        if side == "LONG":
+            if high > peak:
+                peak = high
+            if low < trough:
+                trough = low
+            bar_mfe = (high - entry_price) / entry_price
+            bar_mae = (low - entry_price) / entry_price
+        else:
+            if low < peak:
+                peak = low
+            if high > trough:
+                trough = high
+            bar_mfe = (entry_price - low) / entry_price
+            bar_mae = (entry_price - high) / entry_price
+        if bar_mfe > mfe_pct:
+            mfe_pct = bar_mfe
+        if bar_mae < mae_pct:
+            mae_pct = bar_mae
+
+        # 1. SL — checked before TP per intrabar conservatism.
+        if side == "LONG" and low <= sl:
+            realized_gross += (sl - entry_price) * remaining_units
+            close_reason = "SL"
+            close_price = sl
+            close_ts = ts
+            break
+        if side == "SHORT" and high >= sl:
+            realized_gross += (entry_price - sl) * remaining_units
+            close_reason = "SL"
+            close_price = sl
+            close_ts = ts
+            break
+
+        # 2. Hard TP.
+        if side == "LONG" and high >= tp:
+            realized_gross += (tp - entry_price) * remaining_units
+            close_reason = "TP"
+            close_price = tp
+            close_ts = ts
+            break
+        if side == "SHORT" and low <= tp:
+            realized_gross += (entry_price - tp) * remaining_units
+            close_reason = "TP"
+            close_price = tp
+            close_ts = ts
+            break
+
+        # 3. Partial TP1 (first hit).
+        if partial_hits == 0:
+            hit = (side == "LONG" and high >= tp1) or (
+                side == "SHORT" and low <= tp1
+            )
+            if hit:
+                close_units = initial_units * cfg.tp1_fraction
+                partial_pnl = (
+                    (tp1 - entry_price) if side == "LONG"
+                    else (entry_price - tp1)
+                ) * close_units
+                realized_gross += partial_pnl
+                remaining_units -= close_units
+                partial_hits = 1
+                # Move SL to breakeven.
+                sl = entry_price
+
+        # 4. Partial TP2 (after TP1).
+        if partial_hits == 1:
+            hit = (side == "LONG" and high >= tp2) or (
+                side == "SHORT" and low <= tp2
+            )
+            if hit:
+                close_units = initial_units * cfg.tp2_fraction
+                partial_pnl = (
+                    (tp2 - entry_price) if side == "LONG"
+                    else (entry_price - tp2)
+                ) * close_units
+                realized_gross += partial_pnl
+                remaining_units -= close_units
+                partial_hits = 2
+
+        # 5. Trailing SL — activates above breakeven_pct.
+        if side == "LONG":
+            profit_pct = (close - entry_price) / entry_price
+        else:
+            profit_pct = (entry_price - close) / entry_price
+        if profit_pct >= cfg.trailing_breakeven_pct:
+            trail_dist = (
+                cfg.trailing_distance_post_tp1
+                if partial_hits >= 1
+                else cfg.trailing_distance_pct
+            )
+            if side == "LONG":
+                trailing_sl = max(peak * (1.0 - trail_dist), entry_price)
+                if trailing_sl > sl:
+                    sl = trailing_sl
+            else:
+                trailing_sl = min(peak * (1.0 + trail_dist), entry_price)
+                if sl <= 0 or trailing_sl < sl:
+                    sl = trailing_sl
+
+        # 6. Stagnant exit — track running window of PnL within band.
+        in_band = cfg.stagnant_pct_min <= profit_pct <= cfg.stagnant_pct_max
+        if in_band:
+            if stagnant_start is None:
+                stagnant_start = ts
+            elif ts - stagnant_start >= stagnant_window:
+                if remaining_units > 0:
+                    realized_gross += (
+                        (close - entry_price) if side == "LONG"
+                        else (entry_price - close)
+                    ) * remaining_units
+                close_reason = "STAGNANT"
+                close_price = close
+                close_ts = ts
+                break
+        else:
+            stagnant_start = None
+
+        # 7. Max hold safety net.
+        if ts - entry_ts >= max_hold:
+            if remaining_units > 0:
+                realized_gross += (
+                    (close - entry_price) if side == "LONG"
+                    else (entry_price - close)
+                ) * remaining_units
+            close_reason = "MAX_HOLD"
+            close_price = close
+            close_ts = ts
+            break
+
+    if close_reason is None:
+        # Data ran out — close at last bar's close (end-of-data).
+        last_ts = fwd.index[-1]
+        last_close = float(fwd["close"].iloc[-1])
+        if remaining_units > 0:
+            realized_gross += (
+                (last_close - entry_price) if side == "LONG"
+                else (entry_price - last_close)
+            ) * remaining_units
+        close_reason = "EOD"
+        close_price = last_close
+        close_ts = last_ts
+
+    # Costs: fees on entry + on each closed leg (approximation: sum of
+    # closed notionals × fee_pct each side). Slippage as 1 bp of entry +
+    # exit notional. Funding accrues per 8h boundary crossed — added in
+    # P2.E once the funding cache is wired through here.
+    entry_fee = notional * cfg.taker_fee_pct
+    exit_notional = abs(close_price) * initial_units
+    exit_fee = exit_notional * cfg.taker_fee_pct
+    fees = entry_fee + exit_fee
+    slippage = (notional + exit_notional) * (cfg.slippage_bps / 10000.0)
+    realized_net = realized_gross - fees - slippage
+
+    return TradeResult(
+        symbol=symbol,
+        side=side,
+        confidence=confidence,
+        entry_ts=entry_ts,
+        entry_price=entry_price,
+        exit_ts=close_ts,
+        exit_price=close_price,
+        notional_at_entry=notional,
+        realized_pnl_usd=realized_net,
+        gross_pnl_usd=realized_gross,
+        fees_usd=fees,
+        funding_usd=0.0,  # populated in P2.E
+        slippage_usd=slippage,
+        close_reason=close_reason,
+        partial_tp_hits=partial_hits,
+        mfe_pct=mfe_pct,
+        mae_pct=mae_pct,
+        hold_bars_5m=hold_bars,
+    )
 
 
 # ─── Main entry: run_forward_sim ───────────────────────────────────────
@@ -346,11 +683,17 @@ def _simulate_symbol(
     """
     sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(symbol, "S1")
     entries: list[EntryEvent] = []
+    trades: list[TradeResult] = []
     n_decisions = 0
     n_blocklist = 0
     n_struct = 0
     n_trend = 0
     n_s5 = 0
+    n_open = 0
+    # Track when the current open position is expected to close so we
+    # skip decisions inside the trade window — the live bot can only
+    # hold one position per symbol at a time.
+    next_free_ts: Optional[pd.Timestamp] = None
 
     # Restrict the 5m frame to the decision window and snap to the cadence.
     decisions_5m = df_5m[(df_5m.index >= start_ts) & (df_5m.index <= end_ts)]
@@ -371,6 +714,12 @@ def _simulate_symbol(
 
     for i in range(0, len(decisions_5m), step):
         bar_ts = decisions_5m.index[i]
+        # Live can only hold one position per symbol — skip decisions
+        # that fall inside the currently-simulated trade window.
+        if next_free_ts is not None and bar_ts < next_free_ts:
+            n_open += 1
+            continue
+
         # Lookback windows up to and including bar_ts.
         pos_5m = idx_5m_full.searchsorted(bar_ts, side="right")
         pos_1h = idx_1h_full.searchsorted(bar_ts, side="right")
@@ -418,12 +767,29 @@ def _simulate_symbol(
             last_signal_direction=sig.get("last_signal_direction", ""),
         ))
 
+        # Simulate the trade through to exit. Returns None only when the
+        # entry is on the very last bar of the cache.
+        trade = simulate_position(
+            symbol=symbol,
+            side=side,
+            entry_ts=bar_ts,
+            entry_price=price,
+            confidence=struct_conf,
+            df_5m=df_5m,
+            cfg=cfg,
+        )
+        if trade is not None:
+            trades.append(trade)
+            next_free_ts = trade.exit_ts
+
     return SymbolForwardResult(
         symbol=symbol,
         n_decisions=n_decisions,
         entries=entries,
+        trades=trades,
         skipped_by_blocklist=n_blocklist,
         skipped_by_struct_floor=n_struct,
         skipped_by_trend=n_trend,
         skipped_by_s5_unimplemented=n_s5,
+        skipped_by_open_position=n_open,
     )
