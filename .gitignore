@@ -75,3 +75,4 @@ data/trading.db-wal
 data/self_improve/
 logs/decisions/
 supervisor/supervisord.log
+data/kline_cache/
