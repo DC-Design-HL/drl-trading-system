@@ -51,6 +51,10 @@ from src.features.htf_features import HTFFeatureEngine, HTFDataAligner
 from src.data.multi_asset_fetcher import MultiAssetDataFetcher
 from src.data.storage import get_storage
 from src.signals.bos_choch import MarketStructure
+from src.signals.structure_filters import (
+    passes_adx_directional,
+    passes_ob_proximity,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -2456,64 +2460,37 @@ class HTFLiveBot:
         sym_cfg = STRUCTURE_SYMBOL_CONFIG.get(self.symbol, "S1")
 
         if sym_cfg == "S5":
-            # Extra filter: Order Block proximity
-            if df_15m is not None and len(df_15m) >= 40:
-                ob_window = df_15m.tail(40)
-                opn = ob_window["open"].values
-                close = ob_window["close"].values
-                high = ob_window["high"].values
-                low = ob_window["low"].values
-                n = len(close)
-                bull_obs, bear_obs = [], []
-                atr_proxy = np.mean(high - low) + 1e-10
-                for idx in range(max(0, n - 30), n - 2):
-                    body_i = close[idx] - opn[idx]
-                    body_i1 = close[idx + 1] - opn[idx + 1]
-                    move = abs(close[idx + 2] - close[idx + 1]) if (idx + 2) < n else 0.0
-                    if body_i < 0 and body_i1 > 0 and move > atr_proxy * 0.5:
-                        bull_obs.append((high[idx] + low[idx]) / 2.0)
-                    if body_i > 0 and body_i1 < 0 and move > atr_proxy * 0.5:
-                        bear_obs.append((high[idx] + low[idx]) / 2.0)
-
-                ob_levels = bull_obs if direction == ACTION_LONG else bear_obs
-                near_ob = any(
-                    abs(current_price - lvl) / (lvl + 1e-10) < STRUCTURE_OB_PROXIMITY_PCT
-                    for lvl in ob_levels
+            # S5 extras factored to src/signals/structure_filters.py so the
+            # forward simulator (PROFITABILITY_PLAN.md P2) calls the same
+            # code as the live bot. Behaviour preserved bit-for-bit.
+            if not passes_ob_proximity(
+                df_15m,
+                direction_long=(direction == ACTION_LONG),
+                current_price=current_price,
+                proximity_pct=STRUCTURE_OB_PROXIMITY_PCT,
+            ):
+                logger.info(
+                    "Structure-first S5: blocked by OB proximity "
+                    "(no nearby %s OB)",
+                    "bullish" if direction == ACTION_LONG else "bearish",
                 )
-                if not near_ob:
-                    logger.info("Structure-first S5: blocked by OB proximity (no nearby %s OB)",
-                                "bullish" if direction == ACTION_LONG else "bearish")
-                    return None
-
-            # Extra filter: ADX directional confirmation (from 15m candles)
-            if df_15m is not None and len(df_15m) >= 30:
-                try:
-                    _close = df_15m["close"].values
-                    _high = df_15m["high"].values
-                    _low = df_15m["low"].values
-                    _period = 14
-                    # Quick ADX/DI from last 30 bars
-                    _plus_dm = np.diff(_high[-30:])
-                    _minus_dm = -np.diff(_low[-30:])
-                    _plus_dm = np.where((_plus_dm > _minus_dm) & (_plus_dm > 0), _plus_dm, 0)
-                    _minus_dm = np.where((_minus_dm > _plus_dm) & (_minus_dm > 0), _minus_dm, 0)
-                    _tr = np.maximum(_high[-29:] - _low[-29:],
-                                     np.maximum(np.abs(_high[-29:] - _close[-30:-1]),
-                                                np.abs(_low[-29:] - _close[-30:-1])))
-                    _atr = np.mean(_tr[-_period:])
-                    if _atr > 0:
-                        _plus_di = 100 * np.mean(_plus_dm[-_period:]) / _atr
-                        _minus_di = 100 * np.mean(_minus_dm[-_period:]) / _atr
-                        _adx_val = 100 * abs(_plus_di - _minus_di) / (_plus_di + _minus_di + 1e-10)
-                        if _adx_val >= ADX_GUARD_MIN:
-                            if direction == ACTION_LONG and _minus_di > _plus_di:
-                                logger.info("Structure-first S5: ADX directional block (LONG but -DI > +DI, ADX=%.1f)", _adx_val)
-                                return None
-                            if direction == ACTION_SHORT and _plus_di > _minus_di:
-                                logger.info("Structure-first S5: ADX directional block (SHORT but +DI > -DI, ADX=%.1f)", _adx_val)
-                                return None
-                except Exception as exc:
-                    logger.debug("Structure-first S5 ADX check failed: %s", exc)
+                return None
+            if not passes_adx_directional(
+                df_15m,
+                direction_long=(direction == ACTION_LONG),
+                adx_guard_min=ADX_GUARD_MIN,
+            ):
+                if direction == ACTION_LONG:
+                    logger.info(
+                        "Structure-first S5: ADX directional block "
+                        "(LONG but -DI > +DI)",
+                    )
+                else:
+                    logger.info(
+                        "Structure-first S5: ADX directional block "
+                        "(SHORT but +DI > -DI)",
+                    )
+                return None
 
         # Per-symbol-side blocklist gate (see SYMBOL_SIDE_BLOCKLIST near top of file).
         # Block entries on combos that have negative historical or recent expectancy.

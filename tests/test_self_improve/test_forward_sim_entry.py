@@ -159,10 +159,11 @@ def test_run_forward_sim_struct_floor_blocks(tmp_path: Path) -> None:
     assert len(result.per_symbol["BTCUSDT"].entries) == 0
 
 
-def test_run_forward_sim_eth_s5_is_flagged(tmp_path: Path) -> None:
-    """ETH is S5 in the live config; v1 of the sim does not replicate
-    OB-proximity + ADX-directional checks, so it must mark those
-    decisions as skipped_by_s5_unimplemented instead of silently emitting."""
+def test_run_forward_sim_eth_s5_runs(tmp_path: Path) -> None:
+    """ETH is S5 in the live config. After P2.D the OB-proximity and
+    ADX-directional helpers ARE replicated, so ETH should produce a
+    result whose buckets add up correctly. Exact entry counts depend on
+    the random-walk fixture, so we only assert the bookkeeping holds."""
     _seed_synthetic_cache(tmp_path, symbol="ETHUSDT")
     result = fs.run_forward_sim(
         symbols=("ETHUSDT",),
@@ -171,11 +172,11 @@ def test_run_forward_sim_eth_s5_is_flagged(tmp_path: Path) -> None:
         cache_base=tmp_path,
     )
     sym = result.per_symbol["ETHUSDT"]
-    # ETH would never produce direct entries until the S5 helpers land
-    assert len(sym.entries) == 0
-    # When trend agrees, it should be classified as s5_unimplemented
-    # (could be 0 if the random walk is ranging throughout — only assert
-    # the absence of entries is consistent)
+    total_skipped = (
+        sym.skipped_by_trend + sym.skipped_by_blocklist
+        + sym.skipped_by_struct_floor + sym.skipped_by_s5_unimplemented
+    )
+    assert total_skipped + len(sym.entries) == sym.n_decisions
 
 
 def test_to_json_round_trip(tmp_path: Path) -> None:

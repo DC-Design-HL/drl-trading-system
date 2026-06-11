@@ -39,6 +39,10 @@ from typing import Any, Optional
 import pandas as pd
 
 from src.signals.bos_choch import MarketStructure
+from src.signals.structure_filters import (
+    passes_adx_directional,
+    passes_ob_proximity,
+)
 
 from .kline_cache import as_ohlcv_df, read_klines
 
@@ -94,6 +98,9 @@ class ForwardSimConfig:
         default_factory=dict
     )
     blocklist: frozenset[tuple[str, str]] = DEFAULT_BLOCKLIST
+    # S5 filter constants (mirror live_trading_htf).
+    structure_ob_proximity_pct: float = 0.010
+    adx_guard_min: float = 20.0
     # Exit + sizing constants — mirror live_trading_htf defaults.
     stop_loss_pct: float = 0.015
     take_profit_pct: float = 0.030
@@ -623,6 +630,9 @@ def run_forward_sim(
         df_5m_full = as_ohlcv_df(read_klines(
             symbol, "5m", start=fetch_start_ns, end=end_ns, base=cache_base,
         ))
+        df_15m_full = as_ohlcv_df(read_klines(
+            symbol, "15m", start=fetch_start_ns, end=end_ns, base=cache_base,
+        ))
         df_1h_full = as_ohlcv_df(read_klines(
             symbol, "1h", start=fetch_start_ns, end=end_ns, base=cache_base,
         ))
@@ -640,6 +650,7 @@ def run_forward_sim(
         result = _simulate_symbol(
             symbol=symbol,
             df_5m=df_5m_full,
+            df_15m=df_15m_full,
             df_1h=df_1h_full,
             df_4h=df_4h_full,
             ms=ms,
@@ -666,6 +677,7 @@ def _simulate_symbol(
     *,
     symbol: str,
     df_5m: pd.DataFrame,
+    df_15m: pd.DataFrame,
     df_1h: pd.DataFrame,
     df_4h: pd.DataFrame,
     ms: MarketStructure,
@@ -688,7 +700,8 @@ def _simulate_symbol(
     n_blocklist = 0
     n_struct = 0
     n_trend = 0
-    n_s5 = 0
+    n_s5_ob = 0       # ETH OB-proximity block (P2.D)
+    n_s5_adx = 0      # ETH ADX-directional block (P2.D)
     n_open = 0
     # Track when the current open position is expected to close so we
     # skip decisions inside the trade window — the live bot can only
@@ -709,6 +722,7 @@ def _simulate_symbol(
     # Pre-cache 1h/4h frame slicing — pandas index lookups dominate cost
     # otherwise.
     idx_5m_full = df_5m.index
+    idx_15m_full = df_15m.index if not df_15m.empty else pd.DatetimeIndex([])
     idx_1h_full = df_1h.index
     idx_4h_full = df_4h.index
 
@@ -740,11 +754,27 @@ def _simulate_symbol(
             n_trend += 1
             continue
 
-        # S5 extras are NOT replicated in v1 — flag and skip if symbol
-        # configured for S5. ETH is the only one today.
-        if sym_cfg == "S5":
-            n_s5 += 1
-            continue
+        # S5 filters (live: ETH only). Helpers shared with the live bot
+        # in src/signals/structure_filters.py — same code, same answer.
+        price = float(decisions_5m["close"].iloc[i])
+        if sym_cfg == "S5" and len(idx_15m_full) > 0:
+            pos_15m = idx_15m_full.searchsorted(bar_ts, side="right")
+            win_15m = df_15m.iloc[max(0, pos_15m - 100):pos_15m]
+            if not passes_ob_proximity(
+                win_15m,
+                direction_long=(side == "LONG"),
+                current_price=price,
+                proximity_pct=cfg.structure_ob_proximity_pct,
+            ):
+                n_s5_ob += 1
+                continue
+            if not passes_adx_directional(
+                win_15m,
+                direction_long=(side == "LONG"),
+                adx_guard_min=cfg.adx_guard_min,
+            ):
+                n_s5_adx += 1
+                continue
 
         if (symbol, side) in cfg.blocklist:
             n_blocklist += 1
@@ -756,7 +786,7 @@ def _simulate_symbol(
             n_struct += 1
             continue
 
-        price = float(decisions_5m["close"].iloc[i])
+        # price computed above (needed by S5 OB-proximity helper).
         entries.append(EntryEvent(
             ts=bar_ts,
             symbol=symbol,
@@ -790,6 +820,6 @@ def _simulate_symbol(
         skipped_by_blocklist=n_blocklist,
         skipped_by_struct_floor=n_struct,
         skipped_by_trend=n_trend,
-        skipped_by_s5_unimplemented=n_s5,
+        skipped_by_s5_unimplemented=n_s5_ob + n_s5_adx,
         skipped_by_open_position=n_open,
     )
