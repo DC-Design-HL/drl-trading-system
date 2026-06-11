@@ -22,9 +22,19 @@ from __future__ import annotations
 from typing import Any
 
 APPLYABLE_KEYS: frozenset[str] = frozenset({
+    # Legacy PPO-model-confidence floors. Inert while
+    # STRUCTURE_FIRST_MODE=True in live_trading_htf (execute_trade skips
+    # them); kept applyable in case structure-first is ever switched off.
     "MIN_CONFIDENCE",
     "SYMBOL_MIN_CONFIDENCE",
     "SYMBOL_DIRECTIONAL_CONF",
+    # Structure-confidence floors (PROFITABILITY_PLAN.md P1) — the live
+    # apply surface in structure-first mode. Same mechanics as the legacy
+    # twins above: raise-only.
+    "STRUCT_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_DIRECTIONAL_CONF",
+    # Blocklist additions (always applyable). Removal is Chen-only.
     "SYMBOL_SIDE_BLOCKLIST_ADD",
     "SYMBOL_SIDE_BLOCKLIST",  # alias of SYMBOL_SIDE_BLOCKLIST_ADD
 })
@@ -45,6 +55,9 @@ def tighten_overrides(
     symbol_min_confidence: dict[str, float],
     symbol_directional_conf: dict[str, dict[str, float]],
     symbol_side_blocklist: set[tuple[str, str]],
+    struct_min_confidence: float = 0.0,
+    struct_symbol_min_confidence: dict[str, float] | None = None,
+    struct_symbol_directional_conf: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     """Compute the monotonically-tightened constants given an override dict.
 
@@ -52,6 +65,11 @@ def tighten_overrides(
     with only tightening changes applied. The caller assigns them to the
     live globals. Returns a dict with the new values plus ``applied`` and
     ``skipped`` lists describing every decision (for logging / audit).
+
+    The ``struct_*`` parameters are PROFITABILITY_PLAN.md P1's parallel
+    floor surface — structure-signal confidence, not PPO model confidence.
+    Default 0.0 / {} = no-op (callers that don't yet supply them get
+    identical pre-P1 behavior for the legacy keys).
     """
     overrides = _coerce_overrides(overrides)
 
@@ -59,6 +77,11 @@ def tighten_overrides(
     new_sym_min = dict(symbol_min_confidence)
     new_dir = {s: dict(v) for s, v in symbol_directional_conf.items()}
     new_block = set(symbol_side_blocklist)
+    new_struct_min = float(struct_min_confidence)
+    new_struct_sym = dict(struct_symbol_min_confidence or {})
+    new_struct_dir = {
+        s: dict(v) for s, v in (struct_symbol_directional_conf or {}).items()
+    }
 
     applied: list[str] = []
     skipped: list[str] = []
@@ -156,6 +179,88 @@ def tighten_overrides(
         else:
             skipped.append(f"{_blocklist_src_key} not a list")
 
+    # 5. STRUCT_MIN_CONFIDENCE — raise only. Same shape as MIN_CONFIDENCE.
+    if "STRUCT_MIN_CONFIDENCE" in overrides:
+        try:
+            v = float(overrides["STRUCT_MIN_CONFIDENCE"])
+            if v > new_struct_min:
+                applied.append(
+                    f"STRUCT_MIN_CONFIDENCE {new_struct_min:.3f}→{v:.3f}"
+                )
+                new_struct_min = v
+            else:
+                skipped.append(
+                    _floor_skip("STRUCT_MIN_CONFIDENCE", v, new_struct_min)
+                )
+        except (TypeError, ValueError):
+            skipped.append("STRUCT_MIN_CONFIDENCE not numeric")
+
+    # 6. STRUCT_SYMBOL_MIN_CONFIDENCE — per symbol, merge + raise only.
+    if "STRUCT_SYMBOL_MIN_CONFIDENCE" in overrides:
+        cfg = overrides["STRUCT_SYMBOL_MIN_CONFIDENCE"]
+        if isinstance(cfg, dict):
+            for sym, val in cfg.items():
+                try:
+                    v = float(val)
+                except (TypeError, ValueError):
+                    skipped.append(
+                        f"STRUCT_SYMBOL_MIN_CONFIDENCE[{sym}] not numeric"
+                    )
+                    continue
+                cur = new_struct_sym.get(sym)
+                if cur is None or v > cur:
+                    new_struct_sym[sym] = v
+                    applied.append(
+                        f"STRUCT_SYMBOL_MIN_CONFIDENCE[{sym}] "
+                        f"{'∅' if cur is None else f'{cur:.3f}'}→{v:.3f}"
+                    )
+                else:
+                    skipped.append(
+                        _floor_skip(
+                            f"STRUCT_SYMBOL_MIN_CONFIDENCE[{sym}]", v, cur
+                        )
+                    )
+        else:
+            skipped.append("STRUCT_SYMBOL_MIN_CONFIDENCE not a dict")
+
+    # 7. STRUCT_SYMBOL_DIRECTIONAL_CONF — per (symbol, side), merge + raise.
+    if "STRUCT_SYMBOL_DIRECTIONAL_CONF" in overrides:
+        cfg = overrides["STRUCT_SYMBOL_DIRECTIONAL_CONF"]
+        if isinstance(cfg, dict):
+            for sym, sides in cfg.items():
+                if not isinstance(sides, dict):
+                    skipped.append(
+                        f"STRUCT_SYMBOL_DIRECTIONAL_CONF[{sym}] not a dict"
+                    )
+                    continue
+                for side, val in sides.items():
+                    side_u = str(side).upper()
+                    try:
+                        v = float(val)
+                    except (TypeError, ValueError):
+                        skipped.append(
+                            f"STRUCT_SYMBOL_DIRECTIONAL_CONF[{sym}][{side_u}]"
+                            f" not numeric"
+                        )
+                        continue
+                    cur = new_struct_dir.get(sym, {}).get(side_u)
+                    if cur is None or v > cur:
+                        new_struct_dir.setdefault(sym, {})[side_u] = v
+                        applied.append(
+                            f"STRUCT_SYMBOL_DIRECTIONAL_CONF[{sym}][{side_u}] "
+                            f"{'∅' if cur is None else f'{cur:.3f}'}→{v:.3f}"
+                        )
+                    else:
+                        skipped.append(
+                            _floor_skip(
+                                f"STRUCT_SYMBOL_DIRECTIONAL_CONF[{sym}][{side_u}]",
+                                v,
+                                cur,
+                            )
+                        )
+        else:
+            skipped.append("STRUCT_SYMBOL_DIRECTIONAL_CONF not a dict")
+
     # Unknown keys — schema-drift signal (mirrors backtest harness).
     for key in sorted(set(overrides) - APPLYABLE_KEYS):
         skipped.append(f"unknown key {key!r} (not an entry-suppression gate)")
@@ -165,6 +270,9 @@ def tighten_overrides(
         "symbol_min_confidence": new_sym_min,
         "symbol_directional_conf": new_dir,
         "symbol_side_blocklist": new_block,
+        "struct_min_confidence": new_struct_min,
+        "struct_symbol_min_confidence": new_struct_sym,
+        "struct_symbol_directional_conf": new_struct_dir,
         "applied": applied,
         "skipped": skipped,
     }
@@ -177,6 +285,9 @@ def check_tightening_only(
     symbol_min_confidence: dict[str, float],
     symbol_directional_conf: dict[str, dict[str, float]],
     symbol_side_blocklist: set[tuple[str, str]],
+    struct_min_confidence: float = 0.0,
+    struct_symbol_min_confidence: dict[str, float] | None = None,
+    struct_symbol_directional_conf: dict[str, dict[str, float]] | None = None,
 ) -> list[str]:
     """Pre-write guard for the orchestrator apply step.
 
@@ -192,6 +303,9 @@ def check_tightening_only(
         symbol_min_confidence=symbol_min_confidence,
         symbol_directional_conf=symbol_directional_conf,
         symbol_side_blocklist=symbol_side_blocklist,
+        struct_min_confidence=struct_min_confidence,
+        struct_symbol_min_confidence=struct_symbol_min_confidence,
+        struct_symbol_directional_conf=struct_symbol_directional_conf,
     )
     violations: list[str] = []
     for s in result["skipped"]:

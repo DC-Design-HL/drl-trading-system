@@ -62,15 +62,39 @@ This is the safety boundary enforced by the runtime apply layer
 (src/self_improve/runtime_overrides.py): anything outside this list
 cannot be promoted to live, so proposing it wastes the experiment slot.
 
-  * MIN_CONFIDENCE — global confidence floor (float, raise only)
-  * SYMBOL_MIN_CONFIDENCE — per-symbol confidence floors (dict, raise only)
-  * SYMBOL_DIRECTIONAL_CONF — per (symbol, side) directional floors
-    (nested dict, raise only)
+  * STRUCT_MIN_CONFIDENCE — global STRUCTURE-confidence floor
+    (float, raise only)
+  * STRUCT_SYMBOL_MIN_CONFIDENCE — per-symbol structure-confidence
+    floors (dict, raise only)
+  * STRUCT_SYMBOL_DIRECTIONAL_CONF — per (symbol, side) directional
+    structure-confidence floors (nested dict, raise only)
   * SYMBOL_SIDE_BLOCKLIST — additions to the (symbol, side) blocklist
     (list of [symbol, side] pairs, add only — never remove)
 
-All four are MONOTONIC TIGHTENING ONLY: raise a floor, add a block.
-You cannot lower a floor or remove a block — the apply layer refuses.
+CRITICAL — read this before proposing a confidence floor:
+
+The live bot runs in STRUCTURE_FIRST_MODE. In that mode the entry
+confidence used by every guard is BOS/CHOCH *structure* confidence,
+NOT PPO *model* confidence. The legacy knobs MIN_CONFIDENCE,
+SYMBOL_MIN_CONFIDENCE, SYMBOL_DIRECTIONAL_CONF are still in the
+APPLYABLE_KEYS set so they survive a future switch back to model-first
+mode — but TODAY they are INERT (execute_trade skips their checks).
+Proposing them in structure-first mode produces a backtest that
+filters historical PPO-confidence-tagged trades while live behavior
+does not change. That is exactly the F1 dead-knob bug the P1 plan
+addresses. Use the STRUCT_* keys above instead.
+
+Sanity-check ranges (structure-confidence is a different scale from
+PPO confidence — values like 0.95 may strangle entries entirely):
+  - the recorded `confidence` column on post-2026-04-13 trades is
+    BOS/CHOCH confidence in [0.0, 1.0]
+  - empirically meaningful range is roughly [0.40, 0.85]
+  - the P0 ground-truth report's confidence-decile section is the
+    canonical reference for picking a floor
+
+All four applyable knobs are MONOTONIC TIGHTENING ONLY: raise a
+floor, add a block. You cannot lower a floor or remove a block —
+the apply layer refuses.
 
 You MAY NOT propose:
 

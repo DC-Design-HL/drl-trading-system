@@ -161,6 +161,58 @@ SYMBOL_DIRECTIONAL_CONF: dict = {
     "SOLUSDT": {"LONG": 0.95},
 }
 
+# ── Structure-confidence floors (PROFITABILITY_PLAN.md P1) ─────────────────
+# Parallel to the legacy MIN_CONFIDENCE family above. The legacy values
+# (0.45 global, 0.80 ETH, 0.95 ETH/SOL LONG) were calibrated against PPO
+# *model* confidence; in STRUCTURE_FIRST_MODE the OPEN's confidence field
+# is BOS/CHOCH *structure* confidence — a different quantity and scale —
+# and the legacy confidence-floor checks in execute_trade are skipped
+# entirely. That made the legacy keys dead knobs that the autonomous loop
+# could "apply" as no-ops (PROFITABILITY_PLAN.md F1).
+#
+# These STRUCT_* floors are enforced at the end of
+# _get_structure_direction (after the blocklist) so they affect every
+# entry the live bot actually evaluates. The 0.0 / {} baselines below are
+# zero behavior change at deploy. They become the autonomous loop's
+# apply surface — see runtime_overrides.APPLYABLE_KEYS.
+STRUCT_MIN_CONFIDENCE: float = 0.0
+STRUCT_SYMBOL_MIN_CONFIDENCE: dict = {}        # e.g. {"ETHUSDT": 0.60}
+STRUCT_SYMBOL_DIRECTIONAL_CONF: dict = {}      # e.g. {"ETHUSDT": {"LONG": 0.70}}
+
+
+def _resolve_struct_floor(symbol: str, side: str) -> tuple[Optional[float], str]:
+    """Resolve the effective structure-confidence floor for (symbol, side).
+
+    Precedence: directional → per-symbol → global. Returns (floor, label);
+    floor is None when no rule sets a non-zero requirement (so the 0.0/{}
+    baselines are a true no-op, never logged as a block).
+    """
+    sym_u = symbol.upper()
+    side_u = side.upper()
+    dir_cfg = STRUCT_SYMBOL_DIRECTIONAL_CONF.get(sym_u) or {}
+    if side_u in dir_cfg:
+        try:
+            v = float(dir_cfg[side_u])
+            if v > 0.0:
+                return v, f"STRUCT_SYMBOL_DIRECTIONAL_CONF[{sym_u}][{side_u}]"
+        except (TypeError, ValueError):
+            pass
+    if sym_u in STRUCT_SYMBOL_MIN_CONFIDENCE:
+        try:
+            v = float(STRUCT_SYMBOL_MIN_CONFIDENCE[sym_u])
+            if v > 0.0:
+                return v, f"STRUCT_SYMBOL_MIN_CONFIDENCE[{sym_u}]"
+        except (TypeError, ValueError):
+            pass
+    try:
+        v = float(STRUCT_MIN_CONFIDENCE)
+        if v > 0.0:
+            return v, "STRUCT_MIN_CONFIDENCE"
+    except (TypeError, ValueError):
+        pass
+    return None, ""
+
+
 # ── Per-symbol-side blocklist ──────────────────────────────────────────
 # Surgical port (2026-05-11) of the Apr 27 Option-A SYMBOL_SIDE_BLOCKLIST.
 # Loss-attribution agent showed SOL LONG was 69% of the bleed since the
@@ -218,6 +270,8 @@ def _apply_runtime_overrides() -> dict:
     """
     global MIN_CONFIDENCE, SYMBOL_MIN_CONFIDENCE
     global SYMBOL_DIRECTIONAL_CONF, SYMBOL_SIDE_BLOCKLIST
+    global STRUCT_MIN_CONFIDENCE, STRUCT_SYMBOL_MIN_CONFIDENCE
+    global STRUCT_SYMBOL_DIRECTIONAL_CONF
 
     # Escape hatch used by the apply layer / tests to read pristine baseline
     # constants without applying any override.
@@ -244,11 +298,17 @@ def _apply_runtime_overrides() -> dict:
         symbol_min_confidence=SYMBOL_MIN_CONFIDENCE,
         symbol_directional_conf=SYMBOL_DIRECTIONAL_CONF,
         symbol_side_blocklist=SYMBOL_SIDE_BLOCKLIST,
+        struct_min_confidence=STRUCT_MIN_CONFIDENCE,
+        struct_symbol_min_confidence=STRUCT_SYMBOL_MIN_CONFIDENCE,
+        struct_symbol_directional_conf=STRUCT_SYMBOL_DIRECTIONAL_CONF,
     )
     MIN_CONFIDENCE = result["min_confidence"]
     SYMBOL_MIN_CONFIDENCE = result["symbol_min_confidence"]
     SYMBOL_DIRECTIONAL_CONF = result["symbol_directional_conf"]
     SYMBOL_SIDE_BLOCKLIST = result["symbol_side_blocklist"]
+    STRUCT_MIN_CONFIDENCE = result["struct_min_confidence"]
+    STRUCT_SYMBOL_MIN_CONFIDENCE = result["struct_symbol_min_confidence"]
+    STRUCT_SYMBOL_DIRECTIONAL_CONF = result["struct_symbol_directional_conf"]
     return {
         "experiment_id": payload.get("experiment_id") if isinstance(payload, dict) else None,
         "applied": result["applied"],
@@ -2231,6 +2291,23 @@ class HTFLiveBot:
         except Exception:
             return 1.0 / 3.0
 
+    def _snapshot_model_confidence(self) -> Tuple[Optional[str], Optional[float]]:
+        """Best-effort PPO action+confidence snapshot for the current bar.
+
+        Used to stamp `model_confidence` / `model_action` on OPEN rows
+        without affecting any decision (PROFITABILITY_PLAN.md P1.6).
+        Returns (None, None) on any failure — never raises, never blocks.
+        """
+        try:
+            if self.model is None or self._last_df is None:
+                return None, None
+            obs = self.compute_observation(self._last_df)
+            action, confidence = self.get_action(obs)
+            return ACTION_LABELS.get(action), float(confidence)
+        except Exception as exc:  # pragma: no cover — silent best-effort
+            logger.debug("model-confidence snapshot failed: %s", exc)
+            return None, None
+
     # ------------------------------------------------------------------
     # BOS/CHOCH market structure data
     # ------------------------------------------------------------------
@@ -2446,6 +2523,19 @@ class HTFLiveBot:
                 "🚫 Structure-first: skipping %s %s — combo is in SYMBOL_SIDE_BLOCKLIST "
                 "(historical net-negative expectancy)",
                 self.symbol, side_str,
+            )
+            return None
+
+        # Structure-confidence floor (PROFITABILITY_PLAN.md P1).
+        # Precedence: directional → per-symbol → global. Mirrors the harness
+        # _block_reason order so live and replay agree. Baselines 0.0/{}
+        # mean nothing is blocked — see STRUCT_* constants near top.
+        struct_conf = float(sig.get("confidence", 0.0) or 0.0)
+        floor, floor_label = _resolve_struct_floor(self.symbol, side_str)
+        if floor is not None and struct_conf < floor:
+            logger.info(
+                "🚫 STRUCT_CONF floor: %s %s conf=%.3f < %.3f (%s) — SKIP entry",
+                self.symbol, side_str, struct_conf, floor, floor_label,
             )
             return None
 
@@ -3222,6 +3312,14 @@ class HTFLiveBot:
             actual_margin = notional / leverage
             logger.info("📐 Adjusted leverage to %dx for safety", leverage)
 
+        # PROFITABILITY_PLAN.md P1.6: dual-confidence snapshot.
+        # `confidence` above stays the structure (BOS/CHOCH) confidence
+        # for schema compatibility. `model_confidence` is the PPO max-
+        # action-probability for the same entry, captured best-effort
+        # so we can compare structure-vs-model expectancy later. Failure
+        # MUST NOT block the entry — store None and move on.
+        model_action_name, model_confidence = self._snapshot_model_confidence()
+
         trade = {
             "action": action_str,
             "symbol": self.symbol,
@@ -3229,6 +3327,8 @@ class HTFLiveBot:
             "units": self.position_units,
             "trade_value": trade_value,
             "confidence": confidence,
+            "model_confidence": model_confidence,
+            "model_action": model_action_name,
             "sl": self.sl_price,
             "tp": self.tp_price,
             "partial_tp1": self.partial_tp1_price,
