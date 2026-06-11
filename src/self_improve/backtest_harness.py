@@ -271,9 +271,32 @@ RECOGNIZED_OVERRIDE_KEYS: frozenset[str] = frozenset({
     "MIN_CONFIDENCE",
     "SYMBOL_MIN_CONFIDENCE",
     "SYMBOL_DIRECTIONAL_CONF",
+    # PROFITABILITY_PLAN.md P1: structure-confidence floors. Replay-mode
+    # filtering is only meaningful for trades after structure-first went
+    # live — see STRUCTURE_FIRST_LIVE_SINCE below.
+    "STRUCT_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_DIRECTIONAL_CONF",
     "SYMBOL_SIDE_BLOCKLIST_ADD",
     "SYMBOL_SIDE_BLOCKLIST",  # alias of SYMBOL_SIDE_BLOCKLIST_ADD
 })
+
+# Timestamp at which STRUCTURE_FIRST_MODE became real on the bots.
+# Recovered from git: commit 9fb3ff5 "Fix structure-first entry logic"
+# landed 2026-04-13 10:08:45 UTC and is the first commit whose entry
+# logic matches what's live today. OPEN rows before this had their
+# `confidence` field populated from PPO model output, not BOS/CHOCH —
+# applying a STRUCT_* floor to them is a category error, so the
+# harness refuses (with a loud warning) rather than producing
+# nonsense filtering.
+STRUCTURE_FIRST_LIVE_SINCE = "2026-04-13T10:08:45+00:00"
+
+# The three STRUCT_* keys that are meaningful only after the cutoff above.
+_STRUCT_KEYS = (
+    "STRUCT_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_MIN_CONFIDENCE",
+    "STRUCT_SYMBOL_DIRECTIONAL_CONF",
+)
 
 
 def _block_reason(
@@ -281,7 +304,13 @@ def _block_reason(
 ) -> Optional[str]:
     """Return a human-readable block reason if the pair would be blocked,
     else None. Returns the FIRST matching reason — deterministic order:
-    blocklist → directional → per-symbol-confidence → global-confidence."""
+    blocklist → directional → per-symbol-confidence → global-confidence,
+    then the STRUCT_* floors in the same precedence.
+
+    For pre-STRUCTURE_FIRST_LIVE_SINCE pairs the recorded confidence is
+    PPO model output, so the STRUCT_* family is intentionally NOT applied
+    to them (run_backtest emits a calibration warning when this happens).
+    """
 
     blocklist = (
         overrides.get("SYMBOL_SIDE_BLOCKLIST_ADD")
@@ -320,6 +349,38 @@ def _block_reason(
         if pair.confidence < threshold:
             return (
                 f"global_min_conf conf={pair.confidence:.3f}<{threshold:.3f}"
+            )
+
+    # STRUCT_* family — only valid for post-cutoff pairs.
+    if pair.open_ts < STRUCTURE_FIRST_LIVE_SINCE:
+        return None
+
+    struct_dir = overrides.get("STRUCT_SYMBOL_DIRECTIONAL_CONF") or {}
+    sd_cfg = struct_dir.get(pair.symbol)
+    if sd_cfg:
+        thr = sd_cfg.get(pair.side.upper())
+        if thr is not None and pair.confidence < float(thr):
+            return (
+                f"struct_directional_floor:{pair.symbol}/{pair.side} "
+                f"conf={pair.confidence:.3f}<{float(thr):.3f}"
+            )
+
+    struct_sym = overrides.get("STRUCT_SYMBOL_MIN_CONFIDENCE") or {}
+    if pair.symbol in struct_sym:
+        thr = float(struct_sym[pair.symbol])
+        if pair.confidence < thr:
+            return (
+                f"struct_per_symbol_min_conf:{pair.symbol} "
+                f"conf={pair.confidence:.3f}<{thr:.3f}"
+            )
+
+    struct_global = overrides.get("STRUCT_MIN_CONFIDENCE")
+    if struct_global is not None:
+        thr = float(struct_global)
+        if pair.confidence < thr:
+            return (
+                f"struct_global_min_conf "
+                f"conf={pair.confidence:.3f}<{thr:.3f}"
             )
 
     return None
@@ -363,6 +424,25 @@ def run_backtest(req: BacktestRequest) -> BacktestResult:
             end_date=req.end_date,
             symbols=req.symbols,
         )
+
+    # PROFITABILITY_PLAN.md P1: a STRUCT_* override is meaningful only
+    # for trades opened after structure-first went live. Loudly warn if
+    # the requested window straddles the cutoff — the report would
+    # otherwise silently mix model-confidence and structure-confidence
+    # filtering and be misleading.
+    if any(k in req.config_overrides for k in _STRUCT_KEYS):
+        pre_cutoff = sum(
+            1 for p in pairs if p.open_ts < STRUCTURE_FIRST_LIVE_SINCE
+        )
+        if pre_cutoff:
+            warnings.append(
+                f"STRUCT_* override evaluated over a window containing "
+                f"{pre_cutoff} pre-structure-first pairs (cutoff "
+                f"{STRUCTURE_FIRST_LIVE_SINCE}); those pairs were "
+                f"NOT filtered (their recorded confidence is PPO model "
+                f"output, not BOS/CHOCH). Restrict --since to the cutoff "
+                f"or later for a comparable backtest."
+            )
 
     kept_pairs: list[TradePair] = []
     blocked: list[BlockedTrade] = []
