@@ -254,11 +254,19 @@ def _write_report(
         "",
         "## Known limitations of v1",
         "",
-        "* S5 symbol filters (OB-proximity + ADX-directional) are NOT "
-        "  replicated yet — ETH entries will be undercounted.",
-        "* Pre-trade guards (RSI, ADX, exhaustion, USDT.D, ext-pos-news, "
-        "  anti-whipsaw, cooldown, min-hold) NOT applied — sim entries "
-        "  may be over-counted vs live where these guards block.",
+        "* S5 symbol filters (OB-proximity + ADX-directional) ARE now "
+        "  replicated (P2.D part 1) — the ETH-zero-entries bug is fixed.",
+        "* Replayable pre-trade guards (structure-first ADX, exhaustion, "
+        "  RSI) ARE now applied (P2.D part 2). Guards that cannot be "
+        "  replayed offline (USDT.D proxy, ext-pos-news, orderbook) are "
+        "  still assumed-pass — sim may over-count where these block live.",
+        "* Entry TIMING still diverges: even where aggregate counts match, "
+        "  directional agreement on overlapping timestamps is low. Leading "
+        "  suspects: stateful cooldown / min-hold / anti-whipsaw not yet "
+        "  simulated, and live's continuous eval cadence vs the sim's "
+        "  per-bar-close cadence. This is the dominant remaining gap.",
+        "* LONG-side over-production: sim emits more LONG entries than live "
+        "  on BTC/ETH — a LONG-side gate present in live is not replicated.",
         "* Funding accrual not yet wired (P2.E); fees + slippage only.",
         "* No BOS/CHOCH profitable-overlay on exits.",
     ]
