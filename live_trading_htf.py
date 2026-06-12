@@ -53,6 +53,7 @@ from src.data.storage import get_storage
 from src.signals.bos_choch import MarketStructure
 from src.signals.structure_filters import (
     passes_adx_directional,
+    passes_exhaustion_filter,
     passes_ob_proximity,
 )
 
@@ -3024,35 +3025,25 @@ class HTFLiveBot:
                 logger.debug("Regime filter check failed: %s", exc)
 
         # ── Guard: momentum exhaustion filter ──
-        # Don't enter when price is extended far from VWAP (likely to revert)
+        # Don't enter when price is extended far from VWAP (likely to revert).
+        # Delegated to passes_exhaustion_filter (src/signals/structure_filters.py)
+        # so the live bot and the forward simulator (PROFITABILITY_PLAN.md P2)
+        # share one implementation. Behaviour preserved bit-for-bit: same 20-bar
+        # window, same typical-price VWAP, same 14-bar ATR, same threshold; the
+        # helper fail-opens on <20 bars / ATR<=0 / any error exactly as before.
         if action != ACTION_HOLD and self.position == 0 and self._last_df is not None:
-            try:
-                df = self._last_df
-                if len(df) >= 20:
-                    closes = df["close"].values[-20:]
-                    volumes = df["volume"].values[-20:]
-                    # Compute VWAP over last 20 bars
-                    typical_price = (df["high"].values[-20:] + df["low"].values[-20:] + closes) / 3.0
-                    vwap_20 = float(np.sum(typical_price * volumes) / (np.sum(volumes) + 1e-10))
-                    # Compute ATR (14-period) from last 20 bars
-                    highs = df["high"].values[-20:]
-                    lows = df["low"].values[-20:]
-                    tr = np.maximum(highs - lows, np.maximum(
-                        np.abs(highs - np.roll(closes, 1)),
-                        np.abs(lows - np.roll(closes, 1))
-                    ))
-                    atr_14 = float(np.mean(tr[-14:]))
-                    if atr_14 > 0:
-                        extension = abs(current_price - vwap_20) / atr_14
-                        if extension > EXHAUSTION_ATR_THRESHOLD:
-                            direction_str = "LONG" if action == ACTION_LONG else "SHORT"
-                            logger.info(
-                                "🚫 Exhaustion filter: price $%.2f is %.1f ATR from VWAP $%.2f — SKIP %s entry",
-                                current_price, extension, vwap_20, direction_str,
-                            )
-                            return None
-            except Exception as exc:
-                logger.debug("Exhaustion filter check failed: %s", exc)
+            if not passes_exhaustion_filter(
+                self._last_df,
+                current_price=current_price,
+                threshold_atr=EXHAUSTION_ATR_THRESHOLD,
+            ):
+                direction_str = "LONG" if action == ACTION_LONG else "SHORT"
+                logger.info(
+                    "🚫 Exhaustion filter: price $%.2f extended > %.1f ATR "
+                    "from 20-bar VWAP — SKIP %s entry",
+                    current_price, EXHAUSTION_ATR_THRESHOLD, direction_str,
+                )
+                return None
 
         # ── Guard: USDT.D rising → block LONG ──
         # Block LONG entries when stablecoin dominance is rising (capital

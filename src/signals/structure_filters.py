@@ -5,16 +5,26 @@ the live bot and the forward simulator call the same code. Every
 helper is deterministic — same DataFrame in → same answer out — and
 has no logging side effects.
 
-These helpers MIRROR the live logic so the forward simulator can call
-them today; the live bot still inlines its own copies. Wiring the live
-bot to delegate here (so there is a single source of truth) is a
-pending step tracked in PROFITABILITY_PLAN.md §3/P2 — until that lands,
-the calibration gate is what proves the mirror has not drifted from:
-  * the S5 block at live_trading_htf._get_structure_direction
-    (``passes_ob_proximity`` / ``passes_adx_directional``);
-  * the pre-trade guards in ``execute_trade``
-    (``passes_structure_first_adx`` / ``passes_exhaustion_filter`` /
-    ``passes_rsi_guard``).
+Two classes of helper live here:
+
+1. Shared by the live bot AND the simulator (single source of truth —
+   the live bot calls these directly, behaviour preserved bit-for-bit):
+     * ``passes_ob_proximity`` / ``passes_adx_directional`` — the S5
+       block at live_trading_htf._get_structure_direction;
+     * ``passes_exhaustion_filter`` — the momentum-exhaustion guard in
+       live_trading_htf.execute_trade.
+
+2. Simulator-only OFFLINE MIRRORS of guards the live bot computes from
+   sources the sim cannot replay (the live regime detector's Wilder ADX,
+   the live signals bundle's RSI, plus trend-aware bands and the
+   confidence-based rescue override). The live bot does NOT call these —
+   delegating to them would change live decisions. They exist so the sim
+   can approximate those guards; the calibration gate measures the drift:
+     * ``passes_structure_first_adx`` — mirrors execute_trade's
+       structure-first ADX block (live reads regime_detector ADX);
+     * ``passes_rsi_guard`` — mirrors the RSI half of
+       _check_rsi_adx_guard (live reads the 15m signals bundle and adds
+       trend-loosened bands + rescue override, neither replicated here).
 """
 
 from __future__ import annotations

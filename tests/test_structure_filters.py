@@ -188,6 +188,62 @@ def test_exhaustion_fail_open_too_few_bars() -> None:
     ) is True
 
 
+def _legacy_exhaustion_allows(df, current_price, threshold) -> bool:
+    """Verbatim copy of the OLD inline execute_trade exhaustion block
+    (live_trading_htf lines ~3026-3055, pre-delegation). Returns True if
+    the trade was ALLOWED (i.e. NOT blocked) — used to prove the helper
+    is a bit-for-bit no-op replacement of the inlined logic.
+    """
+    if df is None or len(df) < 20:
+        return True  # too few bars → block never ran → allowed
+    try:
+        closes = df["close"].values[-20:]
+        volumes = df["volume"].values[-20:]
+        typical_price = (df["high"].values[-20:] + df["low"].values[-20:] + closes) / 3.0
+        vwap_20 = float(np.sum(typical_price * volumes) / (np.sum(volumes) + 1e-10))
+        highs = df["high"].values[-20:]
+        lows = df["low"].values[-20:]
+        tr = np.maximum(highs - lows, np.maximum(
+            np.abs(highs - np.roll(closes, 1)),
+            np.abs(lows - np.roll(closes, 1)),
+        ))
+        atr_14 = float(np.mean(tr[-14:]))
+        if atr_14 > 0:
+            extension = abs(current_price - vwap_20) / atr_14
+            if extension > threshold:
+                return False  # blocked
+        return True
+    except Exception:
+        return True  # error → block skipped → allowed
+
+
+def test_exhaustion_matches_legacy_inline() -> None:
+    """The helper must equal the old inline live formula on every fixture
+    (behavior-preserving proof, not assertion — PROFITABILITY_PLAN.md §6)."""
+    rng = np.random.RandomState(7)
+    cases = []
+    # Randomized realistic OHLCV windows of varying length.
+    for n in (19, 20, 21, 30, 50):
+        for _ in range(40):
+            base = rng.uniform(10, 50000)
+            closes = base + rng.normal(0, base * 0.01, n)
+            highs = closes + rng.uniform(0, base * 0.01, n)
+            lows = closes - rng.uniform(0, base * 0.01, n)
+            opens = closes + rng.normal(0, base * 0.005, n)
+            vols = rng.uniform(1, 1000, n)
+            df = pd.DataFrame({"open": opens, "high": highs, "low": lows,
+                               "close": closes, "volume": vols})
+            for probe in (base, base * 1.05, base * 0.95, base * 2.0):
+                cases.append((df, float(probe)))
+    # Plus the degenerate edge cases the live block fail-opens on.
+    cases.append((_ohlc([100]*20, [100]*20, [100]*20, [100]*20), 100.0))  # ATR=0
+    cases.append((None, 100.0))
+    for df, probe in cases:
+        assert passes_exhaustion_filter(
+            df, current_price=probe, threshold_atr=3.0,
+        ) is _legacy_exhaustion_allows(df, probe, 3.0)
+
+
 # ─── RSI band guard ────────────────────────────────────────────────────
 
 
