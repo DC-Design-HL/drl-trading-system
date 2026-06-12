@@ -41,7 +41,10 @@ import pandas as pd
 from src.signals.bos_choch import MarketStructure
 from src.signals.structure_filters import (
     passes_adx_directional,
+    passes_exhaustion_filter,
     passes_ob_proximity,
+    passes_rsi_guard,
+    passes_structure_first_adx,
 )
 
 from .kline_cache import as_ohlcv_df, read_klines
@@ -101,6 +104,10 @@ class ForwardSimConfig:
     # S5 filter constants (mirror live_trading_htf).
     structure_ob_proximity_pct: float = 0.010
     adx_guard_min: float = 20.0
+    # Pre-trade guards (mirror live).
+    exhaustion_atr_threshold: float = 3.0
+    rsi_guard_ob_threshold: float = 70.0
+    rsi_guard_os_threshold: float = 30.0
     # Exit + sizing constants — mirror live_trading_htf defaults.
     stop_loss_pct: float = 0.015
     take_profit_pct: float = 0.030
@@ -179,6 +186,9 @@ class SymbolForwardResult:
     skipped_by_struct_floor: int = 0
     skipped_by_trend: int = 0
     skipped_by_s5_unimplemented: int = 0
+    skipped_by_struct_first_adx: int = 0
+    skipped_by_exhaustion: int = 0
+    skipped_by_rsi: int = 0
     skipped_by_open_position: int = 0   # already in a trade — live can't double up
     runtime_seconds: float = 0.0
 
@@ -220,6 +230,9 @@ class ForwardSimResult:
                     "skipped_by_struct_floor": r.skipped_by_struct_floor,
                     "skipped_by_trend": r.skipped_by_trend,
                     "skipped_by_s5_unimplemented": r.skipped_by_s5_unimplemented,
+                    "skipped_by_struct_first_adx": r.skipped_by_struct_first_adx,
+                    "skipped_by_exhaustion": r.skipped_by_exhaustion,
+                    "skipped_by_rsi": r.skipped_by_rsi,
                     "skipped_by_open_position": r.skipped_by_open_position,
                     "runtime_seconds": r.runtime_seconds,
                     "entries": [
@@ -702,6 +715,9 @@ def _simulate_symbol(
     n_trend = 0
     n_s5_ob = 0       # ETH OB-proximity block (P2.D)
     n_s5_adx = 0      # ETH ADX-directional block (P2.D)
+    n_sf_adx = 0      # structure-first ADX hard block (P2.D)
+    n_exhaustion = 0  # VWAP/ATR exhaustion (P2.D)
+    n_rsi = 0         # RSI band guard (P2.D)
     n_open = 0
     # Track when the current open position is expected to close so we
     # skip decisions inside the trade window — the live bot can only
@@ -786,6 +802,34 @@ def _simulate_symbol(
             n_struct += 1
             continue
 
+        # Pre-trade guards (P2.D part 2). Apply in the same order as
+        # live execute_trade: structure-first ADX → exhaustion → RSI.
+        # The 15m window may be empty (early in cache); helpers
+        # fail-open in that case, matching live behaviour.
+        if len(idx_15m_full) > 0:
+            pos_15m = idx_15m_full.searchsorted(bar_ts, side="right")
+            win_15m = df_15m.iloc[max(0, pos_15m - 100):pos_15m]
+            if not passes_structure_first_adx(
+                win_15m, adx_guard_min=cfg.adx_guard_min,
+            ):
+                n_sf_adx += 1
+                continue
+            if not passes_exhaustion_filter(
+                win_15m,
+                current_price=price,
+                threshold_atr=cfg.exhaustion_atr_threshold,
+            ):
+                n_exhaustion += 1
+                continue
+            if not passes_rsi_guard(
+                win_15m,
+                direction_long=(side == "LONG"),
+                ob_threshold=cfg.rsi_guard_ob_threshold,
+                os_threshold=cfg.rsi_guard_os_threshold,
+            ):
+                n_rsi += 1
+                continue
+
         # price computed above (needed by S5 OB-proximity helper).
         entries.append(EntryEvent(
             ts=bar_ts,
@@ -821,5 +865,8 @@ def _simulate_symbol(
         skipped_by_struct_floor=n_struct,
         skipped_by_trend=n_trend,
         skipped_by_s5_unimplemented=n_s5_ob + n_s5_adx,
+        skipped_by_struct_first_adx=n_sf_adx,
+        skipped_by_exhaustion=n_exhaustion,
+        skipped_by_rsi=n_rsi,
         skipped_by_open_position=n_open,
     )

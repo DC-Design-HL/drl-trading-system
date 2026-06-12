@@ -13,7 +13,10 @@ import pytest
 
 from src.signals.structure_filters import (
     passes_adx_directional,
+    passes_exhaustion_filter,
     passes_ob_proximity,
+    passes_rsi_guard,
+    passes_structure_first_adx,
 )
 
 
@@ -131,3 +134,90 @@ def test_live_bot_imports_helpers() -> None:
     import live_trading_htf as live
     assert live.passes_adx_directional is passes_adx_directional
     assert live.passes_ob_proximity is passes_ob_proximity
+
+
+# ─── Structure-first ADX hard block ────────────────────────────────────
+
+
+def test_struct_first_adx_passes_strong_trend() -> None:
+    n = 35
+    lows = np.full(n, 100.0)
+    highs = np.linspace(105, 115, n)
+    closes = highs - 0.5
+    opens = closes - 0.2
+    df = _ohlc(opens, highs, lows, closes)
+    assert passes_structure_first_adx(df, adx_guard_min=20.0) is True
+
+
+def test_struct_first_adx_blocks_flat() -> None:
+    n = 35
+    df = _ohlc([100]*n, [100.1]*n, [99.9]*n, [100]*n)
+    assert passes_structure_first_adx(df, adx_guard_min=20.0) is False
+
+
+def test_struct_first_adx_fail_open_too_few_bars() -> None:
+    df = _ohlc([100]*10, [101]*10, [99]*10, [100]*10)
+    assert passes_structure_first_adx(df, adx_guard_min=20.0) is True
+
+
+# ─── Exhaustion filter ────────────────────────────────────────────────
+
+
+def test_exhaustion_blocks_far_from_vwap() -> None:
+    n = 25
+    # Tight 100±0.5 series → VWAP≈100, ATR small. Probe price 110 →
+    # extension huge → should block.
+    df = _ohlc([100]*n, [100.5]*n, [99.5]*n, [100]*n)
+    assert passes_exhaustion_filter(
+        df, current_price=110.0, threshold_atr=3.0,
+    ) is False
+
+
+def test_exhaustion_passes_near_vwap() -> None:
+    n = 25
+    df = _ohlc([100]*n, [100.5]*n, [99.5]*n, [100]*n)
+    assert passes_exhaustion_filter(
+        df, current_price=100.2, threshold_atr=3.0,
+    ) is True
+
+
+def test_exhaustion_fail_open_too_few_bars() -> None:
+    df = _ohlc([100]*5, [101]*5, [99]*5, [100]*5)
+    assert passes_exhaustion_filter(
+        df, current_price=200.0, threshold_atr=3.0,
+    ) is True
+
+
+# ─── RSI band guard ────────────────────────────────────────────────────
+
+
+def test_rsi_blocks_long_when_overbought() -> None:
+    n = 30
+    closes = np.linspace(100, 110, n)  # consistently rising → RSI > 70
+    df = _ohlc(closes - 0.1, closes + 0.2, closes - 0.2, closes)
+    assert passes_rsi_guard(
+        df, direction_long=True, ob_threshold=70.0, os_threshold=30.0,
+    ) is False
+
+
+def test_rsi_blocks_short_when_oversold() -> None:
+    n = 30
+    closes = np.linspace(100, 90, n)
+    df = _ohlc(closes + 0.1, closes + 0.2, closes - 0.2, closes)
+    assert passes_rsi_guard(
+        df, direction_long=False, ob_threshold=70.0, os_threshold=30.0,
+    ) is False
+
+
+def test_rsi_neutral_passes_both_sides() -> None:
+    n = 30
+    rng = np.random.default_rng(0)
+    closes = 100 + rng.standard_normal(n) * 0.1
+    df = _ohlc(closes - 0.05, closes + 0.1, closes - 0.1, closes)
+    # RSI near 50 → neither side blocks
+    assert passes_rsi_guard(
+        df, direction_long=True, ob_threshold=70.0, os_threshold=30.0,
+    ) is True
+    assert passes_rsi_guard(
+        df, direction_long=False, ob_threshold=70.0, os_threshold=30.0,
+    ) is True

@@ -1,14 +1,20 @@
-"""Pure helpers for the structure-first S5 entry filters.
+"""Pure helpers for structure-first entry filters.
 
 Extracted from live_trading_htf.py per PROFITABILITY_PLAN.md §3/P2 so
-the live bot and the forward simulator call the same code. Both
-helpers are deterministic — same DataFrame in → same answer out — and
-have no logging side effects.
+the live bot and the forward simulator call the same code. Every
+helper is deterministic — same DataFrame in → same answer out — and
+has no logging side effects.
 
-Live behaviour preserved exactly: the bot's S5 block at
-live_trading_htf._get_structure_direction now delegates to
-``passes_ob_proximity`` and ``passes_adx_directional`` instead of
-inlining the computations.
+These helpers MIRROR the live logic so the forward simulator can call
+them today; the live bot still inlines its own copies. Wiring the live
+bot to delegate here (so there is a single source of truth) is a
+pending step tracked in PROFITABILITY_PLAN.md §3/P2 — until that lands,
+the calibration gate is what proves the mirror has not drifted from:
+  * the S5 block at live_trading_htf._get_structure_direction
+    (``passes_ob_proximity`` / ``passes_adx_directional``);
+  * the pre-trade guards in ``execute_trade``
+    (``passes_structure_first_adx`` / ``passes_exhaustion_filter`` /
+    ``passes_rsi_guard``).
 """
 
 from __future__ import annotations
@@ -128,4 +134,147 @@ def passes_adx_directional(
             return False
         return True
     except Exception:  # noqa: BLE001 — live bot uses bare try/except too
+        return True
+
+
+# ─── Structure-first ADX hard block ────────────────────────────────────
+
+
+def passes_structure_first_adx(
+    df_15m: pd.DataFrame,
+    *,
+    adx_guard_min: float,
+    period: int = 14,
+) -> bool:
+    """Return True if 15m ADX is at or above ``adx_guard_min``.
+
+    Mirrors the structure-first ADX block in live execute_trade
+    (live_trading_htf line ~3010). ADX is computed exactly as the
+    live regime_detector does — Wilder's smoothing collapsed to a
+    simple mean over the last `period` bars of DM/TR (the live
+    regime_detector uses the same approximation in non-trending mode).
+    """
+    if df_15m is None or len(df_15m) < 30:
+        return True  # fail-open, matches live behaviour
+    try:
+        _close = df_15m["close"].values
+        _high = df_15m["high"].values
+        _low = df_15m["low"].values
+        _plus_dm = np.diff(_high[-30:])
+        _minus_dm = -np.diff(_low[-30:])
+        _plus_dm = np.where(
+            (_plus_dm > _minus_dm) & (_plus_dm > 0), _plus_dm, 0,
+        )
+        _minus_dm = np.where(
+            (_minus_dm > _plus_dm) & (_minus_dm > 0), _minus_dm, 0,
+        )
+        _tr = np.maximum(
+            _high[-29:] - _low[-29:],
+            np.maximum(
+                np.abs(_high[-29:] - _close[-30:-1]),
+                np.abs(_low[-29:] - _close[-30:-1]),
+            ),
+        )
+        _atr = float(np.mean(_tr[-period:]))
+        if _atr <= 0:
+            return True
+        _plus_di = 100.0 * float(np.mean(_plus_dm[-period:])) / _atr
+        _minus_di = 100.0 * float(np.mean(_minus_dm[-period:])) / _atr
+        _adx_val = (
+            100.0 * abs(_plus_di - _minus_di)
+            / (_plus_di + _minus_di + 1e-10)
+        )
+        return _adx_val >= adx_guard_min
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# ─── Exhaustion / momentum-extension filter ────────────────────────────
+
+
+def passes_exhaustion_filter(
+    df_15m: pd.DataFrame,
+    *,
+    current_price: float,
+    threshold_atr: float,
+    period: int = 14,
+    window: int = 20,
+) -> bool:
+    """Return True if price is within ``threshold_atr`` ATRs of recent VWAP.
+
+    Mirrors live execute_trade lines ~3030–3055. The 20-bar VWAP is
+    computed from typical-price × volume; ATR is the mean of the last
+    14 true-range bars within that 20-bar slice.
+
+    Fail-open if fewer than ``window`` 15m bars are available, or if
+    ATR collapses to 0 (zero-volume edge case).
+    """
+    if df_15m is None or len(df_15m) < window:
+        return True
+    try:
+        closes = df_15m["close"].values[-window:]
+        volumes = df_15m["volume"].values[-window:]
+        highs = df_15m["high"].values[-window:]
+        lows = df_15m["low"].values[-window:]
+
+        typical_price = (highs + lows + closes) / 3.0
+        vwap = float(np.sum(typical_price * volumes)
+                     / (np.sum(volumes) + 1e-10))
+        tr = np.maximum(
+            highs - lows,
+            np.maximum(
+                np.abs(highs - np.roll(closes, 1)),
+                np.abs(lows - np.roll(closes, 1)),
+            ),
+        )
+        atr = float(np.mean(tr[-period:]))
+        if atr <= 0:
+            return True
+        extension = abs(current_price - vwap) / atr
+        return extension <= threshold_atr
+    except Exception:  # noqa: BLE001
+        return True
+
+
+# ─── RSI band guard ────────────────────────────────────────────────────
+
+
+def passes_rsi_guard(
+    df_15m: pd.DataFrame,
+    *,
+    direction_long: bool,
+    ob_threshold: float,
+    os_threshold: float,
+    period: int = 14,
+) -> bool:
+    """Return True if 15m RSI does NOT block the trade.
+
+    Live (live_trading_htf line ~1636): LONG is blocked when 15m
+    RSI > ob_threshold (overbought); SHORT is blocked when RSI <
+    os_threshold (oversold). Live computes RSI from the mtf signals
+    bundle; the sim computes it directly from the 15m closes using
+    Wilder's smoothing approximation (mean of gain / loss over period).
+
+    Fail-open if fewer than `period+1` bars available.
+    """
+    if df_15m is None or len(df_15m) < period + 1:
+        return True
+    try:
+        closes = df_15m["close"].values
+        delta = np.diff(closes)
+        gain = np.where(delta > 0, delta, 0.0)
+        loss = np.where(delta < 0, -delta, 0.0)
+        avg_gain = float(np.mean(gain[-period:]))
+        avg_loss = float(np.mean(loss[-period:]))
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+        if direction_long and rsi > ob_threshold:
+            return False
+        if (not direction_long) and rsi < os_threshold:
+            return False
+        return True
+    except Exception:  # noqa: BLE001
         return True

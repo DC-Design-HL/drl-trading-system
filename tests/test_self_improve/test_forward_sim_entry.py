@@ -125,6 +125,8 @@ def test_run_forward_sim_smoke(tmp_path: Path) -> None:
     total_skipped = (
         sym.skipped_by_trend + sym.skipped_by_blocklist
         + sym.skipped_by_struct_floor + sym.skipped_by_s5_unimplemented
+        + sym.skipped_by_struct_first_adx
+        + sym.skipped_by_exhaustion + sym.skipped_by_rsi
     )
     assert total_skipped + len(sym.entries) == sym.n_decisions
 
@@ -175,6 +177,8 @@ def test_run_forward_sim_eth_s5_runs(tmp_path: Path) -> None:
     total_skipped = (
         sym.skipped_by_trend + sym.skipped_by_blocklist
         + sym.skipped_by_struct_floor + sym.skipped_by_s5_unimplemented
+        + sym.skipped_by_struct_first_adx
+        + sym.skipped_by_exhaustion + sym.skipped_by_rsi
     )
     assert total_skipped + len(sym.entries) == sym.n_decisions
 
