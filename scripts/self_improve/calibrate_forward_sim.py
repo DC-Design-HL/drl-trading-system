@@ -399,7 +399,10 @@ def _write_report(
         "* Residuals vs live: RSI *value* is a kline proxy (live reads it "
         "  from the API signals bundle) and the conf>=0.90 rescue override "
         "  is not replayed (needs model conf + order-flow/whale/mtf signals).",
-        "* Funding accrual not yet wired (P2.E); fees + slippage only.",
+        "* Funding IS accrued (P2.E): per 8h boundary on entry notional, "
+        "  LONG pays / SHORT receives. Magnitude is small (sub-dollar per "
+        "  trade); the PnL ratio moves more from the rolling now() window "
+        "  pulling a slightly different live+sim trade set each run.",
         "* No BOS/CHOCH profitable-overlay on exits.",
     ]
     output.parent.mkdir(parents=True, exist_ok=True)

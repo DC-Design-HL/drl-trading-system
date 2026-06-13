@@ -1,8 +1,8 @@
 # Forward-Simulator Calibration Report
 
-**Generated:** 2026-06-13T08:44:18.043999+00:00  
+**Generated:** 2026-06-13T09:38:03.282502+00:00  
 **Window:** 2026-05-30 → 2026-06-13 (2 weeks)  
-**Sim runtime:** 448.5s  
+**Sim runtime:** 456.1s  
 
 ## Gate criteria — Option B (PROFITABILITY_PLAN.md §3/P2,
 ## redefined 2026-06-13, see docs/forward_sim_gate_redefinition.md)
@@ -20,20 +20,20 @@ _Time-match window: ±30 min. Denominator excludes entries where the sim was hol
 
 | Combo | Co-decided | Matched | Agreement | Excluded |
 |---|---:|---:|---:|---:|
-| BTCUSDT LONG | 2 | 1 | 50.0% | 2 |
-| BTCUSDT SHORT | 30 | 26 | 86.7% | 16 |
+| BTCUSDT LONG | 2 | 2 | 100.0% | 2 |
+| BTCUSDT SHORT | 27 | 22 | 81.5% | 19 |
 | ETHUSDT LONG | 4 | 4 | 100.0% | 4 |
-| ETHUSDT SHORT | 27 | 26 | 96.3% | 14 |
-| SOLUSDT SHORT | 26 | 21 | 80.8% | 14 |
-| **overall** | 89 | 78 | **87.6%** | 50 |
+| ETHUSDT SHORT | 25 | 23 | 92.0% | 16 |
+| SOLUSDT SHORT | 27 | 24 | 88.9% | 13 |
+| **overall** | 85 | 75 | **88.2%** | 54 |
 
 **GATE 1: PASS ✅** (threshold ≥ 80%)
 
 ## GATE 2 — Net PnL
 
 - Live: **$+518.06**
-- Sim:  **$+701.46**
-- Ratio (sim / live): **1.35**
+- Sim:  **$+487.91**
+- Ratio (sim / live): **0.94**
 - Sign match: **✅**
 
 **GATE 2: PASS ✅**
@@ -44,14 +44,14 @@ _Time-match window: ±30 min. Denominator excludes entries where the sim was hol
 
 | Combo | Live | Sim | Δ% | Within ±30% |
 |---|---:|---:|---:|:--:|
-| BTCUSDT LONG | 4 | 9 | 125.0% | ❌ |
-| BTCUSDT SHORT | 46 | 48 | 4.3% | ✅ |
-| ETHUSDT LONG | 8 | 14 | 75.0% | ❌ |
-| ETHUSDT SHORT | 41 | 44 | 7.3% | ✅ |
-| SOLUSDT SHORT | 40 | 69 | 72.5% | ❌ |
+| BTCUSDT LONG | 4 | 8 | 100.0% | ❌ |
+| BTCUSDT SHORT | 46 | 41 | 10.9% | ✅ |
+| ETHUSDT LONG | 8 | 13 | 62.5% | ❌ |
+| ETHUSDT SHORT | 41 | 37 | 9.8% | ✅ |
+| SOLUSDT SHORT | 40 | 64 | 60.0% | ❌ |
 
-- All-live directional agreement (incl. occupancy/cadence gaps): **56.1%**
-- Over-production: **106** sim entries with no live match / 139 live = **0.76×** (sim total 184). Driven by non-replayable live guards; watch for growth.
+- All-live directional agreement (incl. occupancy/cadence gaps): **54.0%**
+- Over-production: **93** sim entries with no live match / 139 live = **0.67×** (sim total 163). Driven by non-replayable live guards; watch for growth.
 
 ## Verdict
 
@@ -67,5 +67,5 @@ _The orchestrator may use forward-sim results as a promotion gate only after thi
 * Per-decision diagnostic (forward_sim_calibration_diagnosis.md)   shows the entry LOGIC is faithful: among live entries where the   sim was free to decide, agreement is ~90%. The residual headline   gap is occupancy drift (sim busy in a different trade, ~23%) +   cadence/data gaps (~16%), NOT entry-logic disagreement (~5%).
 * Occupancy drift is driven by over-production: the sim takes   entries live skipped because live's orderbook / whale / news /   USDT.D guards cannot be replayed offline (assumed-pass). This is   a STRUCTURAL ceiling on timestamp-matched agreement — handled by   the Option B gate (adopted 2026-06-13): co-decided agreement is   the gate, over-production is a watched metric. See   docs/forward_sim_gate_redefinition.md.
 * Residuals vs live: RSI *value* is a kline proxy (live reads it   from the API signals bundle) and the conf>=0.90 rescue override   is not replayed (needs model conf + order-flow/whale/mtf signals).
-* Funding accrual not yet wired (P2.E); fees + slippage only.
+* Funding IS accrued (P2.E): per 8h boundary on entry notional,   LONG pays / SHORT receives. Magnitude is small (sub-dollar per   trade); the PnL ratio moves more from the rolling now() window   pulling a slightly different live+sim trade set each run.
 * No BOS/CHOCH profitable-overlay on exits.
