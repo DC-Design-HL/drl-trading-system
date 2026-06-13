@@ -72,6 +72,76 @@ def test_derive_direction_ranging_skips() -> None:
     assert side is None
 
 
+# ─── Post-close time gates (cooldown / anti-whipsaw, P2.D timing) ────────
+
+_T0 = pd.Timestamp("2026-06-01T00:00:00Z")
+
+
+def test_post_close_no_history_allows() -> None:
+    assert fs._post_close_block(
+        "LONG", _T0, cooldown_until_ts=None, last_close_dir=0,
+        last_close_pnl=0.0, last_close_ts=None, whipsaw_cooldown_hours=2.0,
+    ) is None
+
+
+def test_post_close_cooldown_blocks_all_sides_until_elapsed() -> None:
+    cd_until = _T0 + pd.Timedelta(minutes=30)
+    # Inside the cooldown window → blocked regardless of side.
+    for side in ("LONG", "SHORT"):
+        assert fs._post_close_block(
+            side, _T0 + pd.Timedelta(minutes=10),
+            cooldown_until_ts=cd_until, last_close_dir=-1,
+            last_close_pnl=-5.0, last_close_ts=_T0,
+            whipsaw_cooldown_hours=2.0,
+        ) == "cooldown"
+    # After the cooldown elapses (and no whipsaw reversal) → allowed.
+    assert fs._post_close_block(
+        "SHORT", _T0 + pd.Timedelta(minutes=31),
+        cooldown_until_ts=cd_until, last_close_dir=-1,
+        last_close_pnl=-5.0, last_close_ts=_T0, whipsaw_cooldown_hours=2.0,
+    ) is None
+
+
+def test_post_close_whipsaw_blocks_reversal_after_loss() -> None:
+    # Last close was a LOSING LONG; an opposite SHORT within 2h is whipsaw.
+    assert fs._post_close_block(
+        "SHORT", _T0 + pd.Timedelta(hours=1),
+        cooldown_until_ts=None, last_close_dir=1, last_close_pnl=-3.0,
+        last_close_ts=_T0, whipsaw_cooldown_hours=2.0,
+    ) == "whipsaw"
+    # Same-side (LONG) re-entry is NOT a whipsaw (only the 30m cooldown gates it).
+    assert fs._post_close_block(
+        "LONG", _T0 + pd.Timedelta(hours=1),
+        cooldown_until_ts=None, last_close_dir=1, last_close_pnl=-3.0,
+        last_close_ts=_T0, whipsaw_cooldown_hours=2.0,
+    ) is None
+    # Past the whipsaw window → reversal allowed.
+    assert fs._post_close_block(
+        "SHORT", _T0 + pd.Timedelta(hours=2, minutes=1),
+        cooldown_until_ts=None, last_close_dir=1, last_close_pnl=-3.0,
+        last_close_ts=_T0, whipsaw_cooldown_hours=2.0,
+    ) is None
+
+
+def test_post_close_whipsaw_only_after_a_loss() -> None:
+    # Winning last close → no whipsaw block even on an immediate reversal.
+    assert fs._post_close_block(
+        "SHORT", _T0 + pd.Timedelta(minutes=5),
+        cooldown_until_ts=None, last_close_dir=1, last_close_pnl=+8.0,
+        last_close_ts=_T0, whipsaw_cooldown_hours=2.0,
+    ) is None
+
+
+def test_post_close_cooldown_takes_precedence_over_whipsaw() -> None:
+    # Both would fire; live checks cooldown first, so 'cooldown' wins.
+    assert fs._post_close_block(
+        "SHORT", _T0 + pd.Timedelta(minutes=10),
+        cooldown_until_ts=_T0 + pd.Timedelta(minutes=30),
+        last_close_dir=1, last_close_pnl=-3.0, last_close_ts=_T0,
+        whipsaw_cooldown_hours=2.0,
+    ) == "cooldown"
+
+
 # ─── End-to-end smoke over a synthetic cache ────────────────────────────
 
 
@@ -127,6 +197,7 @@ def test_run_forward_sim_smoke(tmp_path: Path) -> None:
         + sym.skipped_by_struct_floor + sym.skipped_by_s5_unimplemented
         + sym.skipped_by_struct_first_adx
         + sym.skipped_by_exhaustion + sym.skipped_by_rsi
+        + sym.skipped_by_cooldown + sym.skipped_by_whipsaw
     )
     assert total_skipped + len(sym.entries) == sym.n_decisions
 
@@ -179,6 +250,7 @@ def test_run_forward_sim_eth_s5_runs(tmp_path: Path) -> None:
         + sym.skipped_by_struct_floor + sym.skipped_by_s5_unimplemented
         + sym.skipped_by_struct_first_adx
         + sym.skipped_by_exhaustion + sym.skipped_by_rsi
+        + sym.skipped_by_cooldown + sym.skipped_by_whipsaw
     )
     assert total_skipped + len(sym.entries) == sym.n_decisions
 

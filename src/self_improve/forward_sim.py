@@ -108,6 +108,14 @@ class ForwardSimConfig:
     exhaustion_atr_threshold: float = 3.0
     rsi_guard_ob_threshold: float = 70.0
     rsi_guard_os_threshold: float = 30.0
+    # Stateful post-close time gates (mirror live_trading_htf
+    # COOLDOWN_SECONDS / WHIPSAW_COOLDOWN_HOURS). After a LOSING close the
+    # live bot blocks ALL entries for cooldown_seconds and any OPPOSITE-side
+    # (whipsaw) entry for whipsaw_cooldown_hours. The sim only ever decides
+    # while flat (it holds one position to exit), so live's in-position
+    # min-hold guard never applies here and is intentionally not modelled.
+    cooldown_seconds: float = 1800.0
+    whipsaw_cooldown_hours: float = 2.0
     # Exit + sizing constants — mirror live_trading_htf defaults.
     stop_loss_pct: float = 0.015
     take_profit_pct: float = 0.030
@@ -189,6 +197,8 @@ class SymbolForwardResult:
     skipped_by_struct_first_adx: int = 0
     skipped_by_exhaustion: int = 0
     skipped_by_rsi: int = 0
+    skipped_by_cooldown: int = 0        # post-loss cooldown (P2.D timing)
+    skipped_by_whipsaw: int = 0         # anti-whipsaw reversal (P2.D timing)
     skipped_by_open_position: int = 0   # already in a trade — live can't double up
     runtime_seconds: float = 0.0
 
@@ -233,6 +243,8 @@ class ForwardSimResult:
                     "skipped_by_struct_first_adx": r.skipped_by_struct_first_adx,
                     "skipped_by_exhaustion": r.skipped_by_exhaustion,
                     "skipped_by_rsi": r.skipped_by_rsi,
+                    "skipped_by_cooldown": r.skipped_by_cooldown,
+                    "skipped_by_whipsaw": r.skipped_by_whipsaw,
                     "skipped_by_open_position": r.skipped_by_open_position,
                     "runtime_seconds": r.runtime_seconds,
                     "entries": [
@@ -686,6 +698,43 @@ def run_forward_sim(
     )
 
 
+def _post_close_block(
+    side: str,
+    bar_ts: pd.Timestamp,
+    *,
+    cooldown_until_ts: Optional[pd.Timestamp],
+    last_close_dir: int,
+    last_close_pnl: float,
+    last_close_ts: Optional[pd.Timestamp],
+    whipsaw_cooldown_hours: float,
+) -> Optional[str]:
+    """Name of the post-close time gate blocking an entry at ``bar_ts``,
+    or None if allowed.
+
+    Mirrors live_trading_htf.execute_trade lines ~2925-2962, specialised
+    to the sim's always-flat decision point:
+      * 'cooldown' — a losing close set a cooldown that has not elapsed
+        (live COOLDOWN_SECONDS, blocks all sides);
+      * 'whipsaw' — the last close LOST and ``side`` reverses it within
+        ``whipsaw_cooldown_hours`` (live WHIPSAW_COOLDOWN_HOURS, opposite
+        side only).
+    Live's min-hold guard is intentionally omitted: it only fires while in
+    a position, and the sim never evaluates an entry while holding one.
+    """
+    if cooldown_until_ts is not None and bar_ts < cooldown_until_ts:
+        return "cooldown"
+    if last_close_dir != 0 and last_close_pnl < 0 and last_close_ts is not None:
+        would_reverse = (
+            (last_close_dir == 1 and side == "SHORT")
+            or (last_close_dir == -1 and side == "LONG")
+        )
+        if would_reverse:
+            hours_since = (bar_ts - last_close_ts).total_seconds() / 3600.0
+            if hours_since < whipsaw_cooldown_hours:
+                return "whipsaw"
+    return None
+
+
 def _simulate_symbol(
     *,
     symbol: str,
@@ -719,10 +768,20 @@ def _simulate_symbol(
     n_exhaustion = 0  # VWAP/ATR exhaustion (P2.D)
     n_rsi = 0         # RSI band guard (P2.D)
     n_open = 0
+    n_cooldown = 0    # post-loss cooldown gate (P2.D timing)
+    n_whipsaw = 0     # anti-whipsaw reversal gate (P2.D timing)
     # Track when the current open position is expected to close so we
     # skip decisions inside the trade window — the live bot can only
     # hold one position per symbol at a time.
     next_free_ts: Optional[pd.Timestamp] = None
+    # Stateful post-close gates (mirror live last_loss_time / last_close_*).
+    # cooldown_until_ts is set only on a LOSING close (never explicitly
+    # cleared — a stale past value compares harmlessly, exactly like live's
+    # last_loss_time). last_close_* are updated on every close for whipsaw.
+    cooldown_until_ts: Optional[pd.Timestamp] = None
+    last_close_dir: int = 0          # +1 LONG, -1 SHORT, 0 none yet
+    last_close_pnl: float = 0.0
+    last_close_ts: Optional[pd.Timestamp] = None
 
     # Restrict the 5m frame to the decision window and snap to the cadence.
     decisions_5m = df_5m[(df_5m.index >= start_ts) & (df_5m.index <= end_ts)]
@@ -802,6 +861,25 @@ def _simulate_symbol(
             n_struct += 1
             continue
 
+        # Stateful post-close time gates (cooldown / anti-whipsaw). Live
+        # applies these at the top of execute_trade — after the structure
+        # decision + blocklist + floor (phase 1) and before the
+        # structure-first ADX / exhaustion / RSI guards (phase 2).
+        gate = _post_close_block(
+            side, bar_ts,
+            cooldown_until_ts=cooldown_until_ts,
+            last_close_dir=last_close_dir,
+            last_close_pnl=last_close_pnl,
+            last_close_ts=last_close_ts,
+            whipsaw_cooldown_hours=cfg.whipsaw_cooldown_hours,
+        )
+        if gate == "cooldown":
+            n_cooldown += 1
+            continue
+        if gate == "whipsaw":
+            n_whipsaw += 1
+            continue
+
         # Pre-trade guards (P2.D part 2). Apply in the same order as
         # live execute_trade: structure-first ADX → exhaustion → RSI.
         # The 15m window may be empty (early in cache); helpers
@@ -855,6 +933,15 @@ def _simulate_symbol(
         if trade is not None:
             trades.append(trade)
             next_free_ts = trade.exit_ts
+            # Update post-close state (mirror live). Whipsaw needs the last
+            # close on every trade; cooldown is armed only on a loss.
+            last_close_ts = trade.exit_ts
+            last_close_dir = 1 if side == "LONG" else -1
+            last_close_pnl = trade.realized_pnl_usd
+            if trade.realized_pnl_usd < 0:
+                cooldown_until_ts = trade.exit_ts + pd.Timedelta(
+                    seconds=cfg.cooldown_seconds
+                )
 
     return SymbolForwardResult(
         symbol=symbol,
@@ -868,5 +955,7 @@ def _simulate_symbol(
         skipped_by_struct_first_adx=n_sf_adx,
         skipped_by_exhaustion=n_exhaustion,
         skipped_by_rsi=n_rsi,
+        skipped_by_cooldown=n_cooldown,
+        skipped_by_whipsaw=n_whipsaw,
         skipped_by_open_position=n_open,
     )
