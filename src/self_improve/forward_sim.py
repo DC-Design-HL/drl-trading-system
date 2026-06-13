@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
 
 from src.features.regime_detector import MarketRegime, MarketRegimeDetector
@@ -47,7 +48,7 @@ from src.signals.structure_filters import (
     passes_rsi_guard,
 )
 
-from .kline_cache import as_ohlcv_df, read_klines
+from .kline_cache import as_ohlcv_df, read_funding, read_klines
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,7 @@ class ForwardSimResult:
                             "realized_pnl_usd": t.realized_pnl_usd,
                             "gross_pnl_usd": t.gross_pnl_usd,
                             "fees_usd": t.fees_usd,
+                            "funding_usd": t.funding_usd,
                             "slippage_usd": t.slippage_usd,
                             "close_reason": t.close_reason,
                             "partial_tp_hits": t.partial_tp_hits,
@@ -392,6 +394,35 @@ def _compute_notional(cfg: ForwardSimConfig) -> float:
     return min(notional, cfg.fixed_max_notional)
 
 
+def _funding_cost(
+    notional: float,
+    side: str,
+    entry_ns: int,
+    exit_ns: int,
+    funding_ts: Optional[np.ndarray],
+    funding_rates: Optional[np.ndarray],
+) -> float:
+    """Funding PAID by the position over (entry_ns, exit_ns], accrued at
+    each 8h funding timestamp the position is held through (P2.E).
+
+    Convention: a LONG PAYS funding when the rate is positive, a SHORT
+    RECEIVES it — so the value returned is what the position paid (added
+    as a cost, i.e. subtracted from PnL); it is negative when the position
+    was a net receiver. Accrued on the ENTRY notional (a documented
+    simplification — does not shrink the notional after partial TPs; the
+    per-8h amounts are tiny so the error is sub-cent per leg).
+    ``funding_ts`` must be ascending nanosecond timestamps.
+    """
+    if funding_ts is None or len(funding_ts) == 0:
+        return 0.0
+    lo = int(np.searchsorted(funding_ts, entry_ns, side="right"))
+    hi = int(np.searchsorted(funding_ts, exit_ns, side="right"))
+    if hi <= lo:
+        return 0.0
+    rate_sum = float(funding_rates[lo:hi].sum())
+    return notional * rate_sum * (1.0 if side == "LONG" else -1.0)
+
+
 def simulate_position(
     *,
     symbol: str,
@@ -401,6 +432,8 @@ def simulate_position(
     confidence: float,
     df_5m: pd.DataFrame,
     cfg: ForwardSimConfig,
+    funding_ts: Optional[np.ndarray] = None,
+    funding_rates: Optional[np.ndarray] = None,
 ) -> Optional[TradeResult]:
     """Walk 5m bars forward from entry_ts and apply the live exit stack.
 
@@ -594,14 +627,17 @@ def simulate_position(
 
     # Costs: fees on entry + on each closed leg (approximation: sum of
     # closed notionals × fee_pct each side). Slippage as 1 bp of entry +
-    # exit notional. Funding accrues per 8h boundary crossed — added in
-    # P2.E once the funding cache is wired through here.
+    # exit notional. Funding accrues per 8h boundary crossed (P2.E).
     entry_fee = notional * cfg.taker_fee_pct
     exit_notional = abs(close_price) * initial_units
     exit_fee = exit_notional * cfg.taker_fee_pct
     fees = entry_fee + exit_fee
     slippage = (notional + exit_notional) * (cfg.slippage_bps / 10000.0)
-    realized_net = realized_gross - fees - slippage
+    funding = _funding_cost(
+        notional, side, entry_ts.value, close_ts.value,
+        funding_ts, funding_rates,
+    )
+    realized_net = realized_gross - fees - slippage - funding
 
     return TradeResult(
         symbol=symbol,
@@ -615,7 +651,7 @@ def simulate_position(
         realized_pnl_usd=realized_net,
         gross_pnl_usd=realized_gross,
         fees_usd=fees,
-        funding_usd=0.0,  # populated in P2.E
+        funding_usd=funding,
         slippage_usd=slippage,
         close_reason=close_reason,
         partial_tp_hits=partial_hits,
@@ -689,6 +725,16 @@ def run_forward_sim(
             )
             continue
 
+        # Funding cache (P2.E). Empty when the symbol has no funding parquet
+        # (e.g. the synthetic test cache) → funding accrues to 0.
+        fund = read_funding(
+            symbol, start=fetch_start_ns, end=end_ns, base=cache_base)
+        funding_ts = (
+            fund["ts"].to_numpy(dtype="int64") if not fund.empty else None)
+        funding_rates = (
+            fund["funding_rate"].to_numpy(dtype="float64")
+            if not fund.empty else None)
+
         result = _simulate_symbol(
             symbol=symbol,
             df_5m=df_5m_full,
@@ -701,6 +747,8 @@ def run_forward_sim(
             end_ts=_utc_ts(end),
             decision_interval_min=decision_interval_min,
             regime_detector=regime_detector,
+            funding_ts=funding_ts,
+            funding_rates=funding_rates,
             trace=trace,
         )
         result.runtime_seconds = time.perf_counter() - sym_started
@@ -767,6 +815,8 @@ def _simulate_symbol(
     end_ts: pd.Timestamp,
     decision_interval_min: int,
     regime_detector: MarketRegimeDetector,
+    funding_ts: Optional[np.ndarray] = None,
+    funding_rates: Optional[np.ndarray] = None,
     trace: Optional[list] = None,
 ) -> SymbolForwardResult:
     """Walk one symbol's 5m bars and emit entry events.
@@ -990,6 +1040,8 @@ def _simulate_symbol(
             confidence=struct_conf,
             df_5m=df_5m,
             cfg=cfg,
+            funding_ts=funding_ts,
+            funding_rates=funding_rates,
         )
         if trade is not None:
             trades.append(trade)

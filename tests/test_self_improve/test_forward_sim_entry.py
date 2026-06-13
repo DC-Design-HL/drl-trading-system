@@ -142,6 +142,46 @@ def test_post_close_cooldown_takes_precedence_over_whipsaw() -> None:
     ) == "cooldown"
 
 
+# ─── Funding accrual (P2.E) ─────────────────────────────────────────────
+
+# Three 8h funding stamps at 00:00 / 08:00 / 16:00 on 2026-06-01.
+_F_TS = np.array([
+    int(pd.Timestamp("2026-06-01T00:00:00Z").value),
+    int(pd.Timestamp("2026-06-01T08:00:00Z").value),
+    int(pd.Timestamp("2026-06-01T16:00:00Z").value),
+], dtype="int64")
+_F_RATE = np.array([0.0001, 0.0001, 0.0001], dtype="float64")
+_EN = int(pd.Timestamp("2026-05-31T23:00:00Z").value)  # before all three
+
+
+def test_funding_none_is_zero() -> None:
+    assert fs._funding_cost(1000.0, "LONG", _EN, _EN + 1, None, None) == 0.0
+
+
+def test_funding_long_pays_short_receives() -> None:
+    exit_ns = int(pd.Timestamp("2026-06-01T20:00:00Z").value)  # crosses all 3
+    long_cost = fs._funding_cost(1000.0, "LONG", _EN, exit_ns, _F_TS, _F_RATE)
+    short_cost = fs._funding_cost(1000.0, "SHORT", _EN, exit_ns, _F_TS, _F_RATE)
+    # 3 stamps × 0.0001 × 1000 = 0.30; LONG pays it, SHORT receives it.
+    assert long_cost == pytest.approx(0.30)
+    assert short_cost == pytest.approx(-0.30)
+
+
+def test_funding_only_boundaries_inside_window() -> None:
+    # Window (00:30, 12:00] contains only the 08:00 stamp.
+    en = int(pd.Timestamp("2026-06-01T00:30:00Z").value)
+    ex = int(pd.Timestamp("2026-06-01T12:00:00Z").value)
+    cost = fs._funding_cost(1000.0, "LONG", en, ex, _F_TS, _F_RATE)
+    assert cost == pytest.approx(0.10)
+
+
+def test_funding_no_boundary_crossed_is_zero() -> None:
+    # Intra-window with no funding stamp inside.
+    en = int(pd.Timestamp("2026-06-01T09:00:00Z").value)
+    ex = int(pd.Timestamp("2026-06-01T15:00:00Z").value)
+    assert fs._funding_cost(1000.0, "LONG", en, ex, _F_TS, _F_RATE) == 0.0
+
+
 # ─── End-to-end smoke over a synthetic cache ────────────────────────────
 
 
