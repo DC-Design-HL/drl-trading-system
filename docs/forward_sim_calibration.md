@@ -1,8 +1,8 @@
 # Forward-Simulator Calibration Report
 
-**Generated:** 2026-06-12T21:10:40.424066+00:00  
-**Window:** 2026-05-29 → 2026-06-12 (2 weeks)  
-**Sim runtime:** 470.2s  
+**Generated:** 2026-06-13T01:43:09.045110+00:00  
+**Window:** 2026-05-30 → 2026-06-13 (2 weeks)  
+**Sim runtime:** 516.2s  
 
 ## Gate criteria (PROFITABILITY_PLAN.md §3/P2)
 
@@ -14,11 +14,11 @@
 
 | Combo | Live | Sim | Δ% | Within ±30% |
 |---|---:|---:|---:|:--:|
-| BTCUSDT LONG | 4 | 10 | 150.0% | ❌ |
-| BTCUSDT SHORT | 46 | 45 | 2.2% | ✅ |
-| ETHUSDT LONG | 8 | 14 | 75.0% | ❌ |
-| ETHUSDT SHORT | 42 | 31 | 26.2% | ✅ |
-| SOLUSDT SHORT | 41 | 53 | 29.3% | ✅ |
+| BTCUSDT LONG | 4 | 11 | 175.0% | ❌ |
+| BTCUSDT SHORT | 46 | 41 | 10.9% | ✅ |
+| ETHUSDT LONG | 8 | 13 | 62.5% | ❌ |
+| ETHUSDT SHORT | 42 | 30 | 28.6% | ✅ |
+| SOLUSDT SHORT | 40 | 50 | 25.0% | ✅ |
 
 **Entry-count gate: FAIL**
 
@@ -29,19 +29,19 @@ _Time-match window: ±30 minutes_
 | Combo | Live entries | Matched in sim | Agreement |
 |---|---:|---:|---:|
 | BTCUSDT LONG | 4 | 2 | 50.0% |
-| BTCUSDT SHORT | 46 | 22 | 47.8% |
+| BTCUSDT SHORT | 46 | 21 | 45.7% |
 | ETHUSDT LONG | 8 | 1 | 12.5% |
 | ETHUSDT SHORT | 42 | 19 | 45.2% |
-| SOLUSDT SHORT | 41 | 12 | 29.3% |
-| **overall** | — | — | **39.7%** |
+| SOLUSDT SHORT | 40 | 14 | 35.0% |
+| **overall** | — | — | **40.7%** |
 
 **Directional-agreement gate: FAIL** (threshold ≥ 80%)
 
 ## 3. Net PnL
 
-- Live: **$+504.31**
-- Sim:  **$+344.28**
-- Ratio (sim / live): **0.68**
+- Live: **$+517.49**
+- Sim:  **$+430.55**
+- Ratio (sim / live): **0.83**
 - Sign match: **✅**
 
 ## Verdict
@@ -54,7 +54,8 @@ _The orchestrator may use forward-sim results as a promotion gate only after thi
 
 * S5 symbol filters (OB-proximity + ADX-directional) ARE now   replicated (P2.D part 1) — the ETH-zero-entries bug is fixed.
 * Replayable pre-trade guards (structure-first ADX, exhaustion,   RSI) ARE now applied (P2.D part 2). Guards that cannot be   replayed offline (USDT.D proxy, ext-pos-news, orderbook) are   still assumed-pass — sim may over-count where these block live.
-* Entry TIMING still diverges: even where aggregate counts match,   directional agreement on overlapping timestamps is low. Leading   suspects: stateful cooldown / min-hold / anti-whipsaw not yet   simulated, and live's continuous eval cadence vs the sim's   per-bar-close cadence. This is the dominant remaining gap.
+* Stateful post-close gates (cooldown after loss, anti-whipsaw   reversal block) ARE now simulated (P2.D). This improved the net   PnL ratio (0.68→0.83) and tightened entry counts but did NOT move   directional agreement (~40%) — so post-close timing was NOT the main driver.
+* DOMINANT REMAINING GAP — entry-signal divergence: only ~40% of   live entries have a same-side sim entry within ±30min, and ~half   of sim entries land at times live did not trade. The mismatch is   at the entry-decision level, not the post-close gates. Suspects:   (a) the MarketStructure BOS/CHOCH signal firing on different bars   (data-window / cadence-phase differences); (b) live guards that   cannot be replayed offline (orderbook, whale, news, USDT.D) — this   may cap achievable agreement below 80%. Needs a per-decision   diagnostic (sim vs live logs) to localise before the next fix.
 * LONG-side over-production: sim emits more LONG entries than live   on BTC/ETH — a LONG-side gate present in live is not replicated.
 * Funding accrual not yet wired (P2.E); fees + slippage only.
 * No BOS/CHOCH profitable-overlay on exits.

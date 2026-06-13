@@ -260,11 +260,21 @@ def _write_report(
         "  RSI) ARE now applied (P2.D part 2). Guards that cannot be "
         "  replayed offline (USDT.D proxy, ext-pos-news, orderbook) are "
         "  still assumed-pass — sim may over-count where these block live.",
-        "* Entry TIMING still diverges: even where aggregate counts match, "
-        "  directional agreement on overlapping timestamps is low. Leading "
-        "  suspects: stateful cooldown / min-hold / anti-whipsaw not yet "
-        "  simulated, and live's continuous eval cadence vs the sim's "
-        "  per-bar-close cadence. This is the dominant remaining gap.",
+        "* Stateful post-close gates (cooldown after loss, anti-whipsaw "
+        "  reversal block) ARE now simulated (P2.D). This improved the net "
+        "  PnL ratio and tightened entry counts but did NOT move directional "
+        "  agreement (~40%) — so post-close timing was NOT the main driver.",
+        "* DOMINANT REMAINING GAP — entry-signal divergence: only ~40% of "
+        "  live entries have a same-side sim entry within +/-30min, and ~half "
+        "  of sim entries land at times live did not trade. The mismatch is "
+        "  at the entry-decision level, not the post-close gates. Suspects: "
+        "  (a) the MarketStructure BOS/CHOCH signal firing on different bars "
+        "  (data-window / cadence-phase differences between live fetch and "
+        "  the cache walk); (b) live guards that cannot be replayed offline "
+        "  (orderbook, whale, news, USDT.D proxy) blocking/allowing entries "
+        "  the sim cannot predict — this may cap achievable agreement below "
+        "  80%. Needs a per-decision diagnostic (sim vs live logs) to "
+        "  localise before the next fix; do not guess.",
         "* LONG-side over-production: sim emits more LONG entries than live "
         "  on BTC/ETH — a LONG-side gate present in live is not replicated.",
         "* Funding accrual not yet wired (P2.E); fees + slippage only.",
