@@ -145,7 +145,9 @@ def test_post_close_cooldown_takes_precedence_over_whipsaw() -> None:
 # ─── End-to-end smoke over a synthetic cache ────────────────────────────
 
 
-def _seed_synthetic_cache(tmp_path: Path, symbol: str = "BTCUSDT") -> None:
+def _seed_synthetic_cache(
+    tmp_path: Path, symbol: str = "BTCUSDT", seed: int = 42,
+) -> None:
     """Write a small but valid OHLCV cache so run_forward_sim has data
     to walk over. The signal logic itself is tested elsewhere; here we
     only assert the orchestration glue runs end-to-end without errors.
@@ -155,7 +157,7 @@ def _seed_synthetic_cache(tmp_path: Path, symbol: str = "BTCUSDT") -> None:
     n_5m = 14 * 24 * 12
     ts = np.arange(n_5m, dtype=np.int64) * _5M_NS + start_ns
     # Synthetic random-walk OHLCV
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng(seed)
     closes = 100 + np.cumsum(rng.standard_normal(n_5m) * 0.5)
     opens = np.roll(closes, 1); opens[0] = closes[0]
     highs = np.maximum(opens, closes) + np.abs(rng.standard_normal(n_5m))
@@ -283,3 +285,41 @@ def test_determinism(tmp_path: Path) -> None:
     e1 = [(e.ts, e.side, round(e.confidence, 5)) for e in r1.per_symbol["BTCUSDT"].entries]
     e2 = [(e.ts, e.side, round(e.confidence, 5)) for e in r2.per_symbol["BTCUSDT"].entries]
     assert e1 == e2
+
+
+# ─── Golden windows (PROFITABILITY_PLAN.md P2) ──────────────────────────
+#
+# Committed expected metrics over three fixed (symbol, seed, window)
+# combinations. These pin the full entry+exit+PnL pipeline so any
+# unintended behaviour change is caught. The plan calls for "fixed
+# historical windows"; the real kline cache is not committed (large +
+# data/), so we use the deterministic synthetic cache instead — same
+# regression-guard purpose. Regenerate the constants ONLY for an
+# intentional behaviour change, and call it out in the commit.
+
+_GOLDEN = [
+    # (symbol, seed, start, end, n_decisions, n_entries, n_trades, net_pnl)
+    ("BTCUSDT", 42, (2026, 6, 6), (2026, 6, 8), 192, 31, 31, -118.0665),
+    ("BTCUSDT", 7,  (2026, 6, 5), (2026, 6, 9), 286, 21, 21, -333.2550),
+    ("ETHUSDT", 42, (2026, 6, 6), (2026, 6, 9), 192, 5, 5, 11.6667),
+]
+
+
+@pytest.mark.parametrize(
+    "symbol,seed,start,end,n_dec,n_entries,n_trades,net_pnl", _GOLDEN,
+)
+def test_golden_window(
+    tmp_path, symbol, seed, start, end, n_dec, n_entries, n_trades, net_pnl,
+) -> None:
+    _seed_synthetic_cache(tmp_path, symbol=symbol, seed=seed)
+    r = fs.run_forward_sim(
+        symbols=(symbol,),
+        start=datetime(*start, tzinfo=UTC),
+        end=datetime(*end, tzinfo=UTC),
+        cache_base=tmp_path,
+    )
+    sr = r.per_symbol[symbol]
+    assert sr.n_decisions == n_dec
+    assert len(sr.entries) == n_entries
+    assert len(sr.trades) == n_trades
+    assert sr.net_pnl_usd == pytest.approx(net_pnl, abs=1e-3)
