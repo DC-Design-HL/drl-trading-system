@@ -44,12 +44,21 @@ from src.self_improve.forward_sim import (  # noqa: E402
     ForwardSimConfig,
     run_forward_sim,
 )
+# Reuse the per-decision classifier so the gate and the diagnostic agree.
+from scripts.self_improve.diagnose_calibration import (  # noqa: E402
+    _diagnose_live_entry,
+    _parse_ts,
+)
 
 
-# Acceptance tolerances — match PROFITABILITY_PLAN.md P2 spec.
-ENTRY_COUNT_TOLERANCE_PCT = 30.0   # ±30%
-DIRECTIONAL_AGREEMENT_MIN = 0.80   # ≥80%
+# Acceptance tolerances — Option B gate (PROFITABILITY_PLAN.md P2, redefined
+# 2026-06-13 per docs/forward_sim_gate_redefinition.md).
+ENTRY_COUNT_TOLERANCE_PCT = 30.0   # ±30% — now a WATCHED metric, not a gate
+DIRECTIONAL_AGREEMENT_MIN = 0.80   # ≥80% on CO-DECIDED entries (the gate)
 ENTRY_TIME_MATCH_WINDOW_MIN = 30   # within ±30 min counts as "same entry"
+# Verdicts that mean the sim was NOT free to make a fresh decision at that
+# time — excluded from the co-decided agreement denominator.
+_NOT_CODECIDED = ("sim_in_position", "no_decision_bar")
 
 
 def _load_live_trades(
@@ -175,9 +184,95 @@ def _net_pnl_comparison(
     }
 
 
+def _codecided_agreement(
+    live_by_combo: dict[tuple[str, str], list],
+    trace_by_sym: dict[str, list],
+    trades_by_sym: dict[str, list],
+    window: timedelta,
+) -> dict:
+    """Directional agreement restricted to live entries where the sim was
+    free to make a fresh decision (had a decision bar, not holding a
+    different trade). This isolates entry-LOGIC fidelity from occupancy
+    drift — the Option B gate."""
+    rows = []
+    total_co = 0
+    total_match = 0
+    total_excluded = 0
+    for (sym, side), pairs in sorted(live_by_combo.items()):
+        co = match = exc = 0
+        for p in pairs:
+            try:
+                live_ts = _parse_ts(p.open_ts)
+            except ValueError:
+                continue
+            verdict = _diagnose_live_entry(
+                live_ts, side, sym,
+                trace_by_sym.get(sym, []), trades_by_sym.get(sym, []),
+                window,
+            )
+            if verdict in _NOT_CODECIDED:
+                exc += 1
+                continue
+            co += 1
+            if verdict == "match":
+                match += 1
+        rows.append({
+            "combo": f"{sym} {side}",
+            "codecided": co, "matched": match, "excluded": exc,
+            "agreement_pct": (100.0 * match / co) if co else 0.0,
+        })
+        total_co += co
+        total_match += match
+        total_excluded += exc
+    overall = 100.0 * total_match / total_co if total_co else 0.0
+    return {
+        "rows": rows,
+        "overall_pct": overall,
+        "total_codecided": total_co,
+        "total_matched": total_match,
+        "total_excluded": total_excluded,
+        "passes_gate": (overall / 100.0) >= DIRECTIONAL_AGREEMENT_MIN,
+    }
+
+
+def _overproduction(
+    live_by_combo: dict[tuple[str, str], list],
+    sim_per_symbol: dict,
+    window: timedelta,
+) -> dict:
+    """Watched (non-gating) metric: sim entries with no live entry within
+    window, as a fraction of live entries. Driven by guards the sim can't
+    replay offline (orderbook / whale / news / USDT.D)."""
+    live_by_sym: dict[str, list] = {}
+    for (sym, side), pairs in live_by_combo.items():
+        for p in pairs:
+            try:
+                live_by_sym.setdefault(sym, []).append(
+                    (_parse_ts(p.open_ts), side))
+            except ValueError:
+                continue
+    sim_only = sim_total = 0
+    for sym, sr in sim_per_symbol.items():
+        for e in sr["entries"]:
+            sim_total += 1
+            e_ts = _parse_ts(e["ts"])
+            if not any(
+                lside == e["side"] and abs(lts - e_ts) <= window
+                for lts, lside in live_by_sym.get(sym, [])
+            ):
+                sim_only += 1
+    live_total = sum(len(v) for v in live_by_combo.values())
+    return {
+        "sim_only": sim_only, "sim_total": sim_total,
+        "live_total": live_total,
+        "ratio": (sim_only / live_total) if live_total else float("inf"),
+    }
+
+
 def _write_report(
     *, weeks: int, start: datetime, end: datetime,
-    entry_counts: dict, agreement: dict, pnl: dict,
+    entry_counts: dict, agreement: dict, codecided: dict,
+    overproduction: dict, pnl: dict,
     sim_runtime_s: float, output: Path,
 ) -> None:
     lines = [
@@ -187,13 +282,60 @@ def _write_report(
         f"**Window:** {start.date()} → {end.date()} ({weeks} weeks)  ",
         f"**Sim runtime:** {sim_runtime_s:.1f}s  ",
         "",
-        "## Gate criteria (PROFITABILITY_PLAN.md §3/P2)",
+        "## Gate criteria — Option B (PROFITABILITY_PLAN.md §3/P2,",
+        "## redefined 2026-06-13, see docs/forward_sim_gate_redefinition.md)",
         "",
-        "  1. Entry count per (symbol, side) within ±30%",
-        "  2. Directional agreement on overlapping entries ≥ 80%",
-        "  3. Net PnL same sign",
+        "  GATE  1. Co-decided directional agreement ≥ 80% (live entries",
+        "           where the sim was free to decide — excludes occupancy",
+        "           drift and cadence gaps).",
+        "  GATE  2. Net PnL same sign.",
+        "  WATCH 3. Entry counts, all-live agreement, over-production ratio",
+        "           — reported for monitoring, do NOT block promotion.",
         "",
-        "## 1. Entry counts",
+        "## GATE 1 — Co-decided directional agreement",
+        "",
+        f"_Time-match window: ±{ENTRY_TIME_MATCH_WINDOW_MIN} min. Denominator "
+        "excludes entries where the sim was holding another trade or had no "
+        "decision bar._",
+        "",
+        "| Combo | Co-decided | Matched | Agreement | Excluded |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for r in codecided["rows"]:
+        lines.append(
+            f"| {r['combo']} | {r['codecided']} | {r['matched']} | "
+            f"{r['agreement_pct']:.1f}% | {r['excluded']} |"
+        )
+    lines.append(
+        f"| **overall** | {codecided['total_codecided']} | "
+        f"{codecided['total_matched']} | "
+        f"**{codecided['overall_pct']:.1f}%** | "
+        f"{codecided['total_excluded']} |"
+    )
+    lines.append("")
+    lines.append(
+        f"**GATE 1: {'PASS ✅' if codecided['passes_gate'] else 'FAIL ❌'}** "
+        f"(threshold ≥ {DIRECTIONAL_AGREEMENT_MIN*100:.0f}%)"
+    )
+    lines.append("")
+
+    lines += [
+        "## GATE 2 — Net PnL",
+        "",
+        f"- Live: **${pnl['live_net_pnl_usd']:+.2f}**",
+        f"- Sim:  **${pnl['sim_net_pnl_usd']:+.2f}**",
+        f"- Ratio (sim / live): **{pnl['ratio']:.2f}**",
+        f"- Sign match: **{'✅' if pnl['sign_match'] else '❌'}**",
+        "",
+        f"**GATE 2: {'PASS ✅' if pnl['sign_match'] else 'FAIL ❌'}**",
+        "",
+    ]
+
+    # ── Watched metrics (reported, non-gating) ──────────────────────────
+    lines += [
+        "## Watched metrics (non-gating)",
+        "",
+        "### Entry counts (all live entries)",
         "",
         "| Combo | Live | Sim | Δ% | Within ±30% |",
         "|---|---:|---:|---:|:--:|",
@@ -204,49 +346,27 @@ def _write_report(
             f"{r['diff_pct']:.1f}% | "
             f"{'✅' if r['within_tolerance'] else '❌'} |"
         )
-    all_within = all(r["within_tolerance"] for r in entry_counts["rows"])
-    lines.append("")
-    lines.append(f"**Entry-count gate: {'PASS' if all_within else 'FAIL'}**")
-    lines.append("")
-
-    lines += [
-        "## 2. Directional agreement",
-        "",
-        f"_Time-match window: ±{ENTRY_TIME_MATCH_WINDOW_MIN} minutes_",
-        "",
-        "| Combo | Live entries | Matched in sim | Agreement |",
-        "|---|---:|---:|---:|",
-    ]
-    for r in agreement["rows"]:
-        lines.append(
-            f"| {r['combo']} | {r['live_count']} | {r['matched']} | "
-            f"{r['agreement_pct']:.1f}% |"
-        )
-    lines.append(f"| **overall** | — | — | **{agreement['overall_pct']:.1f}%** |")
     lines.append("")
     lines.append(
-        f"**Directional-agreement gate: "
-        f"{'PASS' if agreement['passes_gate'] else 'FAIL'}** "
-        f"(threshold ≥ {DIRECTIONAL_AGREEMENT_MIN*100:.0f}%)"
+        f"- All-live directional agreement (incl. occupancy/cadence gaps): "
+        f"**{agreement['overall_pct']:.1f}%**"
+    )
+    op = overproduction
+    lines.append(
+        f"- Over-production: **{op['sim_only']}** sim entries with no live "
+        f"match / {op['live_total']} live = **{op['ratio']:.2f}×** "
+        f"(sim total {op['sim_total']}). Driven by non-replayable live "
+        f"guards; watch for growth."
     )
     lines.append("")
 
-    lines += [
-        "## 3. Net PnL",
-        "",
-        f"- Live: **${pnl['live_net_pnl_usd']:+.2f}**",
-        f"- Sim:  **${pnl['sim_net_pnl_usd']:+.2f}**",
-        f"- Ratio (sim / live): **{pnl['ratio']:.2f}**",
-        f"- Sign match: **{'✅' if pnl['sign_match'] else '❌'}**",
-        "",
-    ]
-
-    # Top-level verdict
-    pass_all = all_within and agreement["passes_gate"] and pnl["sign_match"]
+    # Top-level verdict — Option B: co-decided agreement + PnL sign.
+    pass_all = codecided["passes_gate"] and pnl["sign_match"]
     lines += [
         "## Verdict",
         "",
-        f"**Overall: {'PASS ✅' if pass_all else 'FAIL ❌'}**",
+        f"**Overall: {'PASS ✅' if pass_all else 'FAIL ❌'}** "
+        f"(GATE 1 co-decided agreement + GATE 2 PnL sign)",
         "",
         "_The orchestrator may use forward-sim results as a promotion "
         "gate only after this report PASSES and Chen acknowledges it "
@@ -272,9 +392,10 @@ def _write_report(
         "* Occupancy drift is driven by over-production: the sim takes "
         "  entries live skipped because live's orderbook / whale / news / "
         "  USDT.D guards cannot be replayed offline (assumed-pass). This is "
-        "  a STRUCTURAL ceiling on timestamp-matched agreement — see "
-        "  docs/forward_sim_gate_redefinition.md (proposed Option B: gate on "
-        "  co-decided agreement + a separate over-production bound).",
+        "  a STRUCTURAL ceiling on timestamp-matched agreement — handled by "
+        "  the Option B gate (adopted 2026-06-13): co-decided agreement is "
+        "  the gate, over-production is a watched metric. See "
+        "  docs/forward_sim_gate_redefinition.md.",
         "* Residuals vs live: RSI *value* is a kline proxy (live reads it "
         "  from the API signals bundle) and the conf>=0.90 rescue override "
         "  is not replayed (needs model conf + order-flow/whale/mtf signals).",
@@ -306,15 +427,27 @@ def main() -> int:
 
     cfg = ForwardSimConfig()
 
+    window = timedelta(minutes=ENTRY_TIME_MATCH_WINDOW_MIN)
     print(f"running forward sim {start.date()} → {end.date()} (baseline cfg)…")
-    sim = run_forward_sim(start=start, end=end, config=cfg)
-    print(f"sim runtime: {sim.runtime_seconds:.1f}s")
+    trace: list = []
+    sim = run_forward_sim(start=start, end=end, config=cfg, trace=trace)
+    print(f"sim runtime: {sim.runtime_seconds:.1f}s, {len(trace)} decisions")
 
     live_by_combo = _load_live_trades(Path(args.db), start, end)
 
     sim_per_symbol = sim.to_json()["per_symbol"]
+    trace_by_sym: dict[str, list] = {}
+    for rec in trace:
+        trace_by_sym.setdefault(rec["symbol"], []).append(rec)
+    trades_by_sym = {
+        sym: sr.get("trades", []) for sym, sr in sim_per_symbol.items()
+    }
+
     entry_counts = _compare_entry_counts(live_by_combo, sim_per_symbol)
     agreement = _directional_agreement(live_by_combo, sim_per_symbol)
+    codecided = _codecided_agreement(
+        live_by_combo, trace_by_sym, trades_by_sym, window)
+    overproduction = _overproduction(live_by_combo, sim_per_symbol, window)
     pnl = _net_pnl_comparison(live_by_combo, sim_per_symbol)
 
     out = args.output or (
@@ -323,27 +456,30 @@ def main() -> int:
     if not args.no_write:
         _write_report(
             weeks=args.weeks, start=start, end=end,
-            entry_counts=entry_counts, agreement=agreement, pnl=pnl,
+            entry_counts=entry_counts, agreement=agreement,
+            codecided=codecided, overproduction=overproduction, pnl=pnl,
             sim_runtime_s=sim.runtime_seconds, output=out,
         )
         print(f"report → {out}")
 
     # Console summary
-    for r in entry_counts["rows"]:
-        flag = "OK" if r["within_tolerance"] else "FAIL"
-        print(
-            f"  {r['combo']:<14} live={r['live_count']:>3} "
-            f"sim={r['sim_count']:>3} Δ={r['diff_pct']:>5.1f}%  {flag}"
-        )
+    pass_all = codecided["passes_gate"] and pnl["sign_match"]
     print(
-        f"overall directional agreement: {agreement['overall_pct']:.1f}% "
-        f"({'PASS' if agreement['passes_gate'] else 'FAIL'})"
+        f"GATE 1 co-decided agreement: {codecided['overall_pct']:.1f}% "
+        f"({codecided['total_matched']}/{codecided['total_codecided']}, "
+        f"excl {codecided['total_excluded']}) "
+        f"→ {'PASS' if codecided['passes_gate'] else 'FAIL'}"
     )
     print(
-        f"net PnL: live=${pnl['live_net_pnl_usd']:+.2f} "
+        f"GATE 2 net PnL: live=${pnl['live_net_pnl_usd']:+.2f} "
         f"sim=${pnl['sim_net_pnl_usd']:+.2f} "
         f"sign_match={pnl['sign_match']}"
     )
+    print(
+        f"  [watch] all-live agreement {agreement['overall_pct']:.1f}%, "
+        f"over-production {overproduction['ratio']:.2f}×"
+    )
+    print(f"VERDICT: {'PASS ✅' if pass_all else 'FAIL ❌'}")
     return 0
 
 

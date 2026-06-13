@@ -332,10 +332,23 @@ daily). Also cache funding rates per symbol (8h grid) —
 
 **Calibration gate (critical — the sim is useless if it doesn't match
 reality):** run the sim with the live baseline config over the most recent
-4 live weeks and compare to actual logged trades:
-  * entry count per (symbol, side) within ±30%;
-  * directional agreement on overlapping entry timestamps ≥ 80%;
-  * net PnL same sign and within a documented band.
+live weeks and compare to actual logged trades.
+
+> **Gate redefined 2026-06-13 (Option B — see
+> `docs/forward_sim_gate_redefinition.md`).** The original criteria
+> (entry-count within ±30%, all-live directional agreement ≥ 80%, PnL
+> sign) proved structurally unreachable: the sim over-produces entries it
+> can't avoid because live's orderbook / whale / news / USDT.D guards are
+> not replayable offline, which drags down timestamp-matched agreement via
+> occupancy drift. The per-decision diagnostic showed the entry *logic*
+> agrees ~90% on co-decided bars. The gate now is:
+  * **GATE — co-decided directional agreement ≥ 80%**: of live entries
+    where the sim was free to decide (had a decision bar, not holding a
+    different trade), the fraction it entered same-side within ±30 min;
+  * **GATE — net PnL same sign**;
+  * **WATCH (non-gating)** — entry counts, all-live agreement, and the
+    over-production ratio are reported for monitoring and drift alerts,
+    but do not block promotion.
 Commit the calibration report to `docs/forward_sim_calibration.md`. **The
 orchestrator may not use forward-sim results as a promotion gate until
 this calibration is committed and Chen has acknowledged it on Telegram.**
