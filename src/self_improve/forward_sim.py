@@ -632,8 +632,15 @@ def run_forward_sim(
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
     cache_base: Optional[Path] = None,
     label: str = "",
+    trace: Optional[list] = None,
 ) -> ForwardSimResult:
-    """Run a deterministic forward simulation for the given window."""
+    """Run a deterministic forward simulation for the given window.
+
+    If ``trace`` is a list, every evaluated decision appends a record
+    ``{"symbol", "ts", "side", "outcome"}`` where ``outcome`` is "entry"
+    or the name of the gate that blocked it. Diagnostic-only; does not
+    affect the simulation result.
+    """
     cfg = config or ForwardSimConfig()
     started = time.perf_counter()
 
@@ -683,6 +690,7 @@ def run_forward_sim(
             start_ts=_utc_ts(start),
             end_ts=_utc_ts(end),
             decision_interval_min=decision_interval_min,
+            trace=trace,
         )
         result.runtime_seconds = time.perf_counter() - sym_started
         per_symbol[symbol] = result
@@ -747,6 +755,7 @@ def _simulate_symbol(
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
     decision_interval_min: int,
+    trace: Optional[list] = None,
 ) -> SymbolForwardResult:
     """Walk one symbol's 5m bars and emit entry events.
 
@@ -801,6 +810,15 @@ def _simulate_symbol(
     idx_1h_full = df_1h.index
     idx_4h_full = df_4h.index
 
+    def _rec(outcome: str, the_side: Optional[str] = None) -> None:
+        # Diagnostic decision trace (no effect when trace is None). bar_ts
+        # is read from the enclosing loop scope at call time.
+        if trace is not None:
+            trace.append({
+                "symbol": symbol, "ts": bar_ts.isoformat(),
+                "side": the_side or "", "outcome": outcome,
+            })
+
     for i in range(0, len(decisions_5m), step):
         bar_ts = decisions_5m.index[i]
         # Live can only hold one position per symbol — skip decisions
@@ -827,6 +845,7 @@ def _simulate_symbol(
         side, reason = derive_direction(sig)
         if side is None:
             n_trend += 1
+            _rec("trend")
             continue
 
         # S5 filters (live: ETH only). Helpers shared with the live bot
@@ -842,6 +861,7 @@ def _simulate_symbol(
                 proximity_pct=cfg.structure_ob_proximity_pct,
             ):
                 n_s5_ob += 1
+                _rec("s5_ob", side)
                 continue
             if not passes_adx_directional(
                 win_15m,
@@ -849,16 +869,19 @@ def _simulate_symbol(
                 adx_guard_min=cfg.adx_guard_min,
             ):
                 n_s5_adx += 1
+                _rec("s5_adx", side)
                 continue
 
         if (symbol, side) in cfg.blocklist:
             n_blocklist += 1
+            _rec("blocklist", side)
             continue
 
         floor, _label = resolve_struct_floor(cfg, symbol, side)
         struct_conf = float(sig.get("confidence", 0.0) or 0.0)
         if floor is not None and struct_conf < floor:
             n_struct += 1
+            _rec("struct_floor", side)
             continue
 
         # Stateful post-close time gates (cooldown / anti-whipsaw). Live
@@ -875,9 +898,11 @@ def _simulate_symbol(
         )
         if gate == "cooldown":
             n_cooldown += 1
+            _rec("cooldown", side)
             continue
         if gate == "whipsaw":
             n_whipsaw += 1
+            _rec("whipsaw", side)
             continue
 
         # Pre-trade guards (P2.D part 2). Apply in the same order as
@@ -891,6 +916,7 @@ def _simulate_symbol(
                 win_15m, adx_guard_min=cfg.adx_guard_min,
             ):
                 n_sf_adx += 1
+                _rec("struct_first_adx", side)
                 continue
             if not passes_exhaustion_filter(
                 win_15m,
@@ -898,6 +924,7 @@ def _simulate_symbol(
                 threshold_atr=cfg.exhaustion_atr_threshold,
             ):
                 n_exhaustion += 1
+                _rec("exhaustion", side)
                 continue
             if not passes_rsi_guard(
                 win_15m,
@@ -906,9 +933,11 @@ def _simulate_symbol(
                 os_threshold=cfg.rsi_guard_os_threshold,
             ):
                 n_rsi += 1
+                _rec("rsi", side)
                 continue
 
         # price computed above (needed by S5 OB-proximity helper).
+        _rec("entry", side)
         entries.append(EntryEvent(
             ts=bar_ts,
             symbol=symbol,
