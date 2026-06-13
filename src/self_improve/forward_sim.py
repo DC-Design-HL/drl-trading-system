@@ -38,13 +38,13 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from src.features.regime_detector import MarketRegime, MarketRegimeDetector
 from src.signals.bos_choch import MarketStructure
 from src.signals.structure_filters import (
     passes_adx_directional,
     passes_exhaustion_filter,
     passes_ob_proximity,
     passes_rsi_guard,
-    passes_structure_first_adx,
 )
 
 from .kline_cache import as_ohlcv_df, read_klines
@@ -108,6 +108,12 @@ class ForwardSimConfig:
     exhaustion_atr_threshold: float = 3.0
     rsi_guard_ob_threshold: float = 70.0
     rsi_guard_os_threshold: float = 30.0
+    # Trend-aware RSI bands (mirror live RSI_GUARD_*_TREND): in a confirmed
+    # strong trend the live bot loosens the RSI ceiling/floor so it stops
+    # fighting the regime. Applied via the live MarketRegimeDetector below.
+    rsi_guard_ob_trend: float = 80.0
+    rsi_guard_os_trend: float = 20.0
+    rsi_guard_trend_adx_min: float = 25.0
     # Stateful post-close time gates (mirror live_trading_htf
     # COOLDOWN_SECONDS / WHIPSAW_COOLDOWN_HOURS). After a LOSING close the
     # live bot blocks ALL entries for cooldown_seconds and any OPPOSITE-side
@@ -655,6 +661,10 @@ def run_forward_sim(
     end_ns = int(end.timestamp() * 1_000_000_000)
 
     ms = MarketStructure(swing_lookback=8)
+    # Same detector the live bot uses (default params) so the sim's
+    # structure-first ADX and trend-aware RSI bands match live exactly,
+    # instead of the earlier simplified kline approximations.
+    regime_detector = MarketRegimeDetector()
     per_symbol: dict[str, SymbolForwardResult] = {}
 
     for symbol in symbols:
@@ -690,6 +700,7 @@ def run_forward_sim(
             start_ts=_utc_ts(start),
             end_ts=_utc_ts(end),
             decision_interval_min=decision_interval_min,
+            regime_detector=regime_detector,
             trace=trace,
         )
         result.runtime_seconds = time.perf_counter() - sym_started
@@ -755,6 +766,7 @@ def _simulate_symbol(
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
     decision_interval_min: int,
+    regime_detector: MarketRegimeDetector,
     trace: Optional[list] = None,
 ) -> SymbolForwardResult:
     """Walk one symbol's 5m bars and emit entry events.
@@ -905,16 +917,26 @@ def _simulate_symbol(
             _rec("whipsaw", side)
             continue
 
-        # Pre-trade guards (P2.D part 2). Apply in the same order as
-        # live execute_trade: structure-first ADX → exhaustion → RSI.
-        # The 15m window may be empty (early in cache); helpers
-        # fail-open in that case, matching live behaviour.
+        # Pre-trade guards (P2.D). Apply in the same order as live
+        # execute_trade: structure-first ADX → exhaustion → RSI. The 15m
+        # window may be empty (early in cache); guards fail-open then.
+        #
+        # ADX and the RSI trend bands now come from the SAME
+        # MarketRegimeDetector the live bot uses (P2.D #1), replacing the
+        # earlier simplified kline approximations that wrongly blocked
+        # ~16% of live entries. Residuals vs live: the RSI *value* is a
+        # kline proxy (live reads it from the API signals bundle, not
+        # reachable offline) and the confidence≥0.90 rescue override is
+        # not replayed (needs model conf + order-flow/whale/mtf signals).
         if len(idx_15m_full) > 0:
             pos_15m = idx_15m_full.searchsorted(bar_ts, side="right")
             win_15m = df_15m.iloc[max(0, pos_15m - 100):pos_15m]
-            if not passes_structure_first_adx(
-                win_15m, adx_guard_min=cfg.adx_guard_min,
-            ):
+            regime_info = regime_detector.detect_regime(win_15m)
+            adx_val = float(regime_info.trend_strength or 0.0)
+            regime = regime_info.regime
+
+            # Structure-first ADX hard block (live: adx_val < ADX_GUARD_MIN).
+            if adx_val < cfg.adx_guard_min:
                 n_sf_adx += 1
                 _rec("struct_first_adx", side)
                 continue
@@ -926,11 +948,21 @@ def _simulate_symbol(
                 n_exhaustion += 1
                 _rec("exhaustion", side)
                 continue
+
+            # Trend-aware RSI bands (mirror live _check_rsi_adx_guard): in a
+            # confirmed strong trend matching our direction, loosen the band.
+            ob_threshold = cfg.rsi_guard_ob_threshold
+            os_threshold = cfg.rsi_guard_os_threshold
+            if adx_val >= cfg.rsi_guard_trend_adx_min:
+                if side == "LONG" and regime == MarketRegime.TRENDING_UP:
+                    ob_threshold = cfg.rsi_guard_ob_trend
+                elif side == "SHORT" and regime == MarketRegime.TRENDING_DOWN:
+                    os_threshold = cfg.rsi_guard_os_trend
             if not passes_rsi_guard(
                 win_15m,
                 direction_long=(side == "LONG"),
-                ob_threshold=cfg.rsi_guard_ob_threshold,
-                os_threshold=cfg.rsi_guard_os_threshold,
+                ob_threshold=ob_threshold,
+                os_threshold=os_threshold,
             ):
                 n_rsi += 1
                 _rec("rsi", side)

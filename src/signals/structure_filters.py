@@ -158,6 +158,12 @@ def passes_structure_first_adx(
 ) -> bool:
     """Return True if 15m ADX is at or above ``adx_guard_min``.
 
+    SUPERSEDED (P2.D #1): the forward simulator no longer calls this — it
+    now uses the live MarketRegimeDetector for ADX so the sim and live
+    agree exactly. Kept only for its unit tests / reference; the simplified
+    Wilder approximation below does NOT match the live regime detector and
+    must not be reintroduced into the sim's entry path.
+
     Mirrors the structure-first ADX block in live execute_trade
     (live_trading_htf line ~3010). ADX is computed exactly as the
     live regime_detector does — Wilder's smoothing collapsed to a
