@@ -260,23 +260,24 @@ def _write_report(
         "  RSI) ARE now applied (P2.D part 2). Guards that cannot be "
         "  replayed offline (USDT.D proxy, ext-pos-news, orderbook) are "
         "  still assumed-pass — sim may over-count where these block live.",
-        "* Stateful post-close gates (cooldown after loss, anti-whipsaw "
-        "  reversal block) ARE now simulated (P2.D). This improved the net "
-        "  PnL ratio and tightened entry counts but did NOT move directional "
-        "  agreement (~40%) — so post-close timing was NOT the main driver.",
-        "* DOMINANT REMAINING GAP — entry-signal divergence: only ~40% of "
-        "  live entries have a same-side sim entry within +/-30min, and ~half "
-        "  of sim entries land at times live did not trade. The mismatch is "
-        "  at the entry-decision level, not the post-close gates. Suspects: "
-        "  (a) the MarketStructure BOS/CHOCH signal firing on different bars "
-        "  (data-window / cadence-phase differences between live fetch and "
-        "  the cache walk); (b) live guards that cannot be replayed offline "
-        "  (orderbook, whale, news, USDT.D proxy) blocking/allowing entries "
-        "  the sim cannot predict — this may cap achievable agreement below "
-        "  80%. Needs a per-decision diagnostic (sim vs live logs) to "
-        "  localise before the next fix; do not guess.",
-        "* LONG-side over-production: sim emits more LONG entries than live "
-        "  on BTC/ETH — a LONG-side gate present in live is not replicated.",
+        "* Stateful post-close gates (cooldown / anti-whipsaw) ARE simulated "
+        "  (P2.D). ADX + trend-aware RSI bands now come from the live "
+        "  MarketRegimeDetector (P2.D #1), not a kline approximation — this "
+        "  lifted directional agreement ~40% -> ~56%.",
+        "* Per-decision diagnostic (forward_sim_calibration_diagnosis.md) "
+        "  shows the entry LOGIC is faithful: among live entries where the "
+        "  sim was free to decide, agreement is ~90%. The residual headline "
+        "  gap is occupancy drift (sim busy in a different trade, ~23%) + "
+        "  cadence/data gaps (~16%), NOT entry-logic disagreement (~5%).",
+        "* Occupancy drift is driven by over-production: the sim takes "
+        "  entries live skipped because live's orderbook / whale / news / "
+        "  USDT.D guards cannot be replayed offline (assumed-pass). This is "
+        "  a STRUCTURAL ceiling on timestamp-matched agreement — see "
+        "  docs/forward_sim_gate_redefinition.md (proposed Option B: gate on "
+        "  co-decided agreement + a separate over-production bound).",
+        "* Residuals vs live: RSI *value* is a kline proxy (live reads it "
+        "  from the API signals bundle) and the conf>=0.90 rescue override "
+        "  is not replayed (needs model conf + order-flow/whale/mtf signals).",
         "* Funding accrual not yet wired (P2.E); fees + slippage only.",
         "* No BOS/CHOCH profitable-overlay on exits.",
     ]
