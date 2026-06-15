@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .runtime_overrides import check_tightening_only
+from .runtime_overrides import check_apply_allowed
 
 UTC = timezone.utc
 
@@ -175,11 +175,13 @@ def _merge_config_changes(
     monotonically at startup, so this only needs to preserve information."""
     out: dict[str, Any] = {k: v for k, v in existing.items()}
     for key, val in new.items():
-        if key in ("SYMBOL_MIN_CONFIDENCE",) and isinstance(val, dict):
+        if key in ("SYMBOL_MIN_CONFIDENCE", "STRUCT_SYMBOL_MIN_CONFIDENCE") \
+                and isinstance(val, dict):
             merged = dict(out.get(key, {}))
             merged.update(val)
             out[key] = merged
-        elif key == "SYMBOL_DIRECTIONAL_CONF" and isinstance(val, dict):
+        elif key in ("SYMBOL_DIRECTIONAL_CONF",
+                     "STRUCT_SYMBOL_DIRECTIONAL_CONF") and isinstance(val, dict):
             merged = {s: dict(d) for s, d in out.get(key, {}).items()}
             for sym, sides in val.items():
                 if isinstance(sides, dict):
@@ -238,14 +240,19 @@ def apply_live(
     if not is_armed(base_dir):
         return ApplyResult(ok=False, reason="autonomy not armed (AUTONOMY_ARMED absent)")
 
+    # P3 two-sided guard: envelope keys are range-checked (either direction),
+    # legacy floors/blocklist stay tighten-only, blocklist-removal + unknown
+    # keys are rejected. baseline=None (source parse failed) still range-checks
+    # envelopes and blocks removals — the loader re-validates at runtime too.
     baseline = read_baseline_constants(repo)
-    if baseline is not None:
-        violations = check_tightening_only(overrides=config_changes, **baseline)
-        if violations:
-            return ApplyResult(
-                ok=False, reason="override is not pure tightening",
-                violations=violations,
-            )
+    violations = check_apply_allowed(
+        overrides=config_changes, baseline_legacy=baseline
+    )
+    if violations:
+        return ApplyResult(
+            ok=False, reason="override rejected by P3 apply guard",
+            violations=violations,
+        )
 
     # Merge into any change already live so successive live experiments
     # accumulate their tightenings instead of clobbering each other. The

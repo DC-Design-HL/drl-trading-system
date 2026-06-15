@@ -277,6 +277,10 @@ def _apply_runtime_overrides() -> dict:
     global SYMBOL_DIRECTIONAL_CONF, SYMBOL_SIDE_BLOCKLIST
     global STRUCT_MIN_CONFIDENCE, STRUCT_SYMBOL_MIN_CONFIDENCE
     global STRUCT_SYMBOL_DIRECTIONAL_CONF
+    # P3 envelope-controlled exit/timing knobs (set via apply_envelopes below).
+    global TRAILING_BREAKEVEN_PCT, TRAILING_DISTANCE_PCT
+    global COOLDOWN_SECONDS, MIN_HOLD_SECONDS, STAGNANT_HOURS
+    global WHIPSAW_COOLDOWN_HOURS, ADX_GUARD_MIN, EXHAUSTION_ATR_THRESHOLD
 
     # Escape hatch used by the apply layer / tests to read pristine baseline
     # constants without applying any override.
@@ -292,13 +296,23 @@ def _apply_runtime_overrides() -> dict:
         return {"error": f"could not read override file: {exc}"}
 
     try:
-        from src.self_improve.runtime_overrides import tighten_overrides
+        from src.self_improve.runtime_overrides import (
+            apply_envelopes,
+            tighten_overrides,
+        )
+        from src.self_improve.safety_envelopes import ENVELOPES
     except Exception as exc:  # pragma: no cover - import safety net
         return {"error": f"could not import runtime_overrides: {exc}"}
 
     overrides = payload.get("config_changes", payload) if isinstance(payload, dict) else {}
+    overrides = overrides if isinstance(overrides, dict) else {}
+
+    # 1. Legacy floors + blocklist — monotonic tightening only. Envelope keys
+    #    (incl. STRUCT_* floors) are excluded here; the envelope path below
+    #    owns them with two-sided semantics, superseding raise-only.
+    non_env = {k: v for k, v in overrides.items() if k not in ENVELOPES}
     result = tighten_overrides(
-        overrides=overrides if isinstance(overrides, dict) else {},
+        overrides=non_env,
         min_confidence=MIN_CONFIDENCE,
         symbol_min_confidence=SYMBOL_MIN_CONFIDENCE,
         symbol_directional_conf=SYMBOL_DIRECTIONAL_CONF,
@@ -311,30 +325,38 @@ def _apply_runtime_overrides() -> dict:
     SYMBOL_MIN_CONFIDENCE = result["symbol_min_confidence"]
     SYMBOL_DIRECTIONAL_CONF = result["symbol_directional_conf"]
     SYMBOL_SIDE_BLOCKLIST = result["symbol_side_blocklist"]
-    STRUCT_MIN_CONFIDENCE = result["struct_min_confidence"]
-    STRUCT_SYMBOL_MIN_CONFIDENCE = result["struct_symbol_min_confidence"]
-    STRUCT_SYMBOL_DIRECTIONAL_CONF = result["struct_symbol_directional_conf"]
+
+    # 2. Envelope keys — two-sided, range-checked. Out-of-range values are
+    #    skipped (logged) and the committed baseline is preserved. The
+    #    envelope key names ARE the live global names, so we assign straight
+    #    back into module globals.
+    env_current = {
+        "STRUCT_MIN_CONFIDENCE": STRUCT_MIN_CONFIDENCE,
+        "STRUCT_SYMBOL_MIN_CONFIDENCE": STRUCT_SYMBOL_MIN_CONFIDENCE,
+        "STRUCT_SYMBOL_DIRECTIONAL_CONF": STRUCT_SYMBOL_DIRECTIONAL_CONF,
+        "TRAILING_DISTANCE_PCT": TRAILING_DISTANCE_PCT,
+        "TRAILING_BREAKEVEN_PCT": TRAILING_BREAKEVEN_PCT,
+        "STAGNANT_HOURS": STAGNANT_HOURS,
+        "COOLDOWN_SECONDS": COOLDOWN_SECONDS,
+        "MIN_HOLD_SECONDS": MIN_HOLD_SECONDS,
+        "WHIPSAW_COOLDOWN_HOURS": WHIPSAW_COOLDOWN_HOURS,
+        "ADX_GUARD_MIN": ADX_GUARD_MIN,
+        "EXHAUSTION_ATR_THRESHOLD": EXHAUSTION_ATR_THRESHOLD,
+    }
+    env_result = apply_envelopes(overrides=overrides, current=env_current)
+    globals().update(env_result["values"])
+
     return {
         "experiment_id": payload.get("experiment_id") if isinstance(payload, dict) else None,
-        "applied": result["applied"],
-        "skipped": result["skipped"],
+        "applied": result["applied"] + env_result["applied"],
+        "skipped": result["skipped"] + env_result["skipped"],
     }
 
 
-_RUNTIME_OVERRIDE_SUMMARY = _apply_runtime_overrides()
-if _RUNTIME_OVERRIDE_SUMMARY.get("applied"):
-    logger.warning(
-        "[self-improve] runtime overrides applied (exp #%s): %s",
-        _RUNTIME_OVERRIDE_SUMMARY.get("experiment_id"),
-        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["applied"]),
-    )
-if _RUNTIME_OVERRIDE_SUMMARY.get("skipped"):
-    logger.warning(
-        "[self-improve] runtime overrides SKIPPED: %s",
-        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["skipped"]),
-    )
-if _RUNTIME_OVERRIDE_SUMMARY.get("disabled"):
-    logger.info("[self-improve] overrides disabled by kill switch")
+# NOTE: the runtime-override application call lives AFTER all envelope-
+# controlled globals are defined (EXHAUSTION_ATR_THRESHOLD, ADX_GUARD_MIN
+# below), so the loader can read their committed baselines before applying.
+# See "_apply_runtime_overrides() invocation" further down.
 
 # ── USDT Dominance (USDT.D) Filter ──
 # When stablecoin dominance is rising, capital is fleeing crypto → bad time
@@ -436,6 +458,27 @@ RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = re
 # Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
 ADX_GUARD_ENABLED = True
 ADX_GUARD_MIN = 20                  # Block all trades when ADX below this
+
+# ── _apply_runtime_overrides() invocation ──
+# Placed here (not at the function definition) so every envelope-controlled
+# global it may rewrite — STRUCT_* floors above, plus EXHAUSTION_ATR_THRESHOLD
+# and ADX_GUARD_MIN just above — already holds its committed baseline. The
+# loader reads those baselines, applies the autonomous override file with the
+# P3 two-sided envelope guard, and reassigns the globals in place.
+_RUNTIME_OVERRIDE_SUMMARY = _apply_runtime_overrides()
+if _RUNTIME_OVERRIDE_SUMMARY.get("applied"):
+    logger.warning(
+        "[self-improve] runtime overrides applied (exp #%s): %s",
+        _RUNTIME_OVERRIDE_SUMMARY.get("experiment_id"),
+        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["applied"]),
+    )
+if _RUNTIME_OVERRIDE_SUMMARY.get("skipped"):
+    logger.warning(
+        "[self-improve] runtime overrides SKIPPED: %s",
+        "; ".join(_RUNTIME_OVERRIDE_SUMMARY["skipped"]),
+    )
+if _RUNTIME_OVERRIDE_SUMMARY.get("disabled"):
+    logger.info("[self-improve] overrides disabled by kill switch")
 
 # ── Rescue Rule ──
 # Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.

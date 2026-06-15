@@ -21,6 +21,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .safety_envelopes import (
+    BLOCKLIST_REMOVE_KEY,
+    ENVELOPES,
+    check_envelope,
+    is_envelope_key,
+)
+
 APPLYABLE_KEYS: frozenset[str] = frozenset({
     # Legacy PPO-model-confidence floors. Inert while
     # STRUCTURE_FIRST_MODE=True in live_trading_htf (execute_trade skips
@@ -317,4 +324,171 @@ def check_tightening_only(
     # Something must actually change, or there's nothing to deploy live.
     if not result["applied"] and not violations:
         violations.append("override has no applicable tightening effect")
+    return violations
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# PROFITABILITY_PLAN.md P3 — two-sided bounded apply surface
+#
+# Envelope keys (safety_envelopes.ENVELOPES) may move in EITHER direction so
+# long as every numeric leaf stays inside the key's [min, max]. This
+# SUPERSEDES the monotonic-tightening rule above for those keys: a STRUCT_*
+# floor may be lowered within its envelope because forward-sim + paper +
+# canary + circuit breaker validate the change. Keys NOT in ENVELOPES keep
+# the legacy raise-only / add-only semantics. Blocklist REMOVAL is never
+# applyable here — it is escalated to Chen.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Envelope keys whose live value is a per-symbol dict and is MERGED into the
+# current value rather than replaced wholesale.
+_ENVELOPE_PER_SYMBOL_KEYS: frozenset[str] = frozenset({
+    "STRUCT_SYMBOL_MIN_CONFIDENCE",
+})
+# Envelope keys whose live value is a nested per-symbol-per-side dict.
+_ENVELOPE_NESTED_KEYS: frozenset[str] = frozenset({
+    "STRUCT_SYMBOL_DIRECTIONAL_CONF",
+})
+
+
+def apply_envelopes(
+    *, overrides: dict[str, Any], current: dict[str, Any]
+) -> dict[str, Any]:
+    """Two-sided, range-checked apply of envelope keys for the live loader.
+
+    ``current`` maps each envelope key (== the live global's name) to its
+    current value: a scalar, a per-symbol dict, or a nested per-symbol-per-
+    side dict. For every envelope key present in ``overrides``:
+
+      * the WHOLE proposed value is range-checked via ``check_envelope`` —
+        if any numeric leaf falls outside [min, max] the key is SKIPPED
+        (logged) and the current value is preserved (corrupt/out-of-range
+        file is ignored at load, satisfying the P3 re-validation rule);
+      * scalars replace the current value; per-symbol / nested dicts are
+        MERGED into the current value (so successive applies accumulate);
+      * direction is irrelevant — a value inside the envelope applies
+        whether it raises or lowers the current value.
+
+    Returns ``{"values": {key: new_value}, "applied": [...], "skipped": [...]}``
+    where ``values`` holds only the envelope keys that changed. Inputs are
+    treated as read-only.
+    """
+    overrides = _coerce_overrides(overrides)
+    values: dict[str, Any] = {}
+    applied: list[str] = []
+    skipped: list[str] = []
+
+    for key in ENVELOPES:
+        if key not in overrides:
+            continue
+        proposed = overrides[key]
+        chk = check_envelope(key, proposed)
+        if not chk.ok:
+            skipped.append(chk.reason)
+            continue
+        cur = current.get(key)
+
+        if key in _ENVELOPE_PER_SYMBOL_KEYS and isinstance(proposed, dict):
+            merged = dict(cur or {})
+            for sym, val in proposed.items():
+                su = str(sym).upper()
+                merged[su] = float(val)
+                applied.append(f"{key}[{su}]→{float(val):.4f}")
+            values[key] = merged
+
+        elif key in _ENVELOPE_NESTED_KEYS and isinstance(proposed, dict):
+            merged = {s: dict(d) for s, d in (cur or {}).items()}
+            for sym, sides in proposed.items():
+                if not isinstance(sides, dict):
+                    skipped.append(f"{key}[{sym}] not a dict")
+                    continue
+                su = str(sym).upper()
+                for side, val in sides.items():
+                    sd = str(side).upper()
+                    merged.setdefault(su, {})[sd] = float(val)
+                    applied.append(f"{key}[{su}][{sd}]→{float(val):.4f}")
+            values[key] = merged
+
+        else:
+            # Scalar knob.
+            newv = float(proposed)  # check_envelope already proved numeric
+            try:
+                curf = float(cur) if cur is not None else None
+            except (TypeError, ValueError):
+                curf = None
+            if curf is not None and newv == curf:
+                skipped.append(f"{key} {newv:g} equals current (no-op)")
+                continue
+            values[key] = newv
+            applied.append(
+                f"{key} {('∅' if curf is None else f'{curf:g}')}→{newv:g}"
+            )
+
+    return {"values": values, "applied": applied, "skipped": skipped}
+
+
+def check_apply_allowed(
+    *,
+    overrides: dict[str, Any],
+    baseline_legacy: dict[str, Any] | None = None,
+) -> list[str]:
+    """Apply-time guard for the P3 two-sided surface (used by live_apply).
+
+    Returns a list of violations; an empty list means the override is safe
+    to apply. The guard partitions ``overrides`` into:
+
+      * ``BLOCKLIST_REMOVE_KEY`` — never auto-applyable (Chen-only); always
+        a violation here (the orchestrator escalates it to Telegram instead);
+      * envelope keys — range-checked via ``check_envelope`` (two-sided);
+      * legacy keys (floors / blocklist-add) — checked with the existing
+        monotonic-tightening guard when ``baseline_legacy`` is available;
+      * anything else — an unknown key, rejected.
+
+    ``baseline_legacy`` is the pristine legacy-constant dict from
+    ``live_apply.read_baseline_constants`` (keys: min_confidence,
+    symbol_min_confidence, symbol_directional_conf, symbol_side_blocklist).
+    When it is None (source parse failed) the tighten sub-check is skipped
+    and the loader's runtime tightening guard is relied upon instead — but
+    the envelope range check, blocklist-removal block, and unknown-key
+    detection still run.
+    """
+    ov = _coerce_overrides(overrides)
+    if not ov:
+        return ["override is empty — nothing to apply"]
+
+    violations: list[str] = []
+    if BLOCKLIST_REMOVE_KEY in ov:
+        violations.append(
+            f"{BLOCKLIST_REMOVE_KEY} is Chen-only — cannot be auto-applied "
+            f"(must be escalated to Telegram)"
+        )
+
+    env_keys = {k for k in ov if is_envelope_key(k)}
+    for key in sorted(env_keys):
+        chk = check_envelope(key, ov[key])
+        if not chk.ok:
+            violations.append(chk.reason)
+
+    non_env = {
+        k: v for k, v in ov.items()
+        if k not in env_keys and k != BLOCKLIST_REMOVE_KEY
+    }
+    # Unknown-key detection, independent of baseline availability.
+    for key in sorted(non_env):
+        if key not in APPLYABLE_KEYS:
+            violations.append(
+                f"unknown key {key!r} (not an envelope key or "
+                f"entry-suppression gate)"
+            )
+
+    # Legacy tighten check for the recognised floor/blocklist keys.
+    if baseline_legacy is not None and non_env:
+        legacy = check_tightening_only(overrides=non_env, **baseline_legacy)
+        for v in legacy:
+            if "unknown key" in v:
+                continue  # already reported above
+            # If envelopes carry the change, a no-op legacy set is fine.
+            if v == "override has no applicable tightening effect" and env_keys:
+                continue
+            violations.append(v)
+
     return violations

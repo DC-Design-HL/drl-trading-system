@@ -42,6 +42,7 @@ from .llm_client import (
     load_persona,
 )
 from .risk_officer import Proposal
+from .safety_envelopes import allowed_areas_text
 
 
 # Areas the Researcher MAY NOT directly modify — anything touching these
@@ -56,65 +57,47 @@ FORBIDDEN_AREAS = {
     "LIVE_ORDER_CAP_USD",       # capital allocation
 }
 
-ALLOWED_AREAS_HINT = """\
-You may propose changes in EXACTLY these four entry-suppression knobs.
-This is the safety boundary enforced by the runtime apply layer
-(src/self_improve/runtime_overrides.py): anything outside this list
-cannot be promoted to live, so proposing it wastes the experiment slot.
-
-  * STRUCT_MIN_CONFIDENCE — global STRUCTURE-confidence floor
-    (float, raise only)
-  * STRUCT_SYMBOL_MIN_CONFIDENCE — per-symbol structure-confidence
-    floors (dict, raise only)
-  * STRUCT_SYMBOL_DIRECTIONAL_CONF — per (symbol, side) directional
-    structure-confidence floors (nested dict, raise only)
-  * SYMBOL_SIDE_BLOCKLIST — additions to the (symbol, side) blocklist
-    (list of [symbol, side] pairs, add only — never remove)
-
-CRITICAL — read this before proposing a confidence floor:
+# The allowed-areas block is generated FROM safety_envelopes.ENVELOPES at
+# call time (see _build_allowed_areas) so the prompt can NEVER drift from the
+# keys/ranges the apply guard actually permits — the bug class fixed in
+# 08512ea, where the prompt hand-listed knobs that diverged from the guard.
+_STRUCTURE_FIRST_CAVEAT = """\
+CRITICAL — read this before proposing a STRUCT_* confidence floor:
 
 The live bot runs in STRUCTURE_FIRST_MODE. In that mode the entry
 confidence used by every guard is BOS/CHOCH *structure* confidence,
 NOT PPO *model* confidence. The legacy knobs MIN_CONFIDENCE,
-SYMBOL_MIN_CONFIDENCE, SYMBOL_DIRECTIONAL_CONF are still in the
-APPLYABLE_KEYS set so they survive a future switch back to model-first
-mode — but TODAY they are INERT (execute_trade skips their checks).
-Proposing them in structure-first mode produces a backtest that
-filters historical PPO-confidence-tagged trades while live behavior
-does not change. That is exactly the F1 dead-knob bug the P1 plan
-addresses. Use the STRUCT_* keys above instead.
+SYMBOL_MIN_CONFIDENCE, SYMBOL_DIRECTIONAL_CONF are INERT today
+(execute_trade skips their checks). Proposing them produces a backtest
+that filters historical PPO-confidence-tagged trades while live behavior
+does not change — the F1 dead-knob bug. Use the STRUCT_* keys instead.
 
-Sanity-check ranges (structure-confidence is a different scale from
-PPO confidence — values like 0.95 may strangle entries entirely):
+Sanity-check ranges (structure-confidence is a different scale from PPO
+confidence — values near 0.95 may strangle entries entirely):
   - the recorded `confidence` column on post-2026-04-13 trades is
     BOS/CHOCH confidence in [0.0, 1.0]
   - empirically meaningful range is roughly [0.40, 0.85]
   - the P0 ground-truth report's confidence-decile section is the
     canonical reference for picking a floor
 
-All four applyable knobs are MONOTONIC TIGHTENING ONLY: raise a
-floor, add a block. You cannot lower a floor or remove a block —
-the apply layer refuses.
+Envelope keys move in EITHER direction inside their stated range — you
+may lower an exit/timing knob as well as raise it, because forward-sim +
+paper + canary + circuit breaker validate the change before it sticks.
+Blocklist ADD is always allowed; blocklist REMOVAL is Chen-only — propose
+it as verdict="escalate" and it will be routed to Chen for a yes/no.
 
-You MAY NOT propose:
-
-  * Sizing, leverage, SL/TP, daily-loss / max-drawdown halts
-    (FIXED_MAX_NOTIONAL, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
-    MAX_LEVERAGE, etc.) — Chen-only, escalate.
-  * Exit-side knobs (STAGNANT_HOURS, TRAILING_*, WHIPSAW_*,
-    COOLDOWN_SECONDS, MIN_HOLD_SECONDS) — outside the auto-apply
-    boundary because they have no natural monotonic-safety direction.
-    If you have a strong hypothesis here, ESCALATE.
-  * Indicator-stack tuning (USDT.D thresholds, ranging guards,
-    REVERSE_CLOSE_LONG canary, per-symbol size scaling) — same
-    reason as above, escalate.
-  * Adding a new symbol or venue — escalate.
-
-If your hypothesis requires changing anything outside the four
-applyable knobs, set verdict to "escalate" and explain WHY in
-`escalation_reason`. Do not silently fall back to proposing a
-weaker version of an unsupported knob.
+You MAY NOT propose sizing, leverage, SL/TP, per-trade notional, or
+daily-loss / max-drawdown halts (FIXED_MAX_NOTIONAL, STOP_LOSS_PCT,
+TAKE_PROFIT_PCT, MAX_LEVERAGE, etc.) — those are Chen-only; set
+verdict="escalate". Do not silently fall back to a weaker version of an
+unsupported knob.
 """
+
+
+def _build_allowed_areas() -> str:
+    """Allowed-areas prompt block: the envelope table (single source of
+    truth) followed by the structure-first caveat."""
+    return allowed_areas_text() + "\n\n" + _STRUCTURE_FIRST_CAVEAT
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -272,7 +255,7 @@ def _build_user_prompt(ctx: ResearcherContext) -> str:
     parts.append(json.dumps(ctx.config_fingerprint, indent=2, default=str))
 
     parts.append("\n\n# Allowed and forbidden areas")
-    parts.append(ALLOWED_AREAS_HINT)
+    parts.append(_build_allowed_areas())
 
     parts.append("\n# Output now (strict JSON only):")
     return "\n".join(parts)

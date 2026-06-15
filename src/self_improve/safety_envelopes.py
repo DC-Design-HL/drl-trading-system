@@ -22,8 +22,11 @@ is which simulator validates a proposed change to that key:
   * "replay"  — replay harness can express it (entry-side thresholds);
   * "forward" — needs the forward simulator (exit / timing knobs).
 
-NOTE: the ranges below are PROPOSALS pending Chen's approval on Telegram;
-P3 must not merge until that table is confirmed.
+NOTE: the ranges below were APPROVED by Chen on Telegram 2026-06-15 and are
+the single source of truth — the researcher prompt (allowed_areas_text) and
+the live-apply guard (runtime_overrides.check_apply_allowed) are both derived
+from this table, so they cannot drift. Changing a range still requires Chen's
+sign-off.
 """
 
 from __future__ import annotations

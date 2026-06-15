@@ -58,10 +58,16 @@ from .live_apply import (
     measure_since,
     revert_live,
 )
+from .forward_sim import evaluate_forward_gate
 from .llm_client import LLMClient, default_client
 from .paper_trader import evaluate_paper_period
 from .researcher import ResearcherContext, propose
 from .risk_officer import Proposal, evaluate as risk_evaluate
+from .safety_envelopes import (
+    BLOCKLIST_REMOVE_KEY,
+    is_envelope_key,
+    validation_engine,
+)
 
 UTC = timezone.utc
 
@@ -425,6 +431,93 @@ def _load_config_changes(conn: sqlite3.Connection, exp_id: int) -> dict[str, Any
     return cc if isinstance(cc, dict) else {}
 
 
+def _needs_forward_sim(config_overrides: dict[str, Any]) -> bool:
+    """True if any proposed key is an envelope key validated by the forward
+    simulator (exit / timing knobs). Such experiments route through the
+    forward-sim gate instead of the replay backtest harness."""
+    return any(
+        is_envelope_key(k) and validation_engine(k) == "forward"
+        for k in (config_overrides or {})
+    )
+
+
+def _advance_proposed_forward(
+    conn: sqlite3.Connection,
+    exp_id: int,
+    proposal_blob: dict[str, Any],
+    config_overrides: dict[str, Any],
+    *,
+    client: LLMClient,
+) -> str:
+    """proposed → paper via the forward-sim gate (P3 exit/timing envelope
+    keys). Mirrors the replay path's Risk-Officer review + net-PnL/DD gate,
+    but validates with the forward simulator over the last 30 days."""
+    end = datetime.now(UTC)
+    start = end - timedelta(days=30)
+
+    proposal = Proposal(
+        description=proposal_blob.get("description", ""),
+        config_changes=config_overrides,
+        category=proposal_blob.get("category", "config_tune"),
+        rationale=proposal_blob.get("rationale", ""),
+        expected_impact=proposal_blob.get("expected_impact", ""),
+    )
+    verdict = risk_evaluate(proposal, client=client, db_path=str(_DB))
+    if verdict.is_veto:
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason="risk officer veto: " + "; ".join(verdict.reasons),
+        )
+        _log_decision(
+            conn, agent="risk-officer", decision_type="veto",
+            summary=f"Vetoed experiment #{exp_id} (forward)",
+            rationale="; ".join(verdict.reasons),
+            experiment_id=exp_id, outcome="rejected",
+        )
+        return f"exp {exp_id}: rejected — RO veto (forward)"
+
+    try:
+        gate = evaluate_forward_gate(
+            config_overrides=config_overrides,
+            start=start, end=end, capital=CAPITAL_BASE,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason=f"forward-sim gate error: {exc}",
+        )
+        return f"exp {exp_id}: rejected — forward-sim error: {exc}"
+
+    if not gate.pass_gate:
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason="forward-sim gate failed: " + "; ".join(gate.reasons),
+            backtest_result_json=json.dumps(gate.to_json()),
+        )
+        return f"exp {exp_id}: rejected — forward-sim gate"
+
+    _set_experiment_stage(
+        conn, exp_id, "paper",
+        backtest_result_json=json.dumps(gate.to_json()),
+    )
+    note = (
+        f" (note: {gate.unexpressible_keys} not expressible in forward sim "
+        f"— validated downstream by paper + canary + circuit breaker)"
+        if gate.unexpressible_keys else ""
+    )
+    _log_decision(
+        conn, agent="orchestrator", decision_type="promote",
+        summary=f"Experiment #{exp_id} → paper (forward-sim gate)",
+        rationale=(
+            f"forward net PnL ${gate.candidate_pnl:+.2f} vs baseline "
+            f"${gate.baseline_pnl:+.2f}, DD {gate.candidate_max_dd_pct:.2f}%"
+            f"{note}"
+        ),
+        experiment_id=exp_id, outcome="approved",
+    )
+    return f"exp {exp_id}: forward-sim gate passed → paper"
+
+
 def _advance_proposed(
     conn: sqlite3.Connection,
     exp_row: tuple,
@@ -456,6 +549,34 @@ def _advance_proposed(
         return f"exp {exp_id}: rejected — bad payload"
 
     config_overrides = proposal_blob.get("config_changes", {})
+
+    # P3: blocklist REMOVAL is Chen-only — never auto-piped. Escalate + stop.
+    if BLOCKLIST_REMOVE_KEY in config_overrides:
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason="blocklist removal is Chen-only — escalated",
+        )
+        _log_decision(
+            conn, agent="orchestrator", decision_type="escalate",
+            summary=f"Experiment #{exp_id} proposes blocklist removal",
+            rationale=f"{BLOCKLIST_REMOVE_KEY}="
+                      f"{config_overrides[BLOCKLIST_REMOVE_KEY]}",
+            experiment_id=exp_id, outcome="pending",
+        )
+        _telegram_post(
+            f"🚨 Experiment #{exp_id} proposes BLOCKLIST REMOVAL "
+            f"({config_overrides[BLOCKLIST_REMOVE_KEY]}).\n"
+            f"This is Chen-only — NOT auto-applied. Approve/deny manually."
+        )
+        return f"exp {exp_id}: escalated — blocklist removal needs Chen"
+
+    # P3 routing: any envelope key validated by the forward simulator routes
+    # this experiment through the forward-sim gate (replay can't re-time
+    # exits). Otherwise fall through to the replay backtest harness below.
+    if _needs_forward_sim(config_overrides):
+        return _advance_proposed_forward(
+            conn, exp_id, proposal_blob, config_overrides, client=client)
+
     # Run backtest over the last 30 days with this proposed override
     end = datetime.now(UTC)
     start = end - timedelta(days=30)
@@ -560,6 +681,54 @@ def _advance_proposed(
     return f"exp {exp_id}: promoted → paper"
 
 
+def _advance_paper_forward(
+    conn: sqlite3.Connection,
+    exp_id: int,
+    config_overrides: dict[str, Any],
+    paper_start: datetime,
+    paper_end: datetime,
+) -> str:
+    """paper → awaiting_canary_approval (or rejected) via the forward-sim
+    gate over the paper window. Used for P3 exit/timing envelope keys."""
+    try:
+        gate = evaluate_forward_gate(
+            config_overrides=config_overrides,
+            start=paper_start, end=paper_end, capital=CAPITAL_BASE,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _set_experiment_stage(
+            conn, exp_id, "rejected",
+            rollback_reason=f"forward-sim paper error: {exc}",
+        )
+        return f"exp {exp_id}: paper rejected — forward-sim error: {exc}"
+
+    next_stage = "awaiting_canary_approval" if gate.pass_gate else "rejected"
+    _set_experiment_stage(
+        conn, exp_id, next_stage,
+        paper_result_json=json.dumps(gate.to_json()),
+        rollback_reason=(
+            "; ".join(gate.reasons) if not gate.pass_gate else None),
+    )
+    _log_decision(
+        conn, agent="orchestrator", decision_type="paper_evaluation",
+        summary=f"Experiment #{exp_id} forward-paper "
+                f"{'PASSED' if gate.pass_gate else 'FAILED'}",
+        rationale=f"forward net PnL ${gate.candidate_pnl:+.2f} vs baseline "
+                  f"${gate.baseline_pnl:+.2f}, DD {gate.candidate_max_dd_pct:.2f}%, "
+                  f"reasons={'; '.join(gate.reasons) or 'none'}",
+        experiment_id=exp_id,
+        outcome="approved" if gate.pass_gate else "rejected",
+    )
+    if gate.pass_gate:
+        _telegram_post(
+            f"🤖 Experiment #{exp_id} PASSED forward-sim paper gate. "
+            f"forward delta ${gate.delta_pnl:+.2f}. "
+            f"Next: canary gate (auto-applies live if autonomy is armed)."
+        )
+        return f"exp {exp_id}: forward-paper passed → awaiting canary approval"
+    return f"exp {exp_id}: forward-paper failed → rejected"
+
+
 def _advance_paper(
     conn: sqlite3.Connection, exp_row: tuple
 ) -> str:
@@ -580,6 +749,12 @@ def _advance_paper(
     ).fetchone()
     proposal_blob = json.loads(payload[0]) if payload and payload[0] else {}
     config_overrides = proposal_blob.get("config_changes", {})
+
+    # P3: forward-validated experiments evaluate the paper window with the
+    # forward simulator too — replay can't re-time the exit changes.
+    if _needs_forward_sim(config_overrides):
+        return _advance_paper_forward(
+            conn, exp_id, config_overrides, promoted, now)
 
     backtest_sharpe = 0.0
     if backtest_json:

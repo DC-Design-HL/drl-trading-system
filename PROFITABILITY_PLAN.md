@@ -399,8 +399,11 @@ ENVELOPES = {
 }
 ```
 
-(Ranges above are proposals — **Chen must approve the final table before
-this phase merges**; ping him with the table on Telegram.)
+(Ranges above were proposals. ✅ **APPROVED by Chen on Telegram 2026-06-15**
+— adopted as-is and now the single source of truth in
+`src/self_improve/safety_envelopes.py::ENVELOPES`. The researcher prompt and
+the live-apply guard are both generated from that table, so they cannot
+drift from each other.)
 
 **Rules:**
 
@@ -553,7 +556,8 @@ accumulated by the time the analysis steps need it.
 
 ## 5. Decisions reserved for Chen (escalate on Telegram, do not decide)
 
-1. Final envelope table values (P3) — proposal is in §3/P3.
+1. ✅ RESOLVED 2026-06-15: Final envelope table values (P3) — Chen approved
+   the §3/P3 proposal as-is. Future range changes still require his sign-off.
 2. Any blocklist REMOVAL (e.g. re-enabling XRP after retrain) — always.
 3. Re-introducing the PPO model into the live entry path (P5 data may
    recommend it; deployment is Chen's call, likely needs Mac retraining

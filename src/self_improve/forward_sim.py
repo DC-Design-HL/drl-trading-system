@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -1071,4 +1071,175 @@ def _simulate_symbol(
         skipped_by_cooldown=n_cooldown,
         skipped_by_whipsaw=n_whipsaw,
         skipped_by_open_position=n_open,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# PROFITABILITY_PLAN.md P3 — forward-sim validation gate for envelope keys
+#
+# The orchestrator routes any experiment that touches a "forward"-validated
+# envelope key through this gate instead of the replay backtest harness:
+# replay cannot re-time exits, so exit/timing knob changes are invisible to
+# it. The gate runs candidate vs baseline forward sims over the same window
+# and passes only when the candidate (a) does not reduce net PnL after costs
+# and (b) does not worsen max drawdown by more than 20% — the same shape as
+# the replay gate (PLAN.md §6).
+# ─────────────────────────────────────────────────────────────────────────
+
+# Override-key → ForwardSimConfig field. These are the envelope keys whose
+# validation_engine is "forward" (safety_envelopes.ENVELOPES) plus the
+# blocklist-add key, mapped onto the simulator's knobs.
+_OVERRIDE_TO_CFG_FIELD: dict[str, str] = {
+    "STRUCT_MIN_CONFIDENCE": "struct_min_confidence",
+    "STRUCT_SYMBOL_MIN_CONFIDENCE": "struct_symbol_min_confidence",
+    "STRUCT_SYMBOL_DIRECTIONAL_CONF": "struct_symbol_directional_conf",
+    "TRAILING_DISTANCE_PCT": "trailing_distance_pct",
+    "TRAILING_BREAKEVEN_PCT": "trailing_breakeven_pct",
+    "STAGNANT_HOURS": "stagnant_hours",
+    "COOLDOWN_SECONDS": "cooldown_seconds",
+    "WHIPSAW_COOLDOWN_HOURS": "whipsaw_cooldown_hours",
+    "ADX_GUARD_MIN": "adx_guard_min",
+    "EXHAUSTION_ATR_THRESHOLD": "exhaustion_atr_threshold",
+}
+
+# Envelope keys that are forward-validated by table but the simulator cannot
+# express: the sim only decides while flat and holds a single position, so an
+# in-position MIN_HOLD_SECONDS change is a no-op here. Such a change passes
+# the forward gate trivially (candidate == baseline) and is validated for
+# real downstream by the paper window, the live canary, and the circuit
+# breaker. We surface it so the gate report is honest about the limitation.
+FORWARD_UNEXPRESSIBLE: frozenset[str] = frozenset({"MIN_HOLD_SECONDS"})
+
+
+def forward_config_from_overrides(
+    overrides: dict[str, Any], *, base: Optional[ForwardSimConfig] = None,
+) -> tuple[ForwardSimConfig, list[str]]:
+    """Build a ForwardSimConfig from a config_changes dict.
+
+    Returns ``(config, unexpressible_keys)``. Recognised envelope keys are
+    mapped onto sim fields; SYMBOL_SIDE_BLOCKLIST_ADD is unioned into the
+    blocklist; keys the sim cannot express are returned in the second list
+    (and otherwise ignored). Unknown keys are ignored here — the apply guard
+    and the replay schema-drift check are what reject them.
+    """
+    cfg = base or ForwardSimConfig()
+    changes: dict[str, Any] = {}
+    unexpressible: list[str] = []
+    for key, val in (overrides or {}).items():
+        if key in FORWARD_UNEXPRESSIBLE:
+            unexpressible.append(key)
+            continue
+        field_name = _OVERRIDE_TO_CFG_FIELD.get(key)
+        if field_name is not None:
+            changes[field_name] = val
+            continue
+        if key == "SYMBOL_SIDE_BLOCKLIST_ADD" and isinstance(val, (list, tuple)):
+            adds = {
+                (str(e[0]).upper(), str(e[1]).upper())
+                for e in val if isinstance(e, (list, tuple)) and len(e) == 2
+            }
+            changes["blocklist"] = frozenset(cfg.blocklist | adds)
+    return (replace(cfg, **changes) if changes else cfg), unexpressible
+
+
+def _portfolio_dd_pct(result: ForwardSimResult, capital: float) -> float:
+    """Max peak-to-trough drawdown (%) of the chronological portfolio
+    realized-PnL curve across all symbols — mirrors live_apply.measure_since."""
+    trades: list[tuple[Any, float]] = []
+    for r in result.per_symbol.values():
+        for t in r.trades:
+            trades.append((t.exit_ts, float(t.realized_pnl_usd)))
+    trades.sort(key=lambda x: x[0])
+    cum = peak = max_dd = 0.0
+    for _, pnl in trades:
+        cum += pnl
+        peak = max(peak, cum)
+        max_dd = max(max_dd, peak - cum)
+    return (max_dd / capital * 100.0) if capital > 0 else 0.0
+
+
+@dataclass
+class ForwardGateResult:
+    pass_gate: bool
+    candidate_pnl: float
+    baseline_pnl: float
+    delta_pnl: float
+    candidate_max_dd_pct: float
+    baseline_max_dd_pct: float
+    n_candidate_trades: int
+    reasons: list[str] = field(default_factory=list)
+    unexpressible_keys: list[str] = field(default_factory=list)
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "engine": "forward",
+            "pass_gate": self.pass_gate,
+            "candidate_pnl": self.candidate_pnl,
+            "baseline_pnl": self.baseline_pnl,
+            "delta_pnl": self.delta_pnl,
+            "candidate_max_dd_pct": self.candidate_max_dd_pct,
+            "baseline_max_dd_pct": self.baseline_max_dd_pct,
+            "n_candidate_trades": self.n_candidate_trades,
+            "reasons": self.reasons,
+            "unexpressible_keys": self.unexpressible_keys,
+            # Mirror the keys the replay gate exposes so downstream readers
+            # (paper-stage Sharpe reference, dashboards) don't KeyError.
+            "portfolio_metrics": {
+                "net_pnl_usd": self.candidate_pnl,
+                "max_drawdown_pct": self.candidate_max_dd_pct,
+                "sharpe": 0.0,
+            },
+        }
+
+
+def evaluate_forward_gate(
+    *,
+    config_overrides: dict[str, Any],
+    start: datetime,
+    end: datetime,
+    capital: float = 5000.0,
+    symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"),
+    cache_base: Optional[Path] = None,
+    pnl_epsilon: float = 0.01,
+    dd_worsen_factor: float = 1.2,
+) -> ForwardGateResult:
+    """Run candidate vs baseline forward sims and apply the §6-shape gate:
+    candidate net PnL ≥ baseline (within epsilon) AND candidate max DD not
+    worse than ``dd_worsen_factor`` × baseline DD."""
+    base_cfg = ForwardSimConfig(capital_base=capital)
+    cand_cfg, unexpressible = forward_config_from_overrides(
+        config_overrides, base=base_cfg)
+
+    baseline = run_forward_sim(
+        symbols=symbols, start=start, end=end, config=base_cfg,
+        cache_base=cache_base, label="fwd-gate-baseline")
+    candidate = run_forward_sim(
+        symbols=symbols, start=start, end=end, config=cand_cfg,
+        cache_base=cache_base, label="fwd-gate-candidate")
+
+    b_pnl = float(sum(r.net_pnl_usd for r in baseline.per_symbol.values()))
+    c_pnl = float(sum(r.net_pnl_usd for r in candidate.per_symbol.values()))
+    b_dd = _portfolio_dd_pct(baseline, capital)
+    c_dd = _portfolio_dd_pct(candidate, capital)
+    n_trades = int(sum(len(r.trades) for r in candidate.per_symbol.values()))
+
+    reasons: list[str] = []
+    if c_pnl < b_pnl - pnl_epsilon:
+        reasons.append(
+            f"forward net PnL ${c_pnl:+.2f} < baseline ${b_pnl:+.2f}")
+    if b_dd > 0 and c_dd > b_dd * dd_worsen_factor:
+        reasons.append(
+            f"forward max DD {c_dd:.2f}% > {dd_worsen_factor:g}× baseline "
+            f"{b_dd:.2f}%")
+
+    return ForwardGateResult(
+        pass_gate=not reasons,
+        candidate_pnl=round(c_pnl, 2),
+        baseline_pnl=round(b_pnl, 2),
+        delta_pnl=round(c_pnl - b_pnl, 2),
+        candidate_max_dd_pct=round(c_dd, 2),
+        baseline_max_dd_pct=round(b_dd, 2),
+        n_candidate_trades=n_trades,
+        reasons=reasons,
+        unexpressible_keys=unexpressible,
     )

@@ -1,7 +1,12 @@
 # Forward-Sim Gate Redefinition — options for Chen
 
-**Status:** proposal, 2026-06-13. Decision needed before P2 can be
-declared "calibrated". Author: profitability-p2 work.
+**Status:** ✅ APPROVED by Chen on Telegram 2026-06-15 — **Option B adopted**.
+The forward-sim promotion gate is co-decided directional agreement ≥ 80%
+(currently ~90%, passes) + net-PnL sign match, with entry-count /
+all-live-agreement / over-production tracked as watched metrics. Implemented
+in `scripts/self_improve/calibrate_forward_sim.py`; the live orchestrator
+gate (`forward_sim.evaluate_forward_gate`) uses the net-PnL/DD shape over the
+candidate window. (Original proposal authored 2026-06-13 by profitability-p2.)
 
 ## The problem with the current gate
 
