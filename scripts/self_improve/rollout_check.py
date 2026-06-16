@@ -118,23 +118,52 @@ def _override_info() -> str | None:
         return "(active_overrides.json present but unreadable)"
 
 
-def _recent_errors() -> int:
-    """Count Traceback / ERROR / circuit-breaker lines in the bot log tail."""
+# Known-benign recurring log errors that must NOT trigger an alert. These are
+# tracked separately and fixed on their own track — flagging them every 6h
+# would just train Chen to ignore the monitor.
+#   * whale-behavior model load failure — model needs retraining on the Mac;
+#     the bot runs fine without it (it's an optional signal).
+#   * routine exchange order rejections (Binance 4xx, e.g. -2019 insufficient
+#     margin) — normal trading friction, not a system fault.
+_BENIGN_ERROR_PATTERNS = (
+    "Failed to load whale behavior model",
+    "Binance Futures API 4",
+)
+
+# How far back an error counts as "fresh" — slightly more than the 6h cadence
+# so nothing slips through the gap between runs, but old errors don't re-alert.
+_ERROR_WINDOW_HOURS = 6.5
+
+
+def _recent_errors(now: datetime | None = None) -> list[str]:
+    """Return fresh, non-benign ERROR / circuit-breaker lines from the bot log
+    within the last _ERROR_WINDOW_HOURS. Lines are timestamped
+    'YYYY-MM-DD HH:MM:SS,mmm ...'; un-timestamped lines (e.g. a bare
+    'Traceback') are skipped — the ERROR line they accompany is what counts."""
     if not _BOTS_LOG.exists():
-        return 0
+        return []
+    now = now or datetime.now()
     try:
         out = subprocess.run(
-            ["tail", "-n", "400", str(_BOTS_LOG)],
+            ["tail", "-n", "3000", str(_BOTS_LOG)],
             capture_output=True, text=True, timeout=15,
         ).stdout
     except Exception:
-        return 0
-    n = 0
+        return []
+    hits: list[str] = []
     for line in out.splitlines():
-        if "Traceback" in line or "CIRCUIT BREAKER" in line \
-                or " ERROR " in line or line.endswith("ERROR"):
-            n += 1
-    return n
+        if "CIRCUIT BREAKER" not in line and " ERROR " not in line:
+            continue
+        if any(p in line for p in _BENIGN_ERROR_PATTERNS):
+            continue
+        # Parse the leading 'YYYY-MM-DD HH:MM:SS' timestamp for recency.
+        try:
+            ts = datetime.strptime(line[:19], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, IndexError):
+            continue
+        if (now - ts).total_seconds() <= _ERROR_WINDOW_HOURS * 3600:
+            hits.append(line[:160])
+    return hits
 
 
 def _load_prev_state() -> dict:
@@ -173,6 +202,7 @@ def build_report() -> tuple[str | None, dict]:
     killed = _KILL.exists()
     armed = _ARMED.exists()
     errors = _recent_errors()
+    n_errors = len(errors)
 
     prev = _load_prev_state()
     prev_exps = prev.get("experiments", {})
@@ -196,8 +226,12 @@ def build_report() -> tuple[str | None, dict]:
     if new_or_changed:
         moves = ", ".join(f"#{e}→{s}" for e, s in new_or_changed.items())
         alert_bits.append(f"📈 loop stage change: {moves}")
-    if errors:
-        alert_bits.append(f"⚠️ {errors} error/breaker line(s) in bots_live.log tail")
+    if n_errors:
+        sample = errors[-1].split("ERROR", 1)[-1].strip()[:90] if errors else ""
+        alert_bits.append(
+            f"⚠️ {n_errors} fresh error/breaker line(s) in bots_live.log"
+            + (f" — e.g. {sample}" if sample else "")
+        )
     if loop.get("error"):
         alert_bits.append("⚠️ " + loop["error"])
 
