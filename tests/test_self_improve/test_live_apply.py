@@ -301,7 +301,10 @@ def test_armed_canary_applies_and_promotes_to_canary(tmp_path: Path):
     assert la.override_path(sd).exists()
 
 
-def test_canary_promotes_to_live_after_window(tmp_path: Path):
+def test_canary_promotes_to_live_after_window(tmp_path: Path, monkeypatch):
+    """P4: after the window, promotion is gated on canary eval v2's verdict.
+    A 'promote' verdict → live."""
+    from src.self_improve.canary_eval import CanaryVerdict
     db = tmp_path / "t.db"
     _mkdb(db)
     old = (datetime.now(UTC) - timedelta(hours=la.CANARY_HOURS + 1)).isoformat()
@@ -309,9 +312,28 @@ def test_canary_promotes_to_live_after_window(tmp_path: Path):
     sd = tmp_path / "sd"
     sd.mkdir()
     la.armed_flag(sd).touch()
+    monkeypatch.setattr(orch, "evaluate_canary", lambda *a, **k: CanaryVerdict(
+        decision="promote", change_type="suppression", n_samples=6,
+        avoided_pnl=-40.0, rationale="blocked trades would have lost $40"))
     orch.run_tick(db_path=db, client=_StubClient(), base_dir=sd, repo=REPO,
                   dry_run=True)
     assert _stage(db, exp_id) == "live"
+
+
+def test_canary_holds_without_counterfactual_evidence(tmp_path: Path):
+    """P4: with no suppressed-entry evidence, eval v2 extends the canary
+    rather than auto-promoting — the experiment stays at 'canary'."""
+    db = tmp_path / "t.db"
+    _mkdb(db)
+    old = (datetime.now(UTC) - timedelta(hours=la.CANARY_HOURS + 1)).isoformat()
+    exp_id = _seed_experiment(db, stage="canary", config_changes=CC, ts_canary=old)
+    sd = tmp_path / "sd"
+    sd.mkdir()
+    la.armed_flag(sd).touch()
+    # No suppressed_entries table/rows → fail-safe to "extend"; stays canary.
+    orch.run_tick(db_path=db, client=_StubClient(), base_dir=sd, repo=REPO,
+                  dry_run=True)
+    assert _stage(db, exp_id) == "canary"
 
 
 def test_canary_circuit_breaker_reverts(tmp_path: Path):

@@ -58,6 +58,7 @@ from .live_apply import (
     measure_since,
     revert_live,
 )
+from .canary_eval import evaluate_canary
 from .forward_sim import evaluate_forward_gate
 from .llm_client import LLMClient, default_client
 from .paper_trader import evaluate_paper_period
@@ -925,25 +926,69 @@ def _advance_canary(
 
     promoted = _parse_dt(ts_canary)
     elapsed_h = (datetime.now(UTC) - promoted).total_seconds() / 3600.0
-    if elapsed_h >= CANARY_HOURS:
-        _set_experiment_stage(conn, exp_id, "live")
+    if elapsed_h < CANARY_HOURS:
+        return (
+            f"exp {exp_id}: canary monitoring ({elapsed_h:.1f}h/{CANARY_HOURS:.0f}h, "
+            f"pnl ${reading.realized_pnl:+.2f}, n={reading.n_closes})"
+        )
+
+    # P4 canary evaluation v2: the ambient breaker above is the safety net;
+    # promotion is now decided on the change's counterfactual, not ambient PnL.
+    cc = _load_config_changes(conn, exp_id)
+    verdict = evaluate_canary(
+        conn, experiment_id=exp_id, config_changes=cc,
+        since_iso=ts_canary, capital=capital,
+    )
+
+    if verdict.decision == "extend":
         _log_decision(
-            conn, agent="orchestrator", decision_type="promote",
-            summary=f"Experiment #{exp_id} → live (canary clean {CANARY_HOURS:.0f}h)",
-            rationale=f"realized ${reading.realized_pnl:+.2f} over {reading.n_closes} "
-                      f"closes, max DD {reading.max_drawdown_pct:.2f}%",
-            experiment_id=exp_id, outcome="approved",
+            conn, agent="orchestrator", decision_type="canary_eval",
+            summary=f"Experiment #{exp_id} canary extended (insufficient evidence)",
+            rationale=verdict.rationale, experiment_id=exp_id, outcome="pending",
+            notes=json.dumps(verdict.to_json()),
+        )
+        return f"exp {exp_id}: canary extended — {verdict.rationale[:70]}"
+
+    if verdict.decision == "reject":
+        res = revert_live(
+            reason=f"canary eval v2 reject: {verdict.rationale}",
+            base_dir=base_dir, repo=repo, dry_run=dry_run,
+        )
+        _set_experiment_stage(
+            conn, exp_id, "rolled_back",
+            rollback_reason=f"canary eval v2 reject: {verdict.rationale}",
+        )
+        _log_decision(
+            conn, agent="orchestrator", decision_type="rollback",
+            summary=f"Experiment #{exp_id} REJECTED by canary eval v2",
+            rationale=verdict.rationale, expected_impact=res.reason,
+            experiment_id=exp_id, outcome="rolled_back",
+            notes=json.dumps(verdict.to_json()),
         )
         _telegram_post(
-            f"✅ Experiment #{exp_id} cleared the {CANARY_HOURS:.0f}h canary "
-            f"(realized ${reading.realized_pnl:+.2f}, {reading.n_closes} closes) "
-            f"→ promoted to LIVE. Still circuit-breaker monitored."
+            f"↩️ Experiment #{exp_id} REJECTED by canary eval v2 "
+            f"({'reverted' if res.restarted or dry_run else res.reason}).\n"
+            f"{verdict.rationale}"
         )
-        return f"exp {exp_id}: canary clean → live"
-    return (
-        f"exp {exp_id}: canary monitoring ({elapsed_h:.1f}h/{CANARY_HOURS:.0f}h, "
-        f"pnl ${reading.realized_pnl:+.2f}, n={reading.n_closes})"
+        return f"exp {exp_id}: canary eval rejected → reverted"
+
+    # promote
+    _set_experiment_stage(conn, exp_id, "live")
+    _log_decision(
+        conn, agent="orchestrator", decision_type="promote",
+        summary=f"Experiment #{exp_id} → live (canary eval v2 promote)",
+        rationale=verdict.rationale + f" | ambient: realized ${reading.realized_pnl:+.2f}, "
+                  f"DD {reading.max_drawdown_pct:.2f}% over {reading.n_closes} closes",
+        experiment_id=exp_id, outcome="approved",
+        notes=json.dumps(verdict.to_json()),
     )
+    _telegram_post(
+        f"✅ Experiment #{exp_id} PROMOTED to LIVE by canary eval v2.\n"
+        f"{verdict.rationale}\n"
+        f"(ambient: ${reading.realized_pnl:+.2f} over {reading.n_closes} closes). "
+        f"Still circuit-breaker monitored."
+    )
+    return f"exp {exp_id}: canary eval promote → live"
 
 
 def _monitor_live(

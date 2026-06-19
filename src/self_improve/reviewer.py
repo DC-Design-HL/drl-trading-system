@@ -213,7 +213,84 @@ class WindowSummary:
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def render_markdown(summary: WindowSummary, *, llm_pattern_section: str = "") -> str:
+_CLOSE_ACTIONS = (
+    "CLOSE_LONG", "CLOSE_SHORT", "REVERSE_CLOSE_LONG",
+    "REVERSE_CLOSE_SHORT", "SL_HIT", "TP_HIT",
+)
+
+
+def experiment_attribution_section(
+    conn: sqlite3.Connection, *, since: datetime, until: datetime,
+) -> str:
+    """PROFITABILITY_PLAN.md P4 §4 — per active experiment, the stamped-trade
+    PnL and suppression counts over the window, plus the latest canary verdict
+    (the evidence-based counterfactual decision). Returns '' if the P4 schema
+    isn't present yet (older DB) or nothing was attributable."""
+    s, u = since.isoformat(), until.isoformat()
+    try:
+        # Experiments that touched this window: stamped trades, suppressions,
+        # or currently in a live-ish stage.
+        stamped = {
+            r[0]: (r[1], r[2]) for r in conn.execute(
+                f"SELECT experiment_id, COUNT(*), COALESCE(SUM(pnl),0) FROM trades "
+                f"WHERE experiment_id IS NOT NULL AND is_testnet=1 AND pnl IS NOT NULL "
+                f"AND action IN ({','.join('?' * len(_CLOSE_ACTIONS))}) "
+                f"AND COALESCE(created_at,timestamp) BETWEEN ? AND ? "
+                f"GROUP BY experiment_id",
+                (*_CLOSE_ACTIONS, s, u),
+            ).fetchall()
+        }
+        suppressed = {
+            r[0]: r[1] for r in conn.execute(
+                "SELECT experiment_id, COUNT(*) FROM suppressed_entries "
+                "WHERE experiment_id IS NOT NULL AND ts BETWEEN ? AND ? "
+                "GROUP BY experiment_id",
+                (s, u),
+            ).fetchall()
+        }
+        live_stages = {
+            r[0]: r[1] for r in conn.execute(
+                "SELECT id, stage FROM experiments "
+                "WHERE stage IN ('canary','live','awaiting_canary_approval')",
+            ).fetchall()
+        }
+    except sqlite3.OperationalError:
+        return ""  # P4 schema not migrated yet
+
+    exp_ids = set(stamped) | set(suppressed) | set(live_stages)
+    exp_ids.discard(None)
+    if not exp_ids:
+        return ""
+
+    lines = ["## Active-experiment attribution (P4)", ""]
+    lines.append("| exp | stage | stamped closes | stamped PnL | suppressed | latest verdict |")
+    lines.append("|---|---|---|---|---|---|")
+    for eid in sorted(exp_ids):
+        stage = live_stages.get(eid)
+        if stage is None:
+            row = conn.execute(
+                "SELECT stage FROM experiments WHERE id=?", (eid,)).fetchone()
+            stage = row[0] if row else "?"
+        n_cl, pnl = stamped.get(eid, (0, 0.0))
+        n_sup = suppressed.get(eid, 0)
+        v = conn.execute(
+            "SELECT decision_type, outcome, substr(rationale,1,80) FROM decisions "
+            "WHERE experiment_id=? AND decision_type IN "
+            "('promote','rollback','canary_eval','reject') ORDER BY id DESC LIMIT 1",
+            (eid,),
+        ).fetchone()
+        verdict = f"{v[0]}/{v[1]}: {v[2]}" if v else "—"
+        lines.append(
+            f"| #{eid} | {stage} | {n_cl} | ${pnl:+.2f} | {n_sup} | {verdict} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_markdown(
+    summary: WindowSummary, *, llm_pattern_section: str = "",
+    experiment_section: str = "",
+) -> str:
     overall = summary.overall()
     by_sym = summary.by_symbol()
     by_side = summary.by_side()
@@ -314,6 +391,10 @@ def render_markdown(summary: WindowSummary, *, llm_pattern_section: str = "") ->
                 f"- `{c.ts.isoformat()}` {c.symbol} {c.side}: "
                 f"${c.pnl:+.2f} ({c.reason})"
             )
+        lines.append("")
+
+    if experiment_section:
+        lines.append(experiment_section.strip())
         lines.append("")
 
     if llm_pattern_section:
@@ -460,6 +541,8 @@ def run_review(
     db = Path(db_path)
     with sqlite3.connect(str(db)) as conn:
         closes = load_window(conn, since=since, until=now)
+        experiment_section = experiment_attribution_section(
+            conn, since=since, until=now)
 
     summary = WindowSummary(since=since, until=now, closes=closes)
 
@@ -475,7 +558,9 @@ def run_review(
         else:
             llm_section = llm_response.text
 
-    markdown = render_markdown(summary, llm_pattern_section=llm_section)
+    markdown = render_markdown(
+        summary, llm_pattern_section=llm_section,
+        experiment_section=experiment_section)
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)

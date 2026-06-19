@@ -39,6 +39,13 @@ class StorageInterface(ABC):
         """Get recent trades."""
         pass
 
+    def log_suppressed_entry(self, *, symbol: str, side: str,
+                             confidence: Optional[float], gate: str,
+                             experiment_id: Optional[int] = None) -> None:
+        """Record an entry that a loop-controlled gate blocked (PROFITABILITY_PLAN.md
+        P4 counterfactual log). Default no-op; the SQLite backend persists it."""
+        return None
+
 class JsonFileStorage(StorageInterface):
     """Legacy storage using local JSON files."""
     
@@ -160,6 +167,22 @@ class SQLiteStorage(StorageInterface):
             CREATE INDEX IF NOT EXISTS idx_news_assets      ON news_events(assets);
             CREATE INDEX IF NOT EXISTS idx_news_url_hash    ON news_events(url_hash);
             CREATE INDEX IF NOT EXISTS idx_news_title_hash  ON news_events(title_hash);
+
+            -- PROFITABILITY_PLAN.md P4: counterfactual record of entries the
+            -- loop's gates blocked (struct-conf floor, blocklist, etc). Replay
+            -- mode can't reconstruct these — they're the basis for canary
+            -- evaluation v2's "avoided PnL" attribution.
+            CREATE TABLE IF NOT EXISTS suppressed_entries (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts            TEXT NOT NULL DEFAULT (datetime('now')),
+                symbol        TEXT,
+                side          TEXT,
+                confidence    REAL,
+                gate          TEXT,
+                experiment_id INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_suppressed_ts  ON suppressed_entries(ts);
+            CREATE INDEX IF NOT EXISTS idx_suppressed_exp ON suppressed_entries(experiment_id);
         """)
         # Migrate existing DB: add columns that may be missing from older schema
         existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
@@ -170,6 +193,9 @@ class SQLiteStorage(StorageInterface):
             ("reason",     "ALTER TABLE trades ADD COLUMN reason TEXT"),
             ("created_at", "ALTER TABLE trades ADD COLUMN created_at TEXT"),
             ("is_testnet", "ALTER TABLE trades ADD COLUMN is_testnet INTEGER DEFAULT 0"),
+            # P4: stamp every trade with the autonomous experiment whose
+            # override was live when the trade was logged (NULL = baseline).
+            ("experiment_id", "ALTER TABLE trades ADD COLUMN experiment_id INTEGER"),
         ]
         for col, sql in migrations:
             if col not in existing:
@@ -209,9 +235,10 @@ class SQLiteStorage(StorageInterface):
             conn = self._get_conn()
             # Use exit_price for closes, price for opens
             price = trade.get("price") or trade.get("exit_price") or trade.get("entry_price")
+            exp_id = trade.get("experiment_id")
             conn.execute(
-                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, reason, data, is_testnet, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                """INSERT INTO trades (timestamp, symbol, action, price, pnl, confidence, reason, data, is_testnet, experiment_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                 (
                     str(trade.get("timestamp", "")),
                     trade.get("symbol", ""),
@@ -222,11 +249,33 @@ class SQLiteStorage(StorageInterface):
                     trade.get("reason"),
                     json.dumps(trade, default=str),
                     is_testnet,
+                    int(exp_id) if exp_id is not None else None,
                 ),
             )
             conn.commit()
         except Exception as e:
             logger.error("SQLite log_trade failed: %s", e)
+
+    def log_suppressed_entry(self, *, symbol: str, side: str,
+                             confidence: Optional[float], gate: str,
+                             experiment_id: Optional[int] = None) -> None:
+        """Persist a P4 suppression event — an entry a loop-controlled gate
+        blocked. Best-effort: a logging failure must never affect trading."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT INTO suppressed_entries (ts, symbol, side, confidence, gate, experiment_id) "
+                "VALUES (datetime('now'), ?, ?, ?, ?, ?)",
+                (
+                    symbol, side,
+                    float(confidence) if confidence is not None else None,
+                    gate,
+                    int(experiment_id) if experiment_id is not None else None,
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error("SQLite log_suppressed_entry failed: %s", e)
 
     def get_trades(self, limit: int = 100) -> List[Dict]:
         try:

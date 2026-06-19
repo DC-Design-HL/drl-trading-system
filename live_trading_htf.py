@@ -480,6 +480,12 @@ if _RUNTIME_OVERRIDE_SUMMARY.get("skipped"):
 if _RUNTIME_OVERRIDE_SUMMARY.get("disabled"):
     logger.info("[self-improve] overrides disabled by kill switch")
 
+# PROFITABILITY_PLAN.md P4: the autonomous experiment whose override is live
+# (None = committed baseline). Every trade logged and every suppressed entry
+# is stamped with this so canary evaluation v2 can attribute outcomes to the
+# specific change instead of reading ambient PnL.
+_ACTIVE_EXPERIMENT_ID = _RUNTIME_OVERRIDE_SUMMARY.get("experiment_id")
+
 # ── Rescue Rule ──
 # Override RSI/ADX blocks when the model has HIGH confidence AND multiple signals agree.
 # This saves ~7 winning trades that would otherwise be blocked, while only letting through ~2 losses.
@@ -1400,6 +1406,9 @@ class HTFLiveBot:
         """Append trade to line-delimited JSON file and shared storage."""
         # Always tag testnet trades — this bot only runs on Binance Futures testnet
         trade["is_testnet"] = True
+        # P4: stamp the live autonomous experiment id (None = baseline) so the
+        # canary evaluator can attribute this trade to the active change.
+        trade.setdefault("experiment_id", _ACTIVE_EXPERIMENT_ID)
         self.trades.append(trade)
         try:
             with open(TRADES_FILE, "a") as f:
@@ -1412,6 +1421,18 @@ class HTFLiveBot:
             logger.debug("storage.log_trade failed: %s", exc)
         # Send Telegram alert immediately
         self._send_telegram_alert(trade)
+
+    def _log_suppressed_entry(self, side: str, confidence: float, gate: str) -> None:
+        """P4: record an entry blocked by a loop-controlled gate, stamped with
+        the live experiment id, so canary evaluation v2 can forward-sim the
+        avoided trades. Best-effort — never let logging affect trading."""
+        try:
+            self.storage.log_suppressed_entry(
+                symbol=self.symbol, side=side, confidence=confidence,
+                gate=gate, experiment_id=_ACTIVE_EXPERIMENT_ID,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("log_suppressed_entry failed: %s", exc)
 
     def _fetch_market_signals(self, symbol: str = "BTCUSDT") -> Dict:
         """Fetch current market analysis signals from the local API server."""
@@ -2545,6 +2566,8 @@ class HTFLiveBot:
                 "(historical net-negative expectancy)",
                 self.symbol, side_str,
             )
+            self._log_suppressed_entry(
+                side_str, float(sig.get("confidence", 0.0) or 0.0), "blocklist")
             return None
 
         # Structure-confidence floor (PROFITABILITY_PLAN.md P1).
@@ -2558,6 +2581,7 @@ class HTFLiveBot:
                 "🚫 STRUCT_CONF floor: %s %s conf=%.3f < %.3f (%s) — SKIP entry",
                 self.symbol, side_str, struct_conf, floor, floor_label,
             )
+            self._log_suppressed_entry(side_str, struct_conf, "struct_floor")
             return None
 
         logger.info(
