@@ -62,7 +62,7 @@ def load_closes(
 ) -> list[TradeClose]:
     """Pull testnet close rows from the trades table since `since`."""
     sql = f"""
-        SELECT timestamp, symbol, action, pnl
+        SELECT timestamp, symbol, action, pnl, data
         FROM trades
         WHERE is_testnet = 1
           AND timestamp >= ?
@@ -71,16 +71,24 @@ def load_closes(
     """
     rows = conn.execute(sql, (since, *CLOSE_ACTIONS)).fetchall()
     out: list[TradeClose] = []
-    for ts_str, symbol, action, pnl in rows:
+    for ts_str, symbol, action, pnl, data in rows:
         if pnl is None:
             continue
         side = "LONG" if "LONG" in action else "SHORT"
+        # P5: estimated funding cost stamped on the close row (0.0 if absent).
+        funding = 0.0
+        if data:
+            try:
+                funding = float(json.loads(data).get("funding_paid") or 0.0)
+            except (ValueError, TypeError, json.JSONDecodeError):
+                funding = 0.0
         out.append(
             TradeClose(
                 ts=parse_ts(ts_str),
                 symbol=symbol,
                 side=side,
                 pnl=float(pnl),
+                funding_usd=funding,
             )
         )
     return out

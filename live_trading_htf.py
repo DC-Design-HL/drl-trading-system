@@ -1434,6 +1434,92 @@ class HTFLiveBot:
         except Exception as exc:  # noqa: BLE001
             logger.debug("log_suppressed_entry failed: %s", exc)
 
+    def _capture_entry_signals(
+        self, *, ts: str, side: str, snapshot_type: str,
+        structure_conf: Optional[float] = None,
+        model_action: Optional[str] = None,
+        model_confidence: Optional[float] = None,
+        gate: Optional[str] = None, structure_sig: Optional[Dict] = None,
+    ) -> None:
+        """P5: snapshot every entry-time signal for an OPEN or a suppressed
+        entry, so signal_value_report can later measure each signal's
+        conditional expectancy. Best-effort — every sub-fetch is guarded and
+        a failure NEVER blocks or delays the trading decision."""
+        try:
+            signals: Dict = {}
+            try:
+                market = self._fetch_market_signals(self.symbol)
+                signals["market"] = self._build_signal_summary(market)
+                reg = market.get("regime", {}) or {}
+                signals["regime"] = {
+                    "type": reg.get("type") or reg.get("state"),
+                    "adx": reg.get("adx"),
+                }
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                signals["whale"] = self._get_whale_behavior_signal()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                signals["usdt_d"] = dict(_usdt_d_cache)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                signals["ext_pos_news"] = dict(_ext_pos_news_cache)
+            except Exception:  # noqa: BLE001
+                pass
+            if structure_sig:
+                signals["structure"] = {
+                    k: structure_sig.get(k) for k in (
+                        "trend", "last_signal_direction", "confidence",
+                        "fake_bos", "fake_choch")
+                }
+            if model_action is None and model_confidence is None:
+                try:
+                    model_action, model_confidence = self._snapshot_model_confidence()
+                except Exception:  # noqa: BLE001
+                    pass
+            self.storage.log_entry_signal(
+                ts=ts, symbol=self.symbol, side=side,
+                snapshot_type=snapshot_type, signals=signals,
+                structure_conf=structure_conf, model_action=model_action,
+                model_confidence=model_confidence, gate=gate,
+                experiment_id=_ACTIVE_EXPERIMENT_ID,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("capture_entry_signals failed: %s", exc)
+
+    def _estimate_close_funding(
+        self, *, entry_epoch: float, exit_dt: datetime, notional: float, side: str,
+    ) -> Optional[float]:
+        """P5: best-effort estimate of funding PAID over a position's life,
+        from cached 8h funding rates (testnet income history is unreliable).
+        Returns USD cost (LONG pays when rate>0), or None if no data. Never
+        raises — funding is a nice-to-have, the close must always complete."""
+        try:
+            from datetime import timezone as _tz
+            from src.self_improve.kline_cache import read_funding
+            from src.self_improve.metrics import estimate_funding_usd
+            if not entry_epoch or notional <= 0:
+                return None
+            start_ns = int(entry_epoch * 1e9) - int(8 * 3600 * 1e9)
+            end_ns = int(exit_dt.timestamp() * 1e9) + int(8 * 3600 * 1e9)
+            fund = read_funding(self.symbol, start=start_ns, end=end_ns)
+            if fund is None or fund.empty:
+                return None
+            f_ts = (fund["ts"].to_numpy("int64") / 1e9)   # ns → seconds
+            f_rt = fund["funding_rate"].to_numpy("float64")
+            entry_dt = datetime.fromtimestamp(entry_epoch, tz=_tz.utc)
+            ex = exit_dt if exit_dt.tzinfo else exit_dt.replace(tzinfo=_tz.utc)
+            return estimate_funding_usd(
+                entry_ts=entry_dt, exit_ts=ex, notional=notional,
+                side=side, funding_ts=f_ts, funding_rates=f_rt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("estimate_close_funding failed: %s", exc)
+            return None
+
     def _fetch_market_signals(self, symbol: str = "BTCUSDT") -> Dict:
         """Fetch current market analysis signals from the local API server."""
         try:
@@ -2568,6 +2654,11 @@ class HTFLiveBot:
             )
             self._log_suppressed_entry(
                 side_str, float(sig.get("confidence", 0.0) or 0.0), "blocklist")
+            self._capture_entry_signals(
+                ts=datetime.now().isoformat(), side=side_str,
+                snapshot_type="suppressed",
+                structure_conf=float(sig.get("confidence", 0.0) or 0.0),
+                gate="blocklist", structure_sig=sig)
             return None
 
         # Structure-confidence floor (PROFITABILITY_PLAN.md P1).
@@ -2582,6 +2673,10 @@ class HTFLiveBot:
                 self.symbol, side_str, struct_conf, floor, floor_label,
             )
             self._log_suppressed_entry(side_str, struct_conf, "struct_floor")
+            self._capture_entry_signals(
+                ts=datetime.now().isoformat(), side=side_str,
+                snapshot_type="suppressed", structure_conf=struct_conf,
+                gate="struct_floor", structure_sig=sig)
             return None
 
         logger.info(
@@ -3385,6 +3480,14 @@ class HTFLiveBot:
             self.partial_tp1_price, self.partial_tp2_price, confidence,
         )
 
+        # P5: snapshot all entry-time signals for this OPEN (best-effort).
+        self._capture_entry_signals(
+            ts=trade["timestamp"],
+            side="LONG" if "LONG" in action_str else "SHORT",
+            snapshot_type="entry", structure_conf=confidence,
+            model_action=model_action_name, model_confidence=model_confidence,
+        )
+
         if not self.dry_run:
             self._mirror_testnet(trade)
             # Sync balance AND position size from exchange after opening
@@ -3442,6 +3545,18 @@ class HTFLiveBot:
             "balance_pnl_pct": ((self._get_real_balance() - 5000.0) / 5000.0 * 100)
                 if True else 0.0,
         }
+
+        # P5: stamp an estimated funding cost on the close row (best-effort,
+        # clearly labeled estimated). Downstream metrics subtract it for a
+        # funding-aware net; the price-based `pnl` above stays gross.
+        _funding = self._estimate_close_funding(
+            entry_epoch=self.last_entry_time, exit_dt=datetime.now(),
+            notional=self.position_units * self.position_price,
+            side="LONG" if self.position == 1 else "SHORT",
+        )
+        if _funding is not None:
+            trade["funding_paid"] = round(_funding, 4)
+            trade["funding_estimated"] = True
 
         logger.info(
             "📉 %s @ $%.2f | pnl=$%.2f | reason=%s | balance=$%.2f",

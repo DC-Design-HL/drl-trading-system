@@ -46,6 +46,17 @@ class StorageInterface(ABC):
         P4 counterfactual log). Default no-op; the SQLite backend persists it."""
         return None
 
+    def log_entry_signal(self, *, ts: str, symbol: str, side: str,
+                         snapshot_type: str, signals: Dict,
+                         structure_conf: Optional[float] = None,
+                         model_action: Optional[str] = None,
+                         model_confidence: Optional[float] = None,
+                         gate: Optional[str] = None,
+                         experiment_id: Optional[int] = None) -> None:
+        """Record an entry-time signal snapshot (PROFITABILITY_PLAN.md P5) for
+        an OPEN or a suppressed entry. Default no-op; SQLite persists it."""
+        return None
+
 class JsonFileStorage(StorageInterface):
     """Legacy storage using local JSON files."""
     
@@ -183,6 +194,27 @@ class SQLiteStorage(StorageInterface):
             );
             CREATE INDEX IF NOT EXISTS idx_suppressed_ts  ON suppressed_entries(ts);
             CREATE INDEX IF NOT EXISTS idx_suppressed_exp ON suppressed_entries(experiment_id);
+
+            -- PROFITABILITY_PLAN.md P5: entry-time signal snapshot, captured at
+            -- every OPEN and every suppressed entry. Correlated against trade
+            -- outcomes by signal_value_report to measure each signal's
+            -- conditional expectancy (which deserve to gate / drive entries).
+            CREATE TABLE IF NOT EXISTS entry_signals (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts             TEXT NOT NULL,
+                symbol         TEXT,
+                side           TEXT,
+                snapshot_type  TEXT,          -- 'entry' | 'suppressed'
+                gate           TEXT,          -- set when suppressed
+                structure_conf REAL,
+                model_action   TEXT,
+                model_confidence REAL,
+                experiment_id  INTEGER,
+                signals_json   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_entry_signals_ts   ON entry_signals(ts);
+            CREATE INDEX IF NOT EXISTS idx_entry_signals_sym  ON entry_signals(symbol);
+            CREATE INDEX IF NOT EXISTS idx_entry_signals_type ON entry_signals(snapshot_type);
         """)
         # Migrate existing DB: add columns that may be missing from older schema
         existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
@@ -276,6 +308,34 @@ class SQLiteStorage(StorageInterface):
             conn.commit()
         except Exception as e:
             logger.error("SQLite log_suppressed_entry failed: %s", e)
+
+    def log_entry_signal(self, *, ts: str, symbol: str, side: str,
+                         snapshot_type: str, signals: Dict,
+                         structure_conf: Optional[float] = None,
+                         model_action: Optional[str] = None,
+                         model_confidence: Optional[float] = None,
+                         gate: Optional[str] = None,
+                         experiment_id: Optional[int] = None) -> None:
+        """Persist a P5 entry-time signal snapshot. Best-effort: a logging
+        failure must never affect trading."""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT INTO entry_signals (ts, symbol, side, snapshot_type, gate, "
+                "structure_conf, model_action, model_confidence, experiment_id, signals_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ts, symbol, side, snapshot_type, gate,
+                    float(structure_conf) if structure_conf is not None else None,
+                    model_action,
+                    float(model_confidence) if model_confidence is not None else None,
+                    int(experiment_id) if experiment_id is not None else None,
+                    json.dumps(signals, default=str),
+                ),
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error("SQLite log_entry_signal failed: %s", e)
 
     def get_trades(self, limit: int = 100) -> List[Dict]:
         try:

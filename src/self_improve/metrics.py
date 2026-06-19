@@ -33,6 +33,40 @@ class TradeClose:
     symbol: str
     side: str  # 'LONG' | 'SHORT'
     pnl: float
+    # PROFITABILITY_PLAN.md P5: estimated funding PAID over the position's
+    # life (USD, positive = a cost that reduces net). 0.0 when unknown, so
+    # pre-P5 callers that omit it get identical gross behaviour.
+    funding_usd: float = 0.0
+
+
+def estimate_funding_usd(
+    *,
+    entry_ts: datetime,
+    exit_ts: datetime,
+    notional: float,
+    side: str,
+    funding_ts: Sequence[float],
+    funding_rates: Sequence[float],
+) -> float:
+    """Estimate funding PAID over [entry_ts, exit_ts] (PROFITABILITY_PLAN.md P5).
+
+    ``funding_ts`` are funding-boundary epoch SECONDS, ``funding_rates`` the
+    aligned 8h rates. A boundary counts if entry_ts < boundary <= exit_ts.
+    A LONG pays when the rate is positive (cost > 0); a SHORT receives it
+    (cost < 0). Returns the cost in USD: subtract it from gross PnL to get
+    funding-aware net. Empty/short inputs → 0.0 (no estimate available)."""
+    if notional <= 0 or not len(funding_ts):
+        return 0.0
+    e = entry_ts.timestamp()
+    x = exit_ts.timestamp()
+    if x <= e:
+        return 0.0
+    sign = 1.0 if str(side).upper() == "LONG" else -1.0
+    rate_sum = 0.0
+    for ts, rate in zip(funding_ts, funding_rates):
+        if e < float(ts) <= x:
+            rate_sum += float(rate)
+    return sign * notional * rate_sum
 
 
 def parse_ts(text: str) -> datetime:
@@ -55,6 +89,16 @@ def filter_window(
 
 def net_pnl(trades: Sequence[TradeClose]) -> float:
     return float(sum(t.pnl for t in trades))
+
+
+def funding_total(trades: Sequence[TradeClose]) -> float:
+    """Sum of estimated funding paid across the trades (P5)."""
+    return float(sum(getattr(t, "funding_usd", 0.0) for t in trades))
+
+
+def net_pnl_after_funding(trades: Sequence[TradeClose]) -> float:
+    """Net PnL with estimated funding cost subtracted (P5)."""
+    return float(sum(t.pnl - getattr(t, "funding_usd", 0.0) for t in trades))
 
 
 def win_rate(trades: Sequence[TradeClose]) -> float:
@@ -208,6 +252,11 @@ def summarize(
     """Bundle all the metrics into one dict — convenient for snapshot rows."""
     return {
         "net_pnl_usd": net_pnl(trades),
+        # P5: funding-aware net + the funding total it was derived from.
+        # net_pnl_usd stays GROSS (price-only) for backcompat; readers that
+        # want the true bottom line use net_pnl_after_funding_usd.
+        "funding_usd_total": funding_total(trades),
+        "net_pnl_after_funding_usd": net_pnl_after_funding(trades),
         "num_closes": len(trades),
         "win_rate": win_rate(trades),
         "profit_factor": profit_factor(trades),

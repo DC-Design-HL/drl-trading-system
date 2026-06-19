@@ -287,9 +287,83 @@ def experiment_attribution_section(
     return "\n".join(lines)
 
 
+def entry_signal_patterns_section(
+    conn: sqlite3.Connection, *, since: datetime, until: datetime,
+) -> str:
+    """PROFITABILITY_PLAN.md P5 §4 — mine the entry-signal snapshots for
+    loser patterns the numeric tables miss: of this window's losing trades,
+    how many had model disagreement / whale opposition AT ENTRY. Returns ''
+    if the P5 schema is absent or there are too few losers to bother."""
+    open_actions = ("OPEN_LONG", "OPEN_SHORT")
+    close_actions = ("CLOSE_LONG", "CLOSE_SHORT", "REVERSE_CLOSE_LONG",
+                     "REVERSE_CLOSE_SHORT", "SL_HIT", "TP_HIT")
+    try:
+        # Snapshots keyed by (symbol, open_ts).
+        snaps = {}
+        for ts, symbol, side, m_action, sigs in conn.execute(
+            "SELECT ts, symbol, side, model_action, signals_json FROM entry_signals "
+            "WHERE snapshot_type='entry'"
+        ).fetchall():
+            try:
+                signals = json.loads(sigs) if sigs else {}
+            except json.JSONDecodeError:
+                signals = {}
+            snaps[(symbol, ts)] = {"side": side, "model_action": m_action,
+                                   "signals": signals}
+    except sqlite3.OperationalError:
+        return ""  # P5 schema not migrated yet
+    if not snaps:
+        return ""
+
+    # FIFO-pair OPEN→CLOSE; keep losers whose close is in the window.
+    rows = conn.execute(
+        "SELECT id, timestamp, symbol, action, pnl FROM trades "
+        "WHERE is_testnet=1 ORDER BY id"
+    ).fetchall()
+    stack: dict[str, list[str]] = {}
+    losers: list[dict] = []
+    s_iso, u_iso = since.isoformat(), until.isoformat()
+    for _id, ts, symbol, action, pnl in rows:
+        if action in open_actions:
+            stack.setdefault(symbol, []).append(ts)
+        elif action in close_actions and pnl is not None:
+            st = stack.get(symbol)
+            if not st:
+                continue
+            open_ts = st.pop(0)
+            if float(pnl) < 0 and s_iso <= str(ts) <= u_iso:
+                snap = snaps.get((symbol, open_ts))
+                if snap:
+                    losers.append(snap)
+
+    if len(losers) < 3:
+        return ""
+
+    n = len(losers)
+    disagreed = sum(1 for s in losers if s["model_action"]
+                    and str(s["model_action"]).upper() != str(s["side"]).upper())
+    whale_opp = 0
+    for s in losers:
+        whale = s["signals"].get("whale") or {}
+        d = whale.get("direction")
+        if d is not None and whale.get("intent") != "unavailable":
+            if (float(d) > 0.5) != (str(s["side"]).upper() == "LONG"):
+                whale_opp += 1
+
+    return "\n".join([
+        "## Entry-signal patterns (P5)", "",
+        f"Of the **{n}** losing trades this window with an entry snapshot:",
+        f"- **{disagreed}** ({disagreed * 100 // n}%) had the PPO model "
+        f"DISAGREEING with the side at entry.",
+        f"- **{whale_opp}** ({whale_opp * 100 // n}%) had the whale signal "
+        f"OPPOSING the side at entry.",
+        "",
+    ])
+
+
 def render_markdown(
     summary: WindowSummary, *, llm_pattern_section: str = "",
-    experiment_section: str = "",
+    experiment_section: str = "", entry_signal_section: str = "",
 ) -> str:
     overall = summary.overall()
     by_sym = summary.by_symbol()
@@ -395,6 +469,10 @@ def render_markdown(
 
     if experiment_section:
         lines.append(experiment_section.strip())
+        lines.append("")
+
+    if entry_signal_section:
+        lines.append(entry_signal_section.strip())
         lines.append("")
 
     if llm_pattern_section:
@@ -543,6 +621,8 @@ def run_review(
         closes = load_window(conn, since=since, until=now)
         experiment_section = experiment_attribution_section(
             conn, since=since, until=now)
+        entry_signal_section = entry_signal_patterns_section(
+            conn, since=since, until=now)
 
     summary = WindowSummary(since=since, until=now, closes=closes)
 
@@ -560,7 +640,8 @@ def run_review(
 
     markdown = render_markdown(
         summary, llm_pattern_section=llm_section,
-        experiment_section=experiment_section)
+        experiment_section=experiment_section,
+        entry_signal_section=entry_signal_section)
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
