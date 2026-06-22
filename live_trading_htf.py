@@ -457,7 +457,12 @@ RSI_GUARD_TREND_ADX_MIN = 25        # Wilder's "trending" cutoff (ADX >= 25 = re
 # In ranging markets, trend-following signals produce whipsaws.
 # Backtested Mar 24-31: catches ADX=10-13 losses in directionless markets.
 ADX_GUARD_ENABLED = True
-ADX_GUARD_MIN = 20                  # Block all trades when ADX below this
+ADX_GUARD_MIN = 28                  # Block all trades when ADX below this.
+# Raised 20→28 on 2026-06-22 as a chop defense (Chen-approved). Forward-sim
+# over the Jun 17–22 ranging drawdown (@ $4,731): ADX20 −$69.91/35tr →
+# ADX28 −$41.72/31tr, ~40% less bleed by sitting out low-conviction ranging
+# entries. Damage control while the chop lasts; revert to 20 to restore.
+# Within the P3 envelope [15,30]; the autonomous loop may still tune it.
 
 # ── _apply_runtime_overrides() invocation ──
 # Placed here (not at the function definition) so every envelope-controlled
