@@ -50,6 +50,16 @@ WHALE_TRACKERS = {}
 _MARKET_CACHE: dict = {}
 MARKET_CACHE_TTL = 30  # 30 seconds cache (restored from 1 hour since we removed proxy)
 
+# Testnet wallet baseline at the 2026-05-01 reset. Headline PnL is wallet minus
+# this — the one figure that matches the real exchange balance.
+RESET_BASELINE_USD = 5000.0
+
+
+def headline_pnl(wallet_balance: float, *, baseline: float = RESET_BASELINE_USD) -> float:
+    """Truthful PnL-since-reset = real wallet − reset baseline. Used instead of
+    summing per-close realized_pnl, which drifts high (see get_state)."""
+    return round(float(wallet_balance) - baseline, 2)
+
 
 @app.route('/api/state')
 def get_state():
@@ -160,18 +170,20 @@ def get_state():
         except Exception as reconcile_err:
             logger.error(f"Exchange reconciliation failed (using bot state as fallback): {reconcile_err}")
 
-        # Use state file balances directly — trade log accumulation causes inflated PnL
-        # The state files (htf_trading_state.json etc.) track realized_pnl correctly per session
+        # Headline PnL is derived from the REAL synced wallet, not from summing
+        # per-close realized_pnl. The per-close figures drift high (partial-TP
+        # accumulation + funding/fees that price-based pnl never subtracts), so
+        # summing them overstated PnL — and total_balance separately added them
+        # on top of the wallet, double-counting ~$600 (2026-06-22 reconciliation:
+        # true wallet $4,731 was shown as $5,340). Wallet − reset baseline is the
+        # one truthful number. Per-symbol realized_pnl stays in assets for
+        # attribution; only the headline is corrected.
         try:
-            raw_assets = state.get('raw_state', {}).get('assets', {})
-            if not raw_assets:
-                raw_assets = state.get('assets', {})
-            # Sum realized PnL from state files (reset per session, not accumulated forever)
-            total_rpnl = sum(a.get('realized_pnl', 0) for a in raw_assets.values() if isinstance(a, dict))
-            open_pnl = sum(a.get('pnl', 0) for a in raw_assets.values() if isinstance(a, dict) and a.get('position', 0) != 0)
-            if raw_assets:
-                state['total_pnl'] = total_rpnl + open_pnl
-                state['realized_pnl'] = total_rpnl + open_pnl
+            wallet = state.get('total_balance', state.get('balance'))
+            if wallet is not None:
+                pnl = headline_pnl(float(wallet))
+                state['total_pnl'] = pnl
+                state['realized_pnl'] = pnl
         except Exception as math_err:
             logger.error(f"Failed PnL calculation: {math_err}")
             

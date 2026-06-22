@@ -1104,9 +1104,13 @@ class HTFLiveBot:
                 "source": "htf_agent",
             }
             shared_state["assets"] = assets
-            shared_state["total_balance"] = self.balance + sum(
-                a.get("pnl", 0) for a in assets.values()
-            )
+            # total_balance IS the real synced wallet. self.balance is kept in
+            # sync with the exchange (_sync_balance_from_exchange) and already
+            # reflects every realized PnL. Do NOT add the per-symbol cumulative
+            # realized_pnl on top — that double-counted ~$600 and inflated the
+            # dashboard above the true wallet (2026-06-22 reconciliation:
+            # 4731 wallet + 609 realized = 5340 shown). The wallet is the truth.
+            shared_state["total_balance"] = self.balance
             self.storage.save_state(shared_state)
         except Exception as exc:
             logger.debug("Failed to update shared state: %s", exc)
