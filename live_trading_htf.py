@@ -240,6 +240,14 @@ SYMBOL_SIDE_BLOCKLIST: set = {
     ("SOLUSDT", "LONG"),
     ("XRPUSDT", "LONG"),
     ("XRPUSDT", "SHORT"),
+    # Short-bias move 2026-06-24 (Chen-approved). Directional analysis since the
+    # May-1 reset: SHORT +$581/64% WR vs LONG −$152/50% WR, and every symbol's
+    # short beats its long. BTC LONG (−$27) and ETH LONG (−$32) were the last
+    # net-negative long drags still enabled — block them. Forward-sim Jun 14–22
+    # (chop): blocking these improved net −$138→−$104. Regime bet — REMOVE these
+    # two to restore longs when the market turns to a confirmed uptrend.
+    ("BTCUSDT", "LONG"),
+    ("ETHUSDT", "LONG"),
 }
 
 # ── Self-improvement runtime overrides (autonomous loop) ─────────────────
