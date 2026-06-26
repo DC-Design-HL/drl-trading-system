@@ -312,41 +312,54 @@ class HTFTradingEnv(gym.Env):
         min_hold_steps: int = 4  # ~1 hour minimum hold for 15M bars
 
         # ---- execute action -------------------------------------------------
+        # ANTI-OVERFIT REWARD (PROFITABILITY retrain prep 2026-06-26, per
+        # RETRAINING_PLAN.md §4.1). The reward is now realized PnL plus a few
+        # small, SYMMETRIC structural costs — nothing that lets the agent farm
+        # shaped reward instead of edge. Removed vs the old reward:
+        #   * asymmetric SL penalty (−0.05) and TP bonus (+0.10–0.15) — these
+        #     taught "run winners / cut losers" on the training set only; the
+        #     natural TP%>SL% R:R already rewards good exits honestly;
+        #   * unrealized-PnL hold credit (+0.2×pnl_pct) — rewarded mark-to-
+        #     market drift, not realized edge;
+        #   * HTF-alignment reward MULTIPLIERS (htf_mult, align_bonus) — scaled
+        #     reward by regime → overfit to seen alignment patterns;
+        #   * idle penalty — forced action; let the agent choose to wait.
+        # Kept: realized PnL, a flat symmetric trade cost, the min-hold churn
+        # penalty, and a small symmetric counter-trend prior (the HTF thesis).
+        _TRADE_COST = 0.003   # flat, side-independent proxy for fees+slippage
+        _MIN_HOLD_PENALTY = 0.015
+        _COUNTER_TREND_PENALTY = 0.015
+
         if action == 1:  # Long
             if self.position == -1:  # close short first
                 if steps_in_position < min_hold_steps:
-                    reward -= 0.015
+                    reward -= _MIN_HOLD_PENALTY
                 pnl = self._close_position(current_price)
                 reward += pnl
                 trade_made = True
 
             if self.position == 0:
-                # Counter-trend penalty: going long when 1D+4H are bearish
-                if htf_bearish:
-                    reward -= 0.015
-                # HTF alignment multiplier on trade cost
-                htf_mult = 1.0 + 0.5 * max(0.0, htf_align)
+                if htf_bearish:  # symmetric counter-trend prior
+                    reward -= _COUNTER_TREND_PENALTY
                 self._open_position(current_price, 1)
                 self.position_entry_step = self.current_step
-                reward -= 0.003 * htf_mult  # weighted trade cost signal
+                reward -= _TRADE_COST  # flat cost — no regime multiplier
                 trade_made = True
 
         elif action == 2:  # Short
             if self.position == 1:  # close long first
                 if steps_in_position < min_hold_steps:
-                    reward -= 0.015
+                    reward -= _MIN_HOLD_PENALTY
                 pnl = self._close_position(current_price)
                 reward += pnl
                 trade_made = True
 
             if self.position == 0:
-                # Counter-trend penalty: going short when 1D+4H are bullish
-                if htf_bullish:
-                    reward -= 0.015
-                htf_mult = 1.0 + 0.5 * max(0.0, -htf_align)
+                if htf_bullish:  # symmetric counter-trend prior
+                    reward -= _COUNTER_TREND_PENALTY
                 self._open_position(current_price, -1)
                 self.position_entry_step = self.current_step
-                reward -= 0.003 * htf_mult
+                reward -= _TRADE_COST  # flat cost — no regime multiplier
                 trade_made = True
 
         # ---- advance step ---------------------------------------------------
@@ -354,6 +367,9 @@ class HTFTradingEnv(gym.Env):
         done: bool = self.current_step >= self._n_15m - 1
 
         # ---- SL / TP check at the new bar -----------------------------------
+        # Both exits credit ONLY realized PnL — the TP%>SL% asymmetry in the
+        # PnL itself is the honest edge signal; no extra shaped bonus/penalty,
+        # and no unrealized credit while holding.
         if self.position != 0 and not done:
             new_price: float = float(self.df_15m.iloc[self.current_step]["close"])
 
@@ -365,25 +381,13 @@ class HTFTradingEnv(gym.Env):
             if pnl_pct <= -self.stop_loss_pct:
                 pnl = self._close_position(new_price)
                 reward += pnl
-                reward -= 0.05  # strong SL penalty
                 trade_made = True
 
             elif pnl_pct >= self.take_profit_pct:
                 pnl = self._close_position(new_price)
                 reward += pnl
-                # Bonus scaled by HTF alignment: aligned TP hit earns more
-                align_bonus = 0.10 * (1.0 + 0.5 * abs(htf_align))
-                reward += align_bonus
                 trade_made = True
-
-            else:
-                # Unrealized PnL credit (0.2x) — encourages holding winners
-                # Position-size-invariant: pure percentage, no scaling
-                reward += pnl_pct * 0.2
-
-        # ---- idle penalty when strong setup is being ignored ----------------
-        if self.position == 0 and abs(htf_align) > 0.6:
-            reward -= 0.0005
+            # else: holding — no unrealized credit (removed).
 
         # ---- equity tracking and drawdown penalty ---------------------------
         equity: float = self._calculate_equity()
@@ -391,9 +395,11 @@ class HTFTradingEnv(gym.Env):
         if equity > self.max_balance:
             self.max_balance = equity
 
+        # Proportional drawdown penalty (RETRAINING_PLAN §4.1) — only past a
+        # real 10% dip, scaled, not a hard threshold cliff.
         drawdown: float = (self.max_balance - equity) / (self.max_balance + 1e-10)
-        if drawdown > 0.05:
-            reward -= drawdown * 0.1
+        if drawdown > 0.10:
+            reward -= drawdown * 0.05
 
         # ---- build observation ----------------------------------------------
         if done:

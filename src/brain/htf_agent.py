@@ -180,9 +180,14 @@ class HTFTradingAgent:
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "verbose": 1,
-            # Network architecture: three shared hidden layers for both policy
-            # and value function heads.
-            "net_arch": [dict(pi=[512, 256, 128], vf=[512, 256, 128])],
+            # Anti-overfit (RETRAINING_PLAN.md §4.2, retrain prep 2026-06-26):
+            # the old [512,256,128]×2 net was ~250K params on a noisy financial
+            # signal — severely over-parameterized and prone to memorizing the
+            # training regime. Shrunk to [256,128], and added L2 weight decay on
+            # the optimizer. Smaller capacity + regularization push the model
+            # toward generalizable structure instead of curve-fitting folds.
+            "net_arch": [dict(pi=[256, 128], vf=[256, 128])],
+            "weight_decay": 1e-4,
             # Tensorboard log directory
             "tensorboard_log": "./logs/tensorboard/htf/",
         }
@@ -194,6 +199,10 @@ class HTFTradingAgent:
     def _create_model(self) -> PPO:
         """Instantiate a fresh PPO model with the HTF network architecture."""
         policy_kwargs = {"net_arch": self.config["net_arch"]}
+        # L2 weight decay on the Adam optimizer (anti-overfit regularization).
+        wd = self.config.get("weight_decay", 0.0)
+        if wd:
+            policy_kwargs["optimizer_kwargs"] = {"weight_decay": wd}
 
         model = PPO(
             policy=self.config["policy"],
