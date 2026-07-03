@@ -223,13 +223,25 @@ def evaluate_agent(agent, env, n_episodes: int = 3) -> Dict:
     """
     all_metrics: List[Dict] = []
 
+    # CRITICAL (anti-overfit, 2026-07-03): the policy is trained on
+    # VecNormalize-normalized observations (norm_obs=True). Feeding the bare
+    # env's RAW observation to predict() sends the network out-of-distribution
+    # inputs, making every OOS Sharpe/return meaningless noise — the exact bug
+    # class (RETRAINING_PLAN §1 #2) that manufactured the fake +5515%. Apply the
+    # trained running stats to each obs before predict().
+    vecnorm = getattr(agent, "vec_env", None)
+    if vecnorm is None or not hasattr(vecnorm, "normalize_obs"):
+        logger.warning("evaluate_agent: no VecNormalize stats on agent — "
+                       "OOS metrics will be computed on RAW (unnormalized) obs.")
+
     for ep in range(n_episodes):
         obs, _ = env.reset()
         done = False
         truncated = False
 
         while not (done or truncated):
-            action, _, _ = agent.predict(obs, deterministic=True)
+            obs_in = vecnorm.normalize_obs(obs) if vecnorm is not None else obs
+            action, _, _ = agent.predict(obs_in, deterministic=True)
             obs, _, done, truncated, _ = env.step(action)
 
         if hasattr(env, "get_episode_metrics"):
@@ -549,6 +561,30 @@ class HTFWalkForwardTrainer:
             logger.info("Saved fold model to %s", model_path)
         except Exception as exc:
             logger.warning("Could not save fold model: %s", exc)
+
+        # --- Reload the BEST-on-validation checkpoint for evaluation ---
+        # EvalCallback saved the best-on-val policy to best_model.zip. Without
+        # this reload we would evaluate the FINAL (last-step) policy — the most
+        # overfit one — and the "save best on val" early-stopping (§4.5) would be
+        # dead. Reload it plus the normalization stats it was selected under, so
+        # the OOS numbers reflect the model we would actually deploy.
+        # (anti-overfit fix, 2026-07-03)
+        best_zip = fold_dir / "best_model.zip"
+        if best_zip.exists():
+            from stable_baselines3 import PPO  # noqa: PLC0415
+            from stable_baselines3.common.vec_env import VecNormalize  # noqa: PLC0415
+            try:
+                agent.model = PPO.load(str(best_zip), env=agent.vec_env)
+                best_vn = fold_dir / "best_vecnorm.pkl"
+                if best_vn.exists():
+                    agent.vec_env = VecNormalize.load(str(best_vn), agent.vec_env.venv)
+                logger.info("Reloaded best-on-val checkpoint for OOS eval: %s", best_zip)
+            except Exception as exc:
+                logger.warning("Could not reload best checkpoint (%s); "
+                               "evaluating FINAL model instead.", exc)
+        else:
+            logger.warning("No best_model.zip for fold %d — evaluating FINAL "
+                           "(last-step) model; OOS may be optimistic.", fold)
 
         # --- Evaluate on validation set ---
         logger.info("Evaluating on validation set (%d episodes)...", self.n_eval_episodes)

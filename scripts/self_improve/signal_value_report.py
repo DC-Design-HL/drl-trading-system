@@ -35,30 +35,44 @@ _DB = _REPO / "data" / "trading.db"
 _OUT_DIR = _REPO / "docs" / "ground_truth"
 MIN_CLOSES = 100
 
-_OPEN = ("OPEN_LONG", "OPEN_SHORT")
-_CLOSE = ("CLOSE_LONG", "CLOSE_SHORT", "REVERSE_CLOSE_LONG",
-          "REVERSE_CLOSE_SHORT", "SL_HIT", "TP_HIT")
-
-
 def _pnl_by_open(conn: sqlite3.Connection) -> dict[tuple[str, str], float]:
-    """FIFO-pair OPEN→CLOSE per symbol; return {(symbol, open_ts): close_pnl}.
+    """Map each OPEN row to the realized PnL of the position it belonged to:
+    ``{(symbol, open_ts): realized_pnl}``.
 
-    The OPEN row's `timestamp` is the exact key the entry_signals snapshot was
-    stamped with, so the snapshot joins to its outcome on (symbol, ts)."""
+    Robust to the live trade log's OPEN/CLOSE imbalance. The old FIFO stack
+    pop-paired opens to closes 1:1, which drifts catastrophically because:
+
+      * the bot re-logs an OPEN every iteration it re-affirms the same side
+        (SOL alone has ~290 back-to-back opens with no close between), and
+      * some positions close server-side (SL/TP) with no logged CLOSE.
+
+    Under FIFO the (symbol, open_ts) key of a recent snapshot almost never
+    lands in the map (only ~4/68 paired). Instead we walk each symbol in id
+    order and attribute the NEXT full CLOSE's realized PnL to every
+    still-unresolved OPEN before it. Partial fills keep the position open.
+    Opens with no subsequent logged CLOSE (still open, or closed server-side
+    and never logged — see the SOL logging gap) simply don't pair.
+
+    Caveat: consecutive re-affirmation opens all inherit the same close PnL,
+    so a position with N logged opens contributes N correlated rows. Fine for
+    a directional read; note it when N is large for a symbol.
+    """
     rows = conn.execute(
         "SELECT id, timestamp, symbol, action, pnl FROM trades "
-        "WHERE is_testnet=1 ORDER BY id"
+        "WHERE is_testnet=1 ORDER BY symbol, id"
     ).fetchall()
-    open_stack: dict[str, list[str]] = {}
     out: dict[tuple[str, str], float] = {}
+    pending: dict[str, list[str]] = {}
     for _id, ts, symbol, action, pnl in rows:
-        if action in _OPEN:
-            open_stack.setdefault(symbol, []).append(ts)
-        elif action in _CLOSE and pnl is not None:
-            stack = open_stack.get(symbol)
-            if stack:
-                open_ts = stack.pop(0)
+        a = (action or "").upper()
+        if a.startswith("OPEN"):
+            pending.setdefault(symbol, []).append(ts)
+        elif a.startswith("PARTIAL"):
+            continue  # partial fill — position stays open
+        elif a.startswith("CLOSE") and pnl is not None:
+            for open_ts in pending.get(symbol, []):
                 out[(symbol, open_ts)] = float(pnl)
+            pending[symbol] = []
     return out
 
 

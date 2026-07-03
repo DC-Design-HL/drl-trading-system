@@ -94,6 +94,36 @@ class HTFMetricsCallback(BaseCallback):
         return summary
 
 
+class BestVecNormalizeEvalCallback(EvalCallback):
+    """EvalCallback that also snapshots the (synced) VecNormalize stats whenever
+    a new best-on-validation model is saved.
+
+    SB3's EvalCallback saves ``best_model.zip`` (policy weights only) and, on
+    each eval, syncs the eval env's normalization stats from the training env.
+    But it never persists those stats — so a reloaded ``best_model.zip`` would
+    be scored under whatever (drifted) obs stats happen to be live, not the ones
+    it was selected under. We save ``best_vecnorm.pkl`` alongside each new best
+    so evaluation/inference can reload the exact normalization the checkpoint
+    was chosen with. Part of the 2026-07-03 anti-overfit fix set.
+    """
+
+    def __init__(self, *args, vecnorm_save_path: Optional[str] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._vecnorm_save_path = vecnorm_save_path
+
+    def _on_step(self) -> bool:
+        prior_best = self.best_mean_reward
+        result = super()._on_step()
+        if self._vecnorm_save_path and self.best_mean_reward > prior_best:
+            try:
+                # self.eval_env is the VecNormalize wrapper; SB3 synced its
+                # obs_rms from the training env immediately before this eval.
+                self.eval_env.save(self._vecnorm_save_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not snapshot best VecNormalize stats: %s", exc)
+        return result
+
+
 # ---------------------------------------------------------------------------
 # Main agent class
 # ---------------------------------------------------------------------------
@@ -265,8 +295,9 @@ class HTFTradingAgent:
 
         best_path = save_path or "./data/models/htf/"
         log_path = "./logs/eval/htf/" + (phase_tag + "/" if phase_tag else "")
+        vecnorm_save_path = os.path.join(best_path, "best_vecnorm.pkl")
 
-        return EvalCallback(
+        return BestVecNormalizeEvalCallback(
             eval_vec,
             best_model_save_path=best_path,
             log_path=log_path,
@@ -274,6 +305,7 @@ class HTFTradingAgent:
             n_eval_episodes=5,
             deterministic=True,
             render=False,
+            vecnorm_save_path=vecnorm_save_path,
         )
 
     # ------------------------------------------------------------------

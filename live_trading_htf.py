@@ -117,7 +117,15 @@ MIN_HOLD_SECONDS = 3600   # 1 hour minimum hold (HTF signal is slower)
 # SL but are clearly off-thesis at the 6h mark.
 STAGNANT_HOURS = 6.0
 STAGNANT_PCT_MIN = -0.010
-STAGNANT_PCT_MAX = 0.005
+# 2026-07-03: lowered from +0.5% → 0.0% (loss-only). The Jun15–Jul3 stagnant
+# counterfactual (scripts/self_improve/stagnant_counterfactual.py) showed exit
+# tuning is NOT a profitability lever (disabling stagnant is WORSE; best tweak
+# within noise), BUT force-closing a trade that is slightly GREEN at the 6h mark
+# forfeits its chance to reach the +0.8% trailing-breakeven where the profit
+# engine engages — strictly suboptimal. Now we only time-cut trades that are
+# actually losing/flat; slightly-green drifters keep running. Reversible; within
+# the P3 STAGNANT envelope. Not a needle-mover in chop, mild help in trends.
+STAGNANT_PCT_MAX = 0.0
 
 # Anti-whipsaw: block quick losing reversals (Strategy E from backtest_whipsaw.py)
 # If previous trade was opposite direction, closed <2h ago, AND lost money → skip.
@@ -1311,15 +1319,24 @@ class HTFLiveBot:
                 return
 
             if real_amt == 0.0 and self.position != 0:
-                # Exchange says flat but bot thinks it has a position — reset
+                # Exchange says flat but bot thinks it has a position — it closed
+                # server-side (SL/TP filled between iterations). Log the REAL
+                # close (fetched from the exchange fills) BEFORE resetting, so
+                # the trade log and PnL attribution stay complete. Previously
+                # this path dropped the close entirely — the cause of the
+                # opens-without-closes gap (SOL had 24 opens / 0 closes in 7d).
+                # Fixed 2026-07-03.
                 logger.warning(
                     "⚠️ STALE POSITION DETECTED: bot has %s %s but exchange is FLAT. "
-                    "Resetting to flat (likely closed on exchange side).",
+                    "Logging server-side close, then resetting.",
                     "LONG" if self.position == 1 else "SHORT",
                     self.symbol,
                 )
-                # Record a synthetic close trade for tracking
-                close_action = "CLOSE_LONG" if self.position == 1 else "CLOSE_SHORT"
+                try:
+                    self._log_server_side_close(executor)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Server-side close logging failed for %s: %s",
+                                 self.symbol, exc)
                 self.position = 0
                 self.position_price = 0.0
                 self.position_units = 0.0
@@ -1438,6 +1455,84 @@ class HTFLiveBot:
             logger.debug("storage.log_trade failed: %s", exc)
         # Send Telegram alert immediately
         self._send_telegram_alert(trade)
+
+    def _log_server_side_close(self, executor) -> None:
+        """Log a CLOSE for a position that closed server-side (SL/TP filled on
+        the exchange between bot iterations), using the REAL exchange fills so
+        realized PnL and exit price are accurate — not estimated.
+
+        Must be called BEFORE the position state is reset. Does NOT mutate
+        self.balance: the wallet sync is the source of truth for balance, and
+        touching it here would risk the balance double-count class of bug. We
+        do record realized_pnl (per-symbol attribution) and cooldown/whipsaw
+        state, consistent with a normal close. Best-effort: on any fetch error
+        we still log the close with pnl=None so the row is never dropped.
+        """
+        side = self.position
+        entry_price = self.position_price
+        units = self.position_units
+        entry_ms = (self.position_entry_time or 0) * 1000.0
+        action_str = "CLOSE_LONG" if side == 1 else "CLOSE_SHORT"
+
+        exit_price: Optional[float] = None
+        net_realized: Optional[float] = None
+        close_reason = "SERVER_CLOSE"
+        try:
+            fills = executor.connector.get_trade_history(self.symbol, limit=200) or []
+            # Fills for this position's lifecycle: everything since entry.
+            # Opening fills carry realizedPnl=0, so summing realizedPnl over the
+            # window yields the position's true realized PnL. Commission is
+            # separate on Binance; subtract it for the net wallet delta.
+            recent = [f for f in fills if float(f.get("time", 0) or 0) >= entry_ms]
+            if recent:
+                realized = sum(float(f.get("realizedPnl", 0) or 0) for f in recent)
+                commission = sum(float(f.get("commission", 0) or 0) for f in recent)
+                net_realized = realized - commission
+                # exit price = qty-weighted avg of the closing (reduce) fills,
+                # i.e. those on the opposite side to our position
+                want = "SELL" if side == 1 else "BUY"
+                closing = [f for f in recent if str(f.get("side", "")).upper() == want]
+                qty = sum(abs(float(f.get("qty", 0) or 0)) for f in closing)
+                if qty > 0:
+                    exit_price = sum(
+                        abs(float(f.get("qty", 0) or 0)) * float(f.get("price", 0) or 0)
+                        for f in closing
+                    ) / qty
+                if entry_price and exit_price:
+                    gained = (exit_price - entry_price) if side == 1 else (entry_price - exit_price)
+                    close_reason = "SERVER_TP" if gained > 0 else "SERVER_SL"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not fetch server-close fills for %s: %s — "
+                           "logging close with pnl=None.", self.symbol, exc)
+
+        trade = {
+            "action": action_str,
+            "reason": close_reason,
+            "symbol": self.symbol,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "units": units,
+            "pnl": net_realized,
+            "confidence": 1.0,
+            "timestamp": datetime.now().isoformat(),
+            "agent": "htf",
+            "server_side": True,
+        }
+        self._log_trade(trade)
+
+        if net_realized is not None:
+            self.realized_pnl += net_realized
+            self.last_close_pnl = net_realized
+            if net_realized < 0:
+                self.last_loss_time = time.time()
+        self.last_close_direction = side
+        self.last_close_time = time.time()
+        logger.info(
+            "📝 Logged server-side close %s %s: reason=%s pnl=%s exit=%s",
+            action_str, self.symbol, close_reason,
+            f"{net_realized:.2f}" if net_realized is not None else "None",
+            f"{exit_price:.4f}" if exit_price else "None",
+        )
 
     def _log_suppressed_entry(self, side: str, confidence: float, gate: str) -> None:
         """P4: record an entry blocked by a loop-controlled gate, stamped with

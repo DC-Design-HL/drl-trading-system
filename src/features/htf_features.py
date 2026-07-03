@@ -1452,11 +1452,18 @@ class HTFDataAligner:
 
         Returns
         -------
-        int : Integer position in df_parent of the most recent parent bar
-              whose timestamp is <= df_child.index[child_idx].
-              Returns 0 if no parent bar precedes the child timestamp.
+        int : Integer position in df_parent of the most recent FULLY CLOSED
+              parent bar as of df_child.index[child_idx].
+              Returns 0 if no closed parent bar precedes the child timestamp.
         """
         child_ts = df_child.index[child_idx]
-        # searchsorted gives insertion point; subtract 1 to get last bar <= child_ts
-        pos = df_parent.index.searchsorted(child_ts, side="right") - 1
-        return int(max(0, pos))
+        # ANTI-LOOKAHEAD (2026-07-03). Parent frames are resampled with
+        # label="left"/closed="left", so a bar is stamped by its OPEN time and
+        # does not close until open+duration. The last bar whose label <=
+        # child_ts is therefore still FORMING at child_ts — reading its
+        # OHLC/close leaks future price into the child observation (this is the
+        # HTF-specific leak class behind the fake +5515% overfit). Step back one
+        # bar to the most recent fully-closed parent (crypto bars are contiguous
+        # 24/7, so the preceding bar closed at the forming bar's open <= child_ts).
+        forming = df_parent.index.searchsorted(child_ts, side="right") - 1
+        return int(max(0, forming - 1))
