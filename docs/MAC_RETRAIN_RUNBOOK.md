@@ -42,9 +42,15 @@ git pull                                   # make sure you have today's commit
 
 python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip
-pip install -r requirements-training.txt   # sb3, torch (CPU), gymnasium, pandas…
+pip install -r requirements-training.txt   # sb3, torch (MPS), gymnasium, pandas…
 ```
-M-series note: it installs the CPU torch wheel — correct, training is CPU-bound.
+Notes:
+- **Python 3.12 or 3.13 both work** (flexible `>=` pins). On Apple Silicon this
+  installs an **MPS (Metal GPU) accelerated** torch — faster than CPU.
+- **Handoff:** models train here but load on the server (Py 3.12). Right after
+  install, send me `pip freeze | grep -Ei "torch|stable_baselines3|numpy|gymnasium"`
+  so I can match the server versions before you send the models — avoids any
+  cross-version load error after an overnight run.
 
 **Sanity-check the fixes are present (10 seconds):**
 ```bash
