@@ -150,10 +150,21 @@ def load_15m_csv(data_path: str) -> pd.DataFrame:
     """
     p = Path(data_path)
     if not p.exists():
-        raise FileNotFoundError(
-            f"15M data not found at {data_path}. "
-            "Run: python download_historical_data.py --symbol BTCUSDT --interval 15m"
-        )
+        # download_historical_data.py saves date-stamped names, e.g.
+        # BTCUSDT_15m_20230703_20260703.csv, while callers usually pass the
+        # plain BTCUSDT_15m.csv. Fall back to a glob so either form works;
+        # pick the most recent match if several exist. (2026-07-03)
+        matches = sorted(p.parent.glob(f"{p.stem}_*.csv"))
+        if matches:
+            logger.info("Data path %s not found — using date-stamped match %s",
+                        data_path, matches[-1])
+            p = matches[-1]
+        else:
+            raise FileNotFoundError(
+                f"15M data not found at {data_path} (and no {p.stem}_*.csv in "
+                f"{p.parent}). Run: python download_historical_data.py "
+                "--assets BTCUSDT --interval 15m"
+            )
 
     logger.info("Loading 15M data from %s", p)
     df = pd.read_csv(p, parse_dates=["open_time"])

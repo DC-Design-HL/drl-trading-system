@@ -138,6 +138,30 @@ def test_best_vecnorm_callback_is_eval_callback():
     assert "vecnorm_save_path" in BestVecNormalizeEvalCallback.__init__.__code__.co_varnames
 
 
+# ---------------------------------------------------------------------------
+# 4. load_15m_csv accepts the downloader's date-stamped filename
+# ---------------------------------------------------------------------------
+
+def test_load_15m_csv_falls_back_to_datestamped_name(tmp_path):
+    from train_htf_walkforward import load_15m_csv
+
+    idx = pd.date_range("2026-01-01", periods=5, freq="15min", tz="UTC")
+    df = pd.DataFrame({
+        "open_time": idx, "open": 1.0, "high": 1.0, "low": 1.0,
+        "close": 1.0, "volume": 1.0,
+    })
+    # write only the date-stamped file the downloader actually produces
+    df.to_csv(tmp_path / "BTCUSDT_15m_20230101_20260101.csv", index=False)
+
+    # caller passes the plain name (which does NOT exist) -> must resolve the glob
+    out = load_15m_csv(str(tmp_path / "BTCUSDT_15m.csv"))
+    assert len(out) == 5
+
+    # genuinely-missing data still raises
+    with pytest.raises(FileNotFoundError):
+        load_15m_csv(str(tmp_path / "NOTHERE_15m.csv"))
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

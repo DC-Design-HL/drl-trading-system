@@ -65,8 +65,10 @@ python download_historical_data.py \
   --years 3 --assets BTCUSDT ETHUSDT SOLUSDT XRPUSDT --interval 15m \
   --output-dir data/historical
 ```
-Produces `data/historical/<ASSET>_15m.csv`. Quality bar: no >2h gaps, >97%
-complete, no zero/negative prices.
+Produces date-stamped files like `data/historical/BTCUSDT_15m_<start>_<end>.csv`.
+The trainer's `--data-path data/historical/BTCUSDT_15m.csv` auto-resolves to the
+date-stamped file, so you don't need to rename anything. Quality bar: no >2h
+gaps, >97% complete, no zero/negative prices.
 
 ## Step 2 — Smoke-test the pipeline FIRST (~15–20 min, do NOT skip)
 
