@@ -162,6 +162,28 @@ def test_load_15m_csv_falls_back_to_datestamped_name(tmp_path):
         load_15m_csv(str(tmp_path / "NOTHERE_15m.csv"))
 
 
+# ---------------------------------------------------------------------------
+# 5. Deploy verdict gates on OUT-OF-SAMPLE performance, not just the abs ratio
+# ---------------------------------------------------------------------------
+
+def test_deploy_verdict_gates_on_oos():
+    from train_htf_walkforward import _deploy_verdict
+
+    # the exact smoke-test case: val looked great, OOS negative, small abs ratio.
+    # Old logic said "EXCELLENT"; it must now say NO EDGE.
+    v = _deploy_verdict(oos_sharpe_mean=-2.13, positive_fold_pct=0.0,
+                        avg_overfit_ratio=0.79)
+    assert "NO EDGE" in v
+    assert "EXCELLENT" not in v and "GOOD" not in v
+
+    # positive & consistent OOS -> GOOD
+    assert "GOOD" in _deploy_verdict(1.5, 100.0, 1.0)
+    # profitable OOS but big val->test gap -> OVERFIT
+    assert "OVERFIT" in _deploy_verdict(0.6, 60.0, 4.0)
+    # zero OOS Sharpe is not deployable
+    assert "NO EDGE" in _deploy_verdict(0.0, 100.0, 1.0)
+
+
 if __name__ == "__main__":  # pragma: no cover
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

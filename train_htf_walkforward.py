@@ -273,6 +273,27 @@ def evaluate_agent(agent, env, n_episodes: int = 3) -> Dict:
     return agg
 
 
+def _deploy_verdict(oos_sharpe_mean: float, positive_fold_pct: float,
+                    avg_overfit_ratio: float) -> str:
+    """Honest walk-forward deploy verdict.
+
+    Gates on OUT-OF-SAMPLE performance FIRST — a val-positive / OOS-negative
+    model is a generalization failure, not "excellent" (the old verdict only
+    looked at the abs val/test ratio and mislabelled it). Only once OOS is
+    actually profitable do we grade the val→test overfit gap.
+    """
+    if oos_sharpe_mean <= 0 or positive_fold_pct < 50:
+        return (f"NO EDGE — out-of-sample not profitable (OOS Sharpe "
+                f"{oos_sharpe_mean:.2f}, {positive_fold_pct:.0f}% positive "
+                "folds); do not deploy")
+    if avg_overfit_ratio >= 3.0:
+        return ("OVERFIT — positive OOS but large val→test gap; "
+                "validate on forward-sim before deploy")
+    if avg_overfit_ratio >= 1.5:
+        return "ACCEPTABLE — positive OOS, mild val→test gap; forward-sim then canary"
+    return "GOOD — positive & consistent out-of-sample; proceed to forward-sim gate"
+
+
 def _extract_metrics(agg: Dict) -> Dict:
     """Extract key scalar metrics from an evaluate_agent result dict."""
     return {
@@ -641,7 +662,11 @@ class HTFWalkForwardTrainer:
         val_sharpe = val_metrics["sharpe_ratio"]
         test_sharpe = test_metrics["sharpe_ratio"]
         overfit_ratio = abs(val_sharpe) / max(abs(test_sharpe), 0.01)
-        overfit_flag = overfit_ratio > 3.0
+        # Sign-aware (2026-07-03): a fold that is positive in validation but
+        # non-positive out-of-sample is a generalization FAILURE regardless of
+        # the abs ratio — the old abs-only test scored val +2.8 / test -3.1 as
+        # OK. Flag a large magnitude gap OR a positive→non-positive flip.
+        overfit_flag = overfit_ratio > 3.0 or (val_sharpe > 0 >= test_sharpe)
         logger.info(
             "  Overfit ratio (val/test Sharpe): %.2f×  %s",
             overfit_ratio,
@@ -771,16 +796,13 @@ class HTFWalkForwardTrainer:
             ],
         }
 
-        # Overfitting verdict
-        avg_ratio = summary["avg_overfit_ratio"]
-        if avg_ratio < 1.5:
-            verdict = "EXCELLENT — model generalizes well to unseen data"
-        elif avg_ratio < 3.0:
-            verdict = "ACCEPTABLE — mild overfitting, monitor live performance"
-        elif avg_ratio < 5.0:
-            verdict = "CAUTION — moderate overfitting, reduce model complexity"
-        else:
-            verdict = "DO NOT DEPLOY — severe overfitting detected"
+        # Deploy verdict — gates on OUT-OF-SAMPLE performance first, then the
+        # val→test gap (see _deploy_verdict).
+        verdict = _deploy_verdict(
+            summary["oos_sharpe_mean"],
+            summary["positive_fold_pct"],
+            summary["avg_overfit_ratio"],
+        )
         summary["overfit_verdict"] = verdict
 
         # Print summary table
@@ -797,7 +819,7 @@ class HTFWalkForwardTrainer:
         print(f"  Positive Folds: {summary['positive_fold_pct']:.0f}%")
         print(f"  Overfit Flags:  {summary['overfit_flags_count']}/{summary['valid_folds']} folds")
         print(f"  Avg Val/Test Sharpe Ratio: {summary['avg_overfit_ratio']:.2f}×")
-        print(f"  Overfitting:    {verdict}")
+        print(f"  Verdict:        {verdict}")
         print(sep)
 
         # Per-fold table
