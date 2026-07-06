@@ -1,0 +1,160 @@
+2026-07-04 17:18:46,870  INFO      
+######################################################################
+2026-07-04 17:18:46,870  INFO      HTF WALK-FORWARD VALIDATION  |  8 folds  |  Phase1=200000 steps  Phase2=400000 steps
+2026-07-04 17:18:46,870  INFO      ######################################################################
+2026-07-04 17:18:46,870  INFO      
+======================================================================
+2026-07-04 17:18:46,870  INFO      FOLD 0  |  train [2023-07-03 → 2024-04-03, 26400 bars]  val [2024-04-03 → 2024-07-03, 8736 bars]  test [2024-07-03 → 2024-10-03, 8832 bars]
+2026-07-04 17:18:46,870  INFO      ======================================================================
+2026-07-04 17:18:46,870  INFO      Building environments...
+2026-07-04 17:22:40,895  INFO      Env obs shape: (117,)  |  train=26400 bars  val=8736 bars  test=8832 bars
+2026-07-04 17:22:40,896  INFO      Initialising HTFTradingAgent...
+2026-07-04 17:22:42,541  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 17:24:44,610  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 17:24:44,611  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 17:28:47,653  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 17:28:47,654  INFO      Training complete in 365s (6.1 min)  |  600000 steps
+2026-07-04 17:28:47,658  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_00/fold_model.zip
+2026-07-04 17:28:47,667  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_00/best_model.zip
+2026-07-04 17:28:47,667  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 17:28:52,596  INFO        Val  →  Sharpe=0.081  Return=-0.2%  MaxDD=10.1%  WinRate=41.3%  Trades=293
+2026-07-04 17:28:52,596  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 17:28:57,626  INFO        Test →  Sharpe=-1.402  Return=-8.0%  MaxDD=16.6%  WinRate=38.3%  Trades=287
+2026-07-04 17:28:57,627  INFO        Overfit ratio (val/test Sharpe): 0.06×  [OK]
+2026-07-04 17:28:57,628  INFO      
+======================================================================
+2026-07-04 17:28:57,628  INFO      FOLD 1  |  train [2023-10-03 → 2024-07-03, 26304 bars]  val [2024-07-03 → 2024-10-03, 8832 bars]  test [2024-10-03 → 2025-01-03, 8832 bars]
+2026-07-04 17:28:57,628  INFO      ======================================================================
+2026-07-04 17:28:57,628  INFO      Building environments...
+2026-07-04 17:32:53,260  INFO      Env obs shape: (117,)  |  train=26304 bars  val=8832 bars  test=8832 bars
+2026-07-04 17:32:53,261  INFO      Initialising HTFTradingAgent...
+2026-07-04 17:32:53,264  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 17:34:56,122  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 17:34:56,123  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 17:39:00,642  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 17:39:00,643  INFO      Training complete in 367s (6.1 min)  |  600000 steps
+2026-07-04 17:39:00,647  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_01/fold_model.zip
+2026-07-04 17:39:00,655  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_01/best_model.zip
+2026-07-04 17:39:00,655  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 17:39:05,658  INFO        Val  →  Sharpe=0.644  Return=3.0%  MaxDD=7.5%  WinRate=41.2%  Trades=279
+2026-07-04 17:39:05,659  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 17:39:10,649  INFO        Test →  Sharpe=3.641  Return=19.9%  MaxDD=4.8%  WinRate=46.2%  Trades=266
+2026-07-04 17:39:10,649  INFO        Overfit ratio (val/test Sharpe): 0.18×  [OK]
+2026-07-04 17:39:10,651  INFO      
+======================================================================
+2026-07-04 17:39:10,651  INFO      FOLD 2  |  train [2024-01-03 → 2024-10-03, 26304 bars]  val [2024-10-03 → 2025-01-03, 8832 bars]  test [2025-01-03 → 2025-04-03, 8640 bars]
+2026-07-04 17:39:10,651  INFO      ======================================================================
+2026-07-04 17:39:10,651  INFO      Building environments...
+2026-07-04 17:43:04,544  INFO      Env obs shape: (117,)  |  train=26304 bars  val=8832 bars  test=8640 bars
+2026-07-04 17:43:04,545  INFO      Initialising HTFTradingAgent...
+2026-07-04 17:43:04,549  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 17:45:07,736  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 17:45:07,737  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 17:49:13,090  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 17:49:13,090  INFO      Training complete in 369s (6.1 min)  |  600000 steps
+2026-07-04 17:49:13,093  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_02/fold_model.zip
+2026-07-04 17:49:13,100  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_02/best_model.zip
+2026-07-04 17:49:13,100  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 17:49:18,106  INFO        Val  →  Sharpe=3.891  Return=21.5%  MaxDD=6.6%  WinRate=44.7%  Trades=244
+2026-07-04 17:49:18,106  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 17:49:22,957  INFO        Test →  Sharpe=2.508  Return=17.1%  MaxDD=8.1%  WinRate=41.5%  Trades=378
+2026-07-04 17:49:22,957  INFO        Overfit ratio (val/test Sharpe): 1.55×  [OK]
+2026-07-04 17:49:22,957  INFO      
+======================================================================
+2026-07-04 17:49:22,957  INFO      FOLD 3  |  train [2024-04-03 → 2025-01-03, 26400 bars]  val [2025-01-03 → 2025-04-03, 8640 bars]  test [2025-04-03 → 2025-07-03, 8736 bars]
+2026-07-04 17:49:22,957  INFO      ======================================================================
+2026-07-04 17:49:22,957  INFO      Building environments...
+2026-07-04 17:53:18,969  INFO      Env obs shape: (117,)  |  train=26400 bars  val=8640 bars  test=8736 bars
+2026-07-04 17:53:18,970  INFO      Initialising HTFTradingAgent...
+2026-07-04 17:53:18,974  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 17:55:20,218  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 17:55:20,218  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 17:59:22,482  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 17:59:22,482  INFO      Training complete in 364s (6.1 min)  |  600000 steps
+2026-07-04 17:59:22,486  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_03/fold_model.zip
+2026-07-04 17:59:22,492  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_03/best_model.zip
+2026-07-04 17:59:22,492  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 17:59:27,382  INFO        Val  →  Sharpe=2.669  Return=18.0%  MaxDD=9.7%  WinRate=43.2%  Trades=389
+2026-07-04 17:59:27,382  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 17:59:32,337  INFO        Test →  Sharpe=1.333  Return=6.0%  MaxDD=10.0%  WinRate=42.0%  Trades=255
+2026-07-04 17:59:32,338  INFO        Overfit ratio (val/test Sharpe): 2.00×  [OK]
+2026-07-04 17:59:32,338  INFO      
+======================================================================
+2026-07-04 17:59:32,338  INFO      FOLD 4  |  train [2024-07-03 → 2025-04-03, 26304 bars]  val [2025-04-03 → 2025-07-03, 8736 bars]  test [2025-07-03 → 2025-10-03, 8832 bars]
+2026-07-04 17:59:32,338  INFO      ======================================================================
+2026-07-04 17:59:32,338  INFO      Building environments...
+2026-07-04 18:03:26,195  INFO      Env obs shape: (117,)  |  train=26304 bars  val=8736 bars  test=8832 bars
+2026-07-04 18:03:26,196  INFO      Initialising HTFTradingAgent...
+2026-07-04 18:03:26,199  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 18:05:27,253  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 18:05:27,254  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 18:09:30,784  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 18:09:30,784  INFO      Training complete in 365s (6.1 min)  |  600000 steps
+2026-07-04 18:09:30,788  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_04/fold_model.zip
+2026-07-04 18:09:30,795  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_04/best_model.zip
+2026-07-04 18:09:30,795  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 18:09:35,648  INFO        Val  →  Sharpe=2.401  Return=10.2%  MaxDD=7.9%  WinRate=42.7%  Trades=164
+2026-07-04 18:09:35,648  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 18:09:40,600  INFO        Test →  Sharpe=-1.612  Return=-6.8%  MaxDD=12.2%  WinRate=35.4%  Trades=192
+2026-07-04 18:09:40,600  INFO        Overfit ratio (val/test Sharpe): 1.49×  [OK]
+2026-07-04 18:09:40,600  INFO      
+======================================================================
+2026-07-04 18:09:40,600  INFO      FOLD 5  |  train [2024-10-03 → 2025-07-03, 26208 bars]  val [2025-07-03 → 2025-10-03, 8832 bars]  test [2025-10-03 → 2026-01-03, 8832 bars]
+2026-07-04 18:09:40,600  INFO      ======================================================================
+2026-07-04 18:09:40,600  INFO      Building environments...
+2026-07-04 18:13:34,688  INFO      Env obs shape: (117,)  |  train=26208 bars  val=8832 bars  test=8832 bars
+2026-07-04 18:13:34,689  INFO      Initialising HTFTradingAgent...
+2026-07-04 18:13:34,693  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 18:15:37,292  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 18:15:37,293  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 18:19:42,429  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 18:19:42,430  INFO      Training complete in 368s (6.1 min)  |  600000 steps
+2026-07-04 18:19:42,433  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_05/fold_model.zip
+2026-07-04 18:19:42,441  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_05/best_model.zip
+2026-07-04 18:19:42,441  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 18:19:47,435  INFO        Val  →  Sharpe=1.852  Return=8.0%  MaxDD=7.2%  WinRate=41.3%  Trades=196
+2026-07-04 18:19:47,435  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 18:19:52,430  INFO        Test →  Sharpe=-3.912  Return=-19.0%  MaxDD=19.2%  WinRate=31.7%  Trades=243
+2026-07-04 18:19:52,430  INFO        Overfit ratio (val/test Sharpe): 0.47×  [OK]
+2026-07-04 18:19:52,430  INFO      
+======================================================================
+2026-07-04 18:19:52,430  INFO      FOLD 6  |  train [2025-01-03 → 2025-10-03, 26208 bars]  val [2025-10-03 → 2026-01-03, 8832 bars]  test [2026-01-03 → 2026-04-03, 8640 bars]
+2026-07-04 18:19:52,430  INFO      ======================================================================
+2026-07-04 18:19:52,430  INFO      Building environments...
+2026-07-04 18:23:44,629  INFO      Env obs shape: (117,)  |  train=26208 bars  val=8832 bars  test=8640 bars
+2026-07-04 18:23:44,630  INFO      Initialising HTFTradingAgent...
+2026-07-04 18:23:44,634  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 18:25:47,872  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 18:25:47,873  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 18:29:52,962  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 18:29:52,963  INFO      Training complete in 368s (6.1 min)  |  600000 steps
+2026-07-04 18:29:52,967  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_06/fold_model.zip
+2026-07-04 18:29:52,973  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_06/best_model.zip
+2026-07-04 18:29:52,973  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 18:29:58,075  INFO        Val  →  Sharpe=2.147  Return=11.1%  MaxDD=7.2%  WinRate=41.6%  Trades=233
+2026-07-04 18:29:58,075  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 18:30:03,033  INFO        Test →  Sharpe=1.074  Return=4.7%  MaxDD=9.1%  WinRate=38.6%  Trades=202
+2026-07-04 18:30:03,034  INFO        Overfit ratio (val/test Sharpe): 2.00×  [OK]
+2026-07-04 18:30:03,034  INFO      
+======================================================================
+2026-07-04 18:30:03,034  INFO      FOLD 7  |  train [2025-04-03 → 2026-01-03, 26400 bars]  val [2026-01-03 → 2026-04-03, 8640 bars]  test [2026-04-03 → 2026-07-03, 8736 bars]
+2026-07-04 18:30:03,034  INFO      ======================================================================
+2026-07-04 18:30:03,034  INFO      Building environments...
+2026-07-04 18:33:56,627  INFO      Env obs shape: (117,)  |  train=26400 bars  val=8640 bars  test=8736 bars
+2026-07-04 18:33:56,628  INFO      Initialising HTFTradingAgent...
+2026-07-04 18:33:56,632  INFO      Phase 1: HTF Alignment Focus (200000 steps)...
+2026-07-04 18:35:58,053  INFO      Phase 1 done: {'phase': 'phase1', 'timesteps': 200000, 'cumulative_timesteps': 200000}
+2026-07-04 18:35:58,053  INFO      Phase 2: Full 4-TF Cascade Execution (400000 steps)...
+2026-07-04 18:40:00,417  INFO      Phase 2 done: {'phase': 'phase2', 'timesteps': 400000, 'cumulative_timesteps': 600000}
+2026-07-04 18:40:00,418  INFO      Training complete in 364s (6.1 min)  |  600000 steps
+2026-07-04 18:40:00,421  INFO      Saved fold model to data/models/htf_walkforward_sol/fold_07/fold_model.zip
+2026-07-04 18:40:00,429  INFO      Reloaded best-on-val checkpoint for OOS eval: data/models/htf_walkforward_sol/fold_07/best_model.zip
+2026-07-04 18:40:00,429  INFO      Evaluating on validation set (3 episodes)...
+2026-07-04 18:40:05,338  INFO        Val  →  Sharpe=-3.103  Return=-14.4%  MaxDD=17.4%  WinRate=35.2%  Trades=233
+2026-07-04 18:40:05,338  INFO      Evaluating on test set (3 episodes)...
+2026-07-04 18:40:10,280  INFO        Test →  Sharpe=0.360  Return=1.1%  MaxDD=6.4%  WinRate=39.3%  Trades=140
+2026-07-04 18:40:10,280  INFO        Overfit ratio (val/test Sharpe): 8.61×  [OVERFIT WARNING]
+2026-07-04 18:40:10,281  INFO      Summary saved to data/models/htf_walkforward_sol/walk_forward_summary.json
+2026-07-04 18:40:10,281  INFO      
+HTF walk-forward validation complete.
+2026-07-04 18:40:10,281  INFO      Results saved to /Users/chenluigi/PycharmProjects/drl-trading-system/data/models/htf_walkforward_sol
