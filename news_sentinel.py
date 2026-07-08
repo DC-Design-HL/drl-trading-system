@@ -65,7 +65,9 @@ logger = logging.getLogger(__name__)
 RSS_POLL_INTERVAL    = 90    # seconds between RSS polls
 REDDIT_POLL_INTERVAL = 180   # seconds between Reddit polls
 DB_CLEANUP_INTERVAL  = 3600  # seconds between DB cleanup runs
-DB_CLEANUP_DAYS      = 7     # days to retain events
+DB_CLEANUP_DAYS      = 3650  # days to retain events (was 7 — raised 2026-07-08 to
+                             # stop purging the news corpus; we need history to train
+                             # the news-impact model. ~45 events/day → trivial storage.)
 
 # ── Alert output ──
 ALERTS_FILE = _LOG_DIR / "news_pending_alerts.jsonl"
