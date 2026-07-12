@@ -3601,7 +3601,20 @@ class HTFLiveBot:
         )
 
         if not self.dry_run:
-            self._mirror_testnet(trade)
+            mirror_result = self._mirror_testnet(trade)
+            # If the exchange REJECTED the open (e.g. -2019 margin, connectivity),
+            # do NOT record a phantom position. Revert to FLAT and bail so the bot
+            # can retry cleanly on the next signal instead of logging a fake
+            # OPEN followed by a spurious SERVER_CLOSE next iteration.
+            if mirror_result is not None and not mirror_result.get("executed", True):
+                logger.error(
+                    "❌ Exchange OPEN failed for %s — %s. Reverting to FLAT; "
+                    "no trade logged.",
+                    self.symbol,
+                    mirror_result.get("error") or mirror_result.get("note") or "unknown",
+                )
+                self._revert_failed_open(fee)
+                return None
             # Sync balance AND position size from exchange after opening
             self._sync_balance_from_exchange()
             self._sync_position_from_exchange()
@@ -3716,6 +3729,31 @@ class HTFLiveBot:
     # Testnet mirroring
     # ------------------------------------------------------------------
 
+    def _revert_failed_open(self, fee: float) -> None:
+        """Undo the optimistic state set in _open_position when the exchange
+        REJECTS the open order (e.g. Binance -2019 margin, connectivity).
+
+        Refunds the pre-deducted fee and resets all position fields back to
+        FLAT — identical to the reset block in _close_position — so the bot
+        does not carry a phantom position (which would otherwise be logged as
+        an OPEN and then produce a spurious SERVER_CLOSE on the next sync).
+        """
+        self.balance += fee
+        self.position = 0
+        self.position_price = 0.0
+        self.position_units = 0.0
+        self.sl_price = 0.0
+        self.tp_price = 0.0
+        self.peak_price = 0.0
+        self.mfe_pct = 0.0
+        self.mae_pct = 0.0
+        self.partial_tp_level = 0
+        self.partial_tp1_price = 0.0
+        self.partial_tp2_price = 0.0
+        self.sl_pct = 0.0
+        self.initial_position_units = 0.0
+        self.position_entry_time = 0.0
+
     def _mirror_testnet(self, trade: Dict) -> None:
         """
         Mirror a bot decision to futures testnet.
@@ -3764,12 +3802,17 @@ class HTFLiveBot:
                     result.get("sl_order_id", ""),
                     result.get("tp_order_id", ""),
                 )
+            # Return the result so the caller (_open_position) can detect a
+            # rejected exchange open (executed=False) and avoid recording a
+            # phantom position. None → no executor / nothing attempted.
+            return result
         except Exception as exc:
             logger.warning("Testnet mirror failed: %s", exc)
             self._write_system_alert(
                 "REST_API_ERROR",
                 f"Testnet mirror failed for {action} {symbol}: {exc}"
             )
+            return {"executed": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Main iteration
