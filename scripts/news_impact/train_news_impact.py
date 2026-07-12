@@ -31,13 +31,16 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import roc_auc_score, accuracy_score, classification_report
 from sklearn.preprocessing import OneHotEncoder
 
-DATA = "data/news_impact/news_labeled.csv"
+# Prefer the full Telegram-recovered dataset (~3k events, 3 months) if present,
+# else the 7-day DB slice. Override with --data.
+DATA_FULL = "data/news_impact/news_labeled_full.csv"
+DATA_DB = "data/news_impact/news_labeled.csv"
 MODEL_DIR = "data/news_impact/models"
 CAT = ["symbol", "source", "event_type"]
 NUM = ["urgency", "sentiment", "abs_sentiment", "confidence", "hour"]
 
-def load(horizon, deadband):
-    rows = list(csv.DictReader(open(DATA)))
+def load(horizon, deadband, data_path):
+    rows = list(csv.DictReader(open(data_path)))
     rows.sort(key=lambda r: int(r["ts_ms"]))          # time order
     X_cat, X_num, y, keep = [], [], [], []
     for r in rows:
@@ -51,12 +54,18 @@ def load(horizon, deadband):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--horizon", default="ret_4h", choices=["ret_1h", "ret_4h"])
+    # ret_* = raw return; exc_* = market-excess (asset minus BTC) — use exc to
+    # strip drift. exc is only meaningful for non-BTC assets.
+    ap.add_argument("--horizon", default="ret_4h",
+                    choices=["ret_1h", "ret_4h", "exc_1h", "exc_4h"])
     ap.add_argument("--deadband", type=float, default=0.001)
     ap.add_argument("--test-frac", type=float, default=0.25)
+    ap.add_argument("--data", default=None, help="labeled CSV (default: full if present)")
     args = ap.parse_args()
 
-    Xc, Xn, y = load(args.horizon, args.deadband)
+    data_path = args.data or (DATA_FULL if os.path.exists(DATA_FULL) else DATA_DB)
+    print(f"data: {data_path}")
+    Xc, Xn, y = load(args.horizon, args.deadband, data_path)
     n = len(y)
     if n < 50:
         print(f"Only {n} usable rows — too few to train meaningfully. "

@@ -4,19 +4,36 @@
 features the sentinel already extracts (sentiment, urgency, event_type, source,
 confidence, asset, hour).
 
-**Status (2026-07-08): NO EDGE YET — this is expected.** On the 405 events we
-have, sentiment→direction AUC ≈ 0.51 and forward returns are dominated by overall
-market drift (even *bearish* news is followed by up-moves because the whole market
-rose). There isn't enough data yet, and the raw-return target is drift-contaminated.
-The point of v0 is to have the pipeline ready so it improves as data accumulates.
+**Status (2026-07-12): NO MEANINGFUL EDGE — now on a robust sample.** Chen
+exported the Telegram news-alert channel (Luigi_News), recovering **3,017 unique
+events over 3 months (Apr 9 → Jul 12)** — the DB only had 405 because the sentinel
+purged >7d (fixed 2026-07-08, `DB_CLEANUP_DAYS` 7→3650). On the full sample:
+- sentiment→direction AUC ≈ **0.49–0.54** across 1h/4h, raw AND market-excess.
+- base rate ~50% (the earlier 58% was just a 9-day bull window; drift washes out
+  over 3 months).
+This is a trustworthy read, not a small-sample fluke: news sentiment does not
+predict direction. Caveat: 2,770 of 3,017 events are BTC/market-wide; only ~247
+are asset-specific (ETH/SOL/XRP), so per-asset excess signal is thin.
 
-**Why we only had 405:** the sentinel was auto-deleting events older than 7 days.
-Fixed 2026-07-08 (`DB_CLEANUP_DAYS` 7 → 3650) — the corpus now grows ~45/day.
-Re-run this in a few weeks with a real sample.
+**Definitive test still to run (Mac):** the single-feature AUC is ~0.5, but the
+full GBM (all features together) is the final word — run `train_news_impact.py`
+on the Mac. Don't expect much; wire to live only if it clearly beats baseline.
+
+**Data files:**
+- `data/news_impact/news_labeled_full.csv` — 3,017 events (from the Telegram export)
+- `data/news_impact/news_labeled.csv` — the 7-day DB slice (small)
 
 ## Pipeline
 
-### 1. Label (safe on server OR Mac — it's data processing, not training)
+### 0. (One-time / periodic) Recover history from a Telegram export
+```bash
+# Telegram Desktop → news channel → Export chat history → JSON
+python3 scripts/news_impact/parse_telegram_news.py path/to/result.json
+# -> data/news_impact/news_labeled_full.csv (parses alerts, joins prices,
+#    computes raw + market-excess returns, prints the signal check)
+```
+
+### 1. Label the live DB slice (safe on server OR Mac — data processing, not training)
 ```bash
 python3 scripts/news_impact/label_news.py
 # -> data/news_impact/news_labeled.csv  + prints the signal check
