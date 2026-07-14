@@ -470,6 +470,7 @@ class HTFWalkForwardTrainer:
         phase2_steps: int = 400_000,
         n_eval_episodes: int = 3,
         position_size: float = 0.25,
+        ent_floor: float = 0.0,
     ):
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -478,6 +479,7 @@ class HTFWalkForwardTrainer:
         self.phase2_steps = phase2_steps
         self.n_eval_episodes = n_eval_episodes
         self.position_size = position_size
+        self.ent_floor = ent_floor
 
         self.fold_results: List[Dict] = []
 
@@ -559,6 +561,7 @@ class HTFWalkForwardTrainer:
                 timesteps=self.phase1_steps,
                 eval_env=val_env,
                 save_path=save_path,
+                ent_floor=self.ent_floor,
             )
             logger.info("Phase 1 done: %s", {k: v for k, v in metrics_p1.items()
                                               if not isinstance(v, list)})
@@ -572,6 +575,7 @@ class HTFWalkForwardTrainer:
                 timesteps=self.phase2_steps,
                 eval_env=val_env,
                 save_path=save_path,
+                ent_floor=self.ent_floor,
             )
             logger.info("Phase 2 done: %s", {k: v for k, v in metrics_p2.items()
                                               if not isinstance(v, list)})
@@ -658,6 +662,23 @@ class HTFWalkForwardTrainer:
             test_metrics["total_trades"],
         )
 
+        # --- Gate diagnostics (2026-07-13) ---
+        # Whether we can ever use this model as an entry GATE hinges on its
+        # logit margin ranking winners above losers OOS — not on Sharpe alone.
+        # (max-prob confidence saturates after the Phase-2 entropy anneal, so
+        # margin is the gate signal; see src/brain/gate_diagnostics.py.)
+        gate_diag: Dict = {}
+        try:
+            from src.brain.gate_diagnostics import run_gate_diagnostics  # noqa: PLC0415
+            gate_diag = run_gate_diagnostics(agent.model, agent.vec_env, test_env)
+            logger.info(
+                "  Gate →  trades=%s  margin_AUC=%s  maxprob_AUC=%s  %s",
+                gate_diag.get("n_trades"), gate_diag.get("margin_auc"),
+                gate_diag.get("max_prob_auc"), gate_diag.get("verdict", ""),
+            )
+        except Exception as exc:
+            logger.warning("Gate diagnostics failed for fold %d: %s", fold, exc)
+
         # --- Anti-overfitting detection ---
         val_sharpe = val_metrics["sharpe_ratio"]
         test_sharpe = test_metrics["sharpe_ratio"]
@@ -690,6 +711,7 @@ class HTFWalkForwardTrainer:
             "test_metrics": test_metrics,
             "overfit_ratio_val_test": round(overfit_ratio, 3),
             "overfit_flag": overfit_flag,
+            "gate_diagnostics": gate_diag,
             "model_path": model_path,
         }
 
@@ -758,6 +780,13 @@ class HTFWalkForwardTrainer:
         val_sharpes    = [r["val_metrics"]["sharpe_ratio"]  for r in valid]
         overfit_ratios = [r["overfit_ratio_val_test"]       for r in valid]
 
+        gate_aucs = [r.get("gate_diagnostics", {}).get("margin_auc")
+                     for r in valid]
+        gate_aucs = [a for a in gate_aucs if isinstance(a, (int, float))
+                     and not np.isnan(a)]
+        gate_trades = sum(r.get("gate_diagnostics", {}).get("n_trades", 0)
+                          for r in valid)
+
         summary = {
             "total_folds": len(self.fold_results),
             "valid_folds": len(valid),
@@ -778,6 +807,11 @@ class HTFWalkForwardTrainer:
             "avg_val_sharpe":         round(float(np.mean(val_sharpes)),   4),
             "avg_overfit_ratio":      round(float(np.mean(overfit_ratios)), 3),
             "max_overfit_ratio":      round(float(np.max(overfit_ratios)),  3),
+            # Gate viability (mean OOS logit-margin AUC across folds; 0.5 = the
+            # model's certainty says nothing about outcomes, >=0.55 = gateable)
+            "gate_margin_auc_mean":   round(float(np.mean(gate_aucs)), 4) if gate_aucs else None,
+            "gate_margin_auc_min":    round(float(np.min(gate_aucs)),  4) if gate_aucs else None,
+            "gate_trades_total":      gate_trades,
             # Per-fold breakdown
             "per_fold": [
                 {
@@ -819,6 +853,10 @@ class HTFWalkForwardTrainer:
         print(f"  Positive Folds: {summary['positive_fold_pct']:.0f}%")
         print(f"  Overfit Flags:  {summary['overfit_flags_count']}/{summary['valid_folds']} folds")
         print(f"  Avg Val/Test Sharpe Ratio: {summary['avg_overfit_ratio']:.2f}×")
+        if summary["gate_margin_auc_mean"] is not None:
+            print(f"  Gate Margin AUC: {summary['gate_margin_auc_mean']:.3f} "
+                  f"(min {summary['gate_margin_auc_min']:.3f}, "
+                  f"{summary['gate_trades_total']} OOS trades)")
         print(f"  Verdict:        {verdict}")
         print(sep)
 
@@ -936,6 +974,15 @@ def parse_args() -> argparse.Namespace:
         dest="position_size",
         help="Fraction of capital per trade (default: 0.25)",
     )
+    p.add_argument(
+        "--ent-floor",
+        type=float,
+        default=0.0,
+        dest="ent_floor",
+        help="Entropy-coefficient floor for both curriculum phases "
+             "(calibrated retrain: 0.02 keeps the policy from saturating "
+             "confidence at ~0.99; default 0.0 = legacy anneal to 0.005)",
+    )
     return p.parse_args()
 
 
@@ -956,6 +1003,8 @@ def main() -> int:
     print(f"  Slide:          {args.slide_months} months per fold")
     print(f"  Steps/fold:     {args.phase1_steps:,} Phase1 + {args.phase2_steps:,} Phase2 = {total_steps:,} total")
     print(f"  Eval episodes:  {args.eval_episodes}")
+    if args.ent_floor:
+        print(f"  Entropy floor:  {args.ent_floor} (calibrated retrain)")
     if args.max_folds:
         print(f"  Max folds:      {args.max_folds}")
     print("=" * 70 + "\n")
@@ -1012,6 +1061,7 @@ def main() -> int:
         phase2_steps=args.phase2_steps,
         n_eval_episodes=args.eval_episodes,
         position_size=args.position_size,
+        ent_floor=args.ent_floor,
     )
 
     summary = trainer.run(windows)

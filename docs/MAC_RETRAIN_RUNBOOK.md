@@ -3,8 +3,9 @@
 **For:** Chen, on his Mac (training is Mac-only — never on the server).
 **Goal:** retrain the HTF PPO model that should drive live entries, WITHOUT
 re-creating the overfit model we have today (the fake +5515% / Sharpe 10.7).
-**Updated:** 2026-07-03 — the anti-overfit fixes are DONE and committed. You can
-run this tonight.
+**Updated:** 2026-07-13 — added the SOL GATE section at the bottom (diagnostic
+first, calibrated retrain only if needed). The 2026-07-03 anti-overfit fixes
+remain in force.
 
 ---
 
@@ -151,3 +152,67 @@ This is the real profitability lever — but not a guaranteed win. A clean retra
 finds modest edge, or confirms there isn't enough. Either way we'll *know* from
 trustworthy OOS numbers instead of guessing, and nothing risky goes live without
 forward-sim proof. Methodology reference: `RETRAINING_PLAN.md`.
+
+---
+
+# SOL GATE — diagnostic first, retrain only if needed (2026-07-13)
+
+**Background:** the SOL model gate failed because live "confidence" = max
+softmax probability, which saturates at ~0.99 on nearly every entry — nothing
+to gate on. But the **logit margin** (top-1 minus top-2 logit) underneath the
+softmax still varies per decision. Your existing Jul-4 SOL fold models may
+already contain gate signal we simply weren't reading. So: **run the 30-minute
+diagnostic BEFORE burning an overnight retrain.**
+
+## Step A — Diagnostic on the existing Jul-4 SOL models (~30 min, NO training)
+
+```bash
+cd drl-trading-system
+git checkout feature/autonomous-loop && git pull    # today's commit has the tooling
+source .venv/bin/activate
+python3 -m pytest tests/test_gate_diagnostics.py -q  # expect: 10 passed
+
+python scripts/sol_gate_diagnostic.py \
+  --models-dir data/models/htf_walkforward_sol \
+  --data-path data/historical/SOLUSDT_15m.csv
+```
+(If your July SOL CSV is gone, re-run the Step-1 downloader for SOLUSDT first.
+The diagnostic auto-resolves date-stamped CSV names.)
+
+It replays each fold's best-on-val checkpoint over that fold's out-of-sample
+test window, joins every entry's logit margin to the trade outcome, and prints
+per-fold + pooled **margin AUC** (does higher margin = higher win rate?).
+
+**Read the verdict line:**
+- **pooled margin_auc ≥ 0.55** → the model already discriminates. NO RETRAIN.
+  Send me `data/models/htf_walkforward_sol/` (tar.gz, same as Step 5) +
+  `gate_diagnostic.json`; I wire the gate on margin with a val-fitted
+  threshold → forward-sim → canary.
+- **~0.50–0.52** → certainty carries no outcome information → Step B.
+- Also send me `gate_diagnostic.json` either way.
+
+## Step B — Calibrated retrain, SOL only (overnight, only if Step A says NONE/WEAK)
+
+Identical to the Step-3 SOL command plus `--ent-floor 0.02` (holds the entropy
+coefficient at 0.02 instead of annealing to 0.005 — the anneal is what
+collapses the policy to saturated one-hot outputs), and a fresh output dir:
+
+```bash
+python train_htf_walkforward.py \
+  --data-path data/historical/SOLUSDT_15m.csv \
+  --output-dir data/models/htf_walkforward_sol_cal \
+  --phase1-steps 200000 --phase2-steps 400000 \
+  --train-months 12 --val-months 3 --test-months 3 --slide-months 3 \
+  --ent-floor 0.02
+```
+
+The summary now prints a **Gate Margin AUC** line and each
+`fold_result.json` contains a `gate_diagnostics` block — the retrain's success
+criterion is BOTH of:
+1. OOS Sharpe stays positive with ≥50% positive folds (doesn't lose the Jul-4
+   edge), and
+2. gate_margin_auc_mean ≥ 0.55.
+
+Send back the summary + `data/models/htf_walkforward_sol_cal/` as usual.
+If (1) holds but (2) still fails after calibration, the honest conclusion is
+the model's edge isn't expressible as a per-trade gate — we stop there.

@@ -317,6 +317,7 @@ class HTFTradingAgent:
         timesteps: int = 500_000,
         eval_env: Optional[gym.Env] = None,
         save_path: Optional[str] = None,
+        ent_floor: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Curriculum Phase 1 — HTF alignment focus.
@@ -329,17 +330,24 @@ class HTFTradingAgent:
             timesteps: Number of environment steps for this phase.
             eval_env:  Optional evaluation environment for checkpointing.
             save_path: Directory to save the best model checkpoint.
+            ent_floor: Lower bound on the annealed entropy coefficient
+                       (calibration option, 2026-07-13 — keeps the policy
+                       from collapsing to saturated near-one-hot outputs,
+                       which destroys confidence as a gate signal).
 
         Returns:
             Metrics dict with phase tag and training summary.
         """
         logger.info("=== Phase 1: HTF Alignment Focus (%d steps) ===", timesteps)
 
+        start_ent = max(0.05, ent_floor)
+        end_ent = max(0.02, ent_floor)
         # Temporarily raise entropy for exploration
-        self.model.ent_coef = 0.05
+        self.model.ent_coef = start_ent
 
         callbacks: list = [
-            EntropyAnnealCallback(start_ent=0.05, end_ent=0.02, total_steps=timesteps),
+            EntropyAnnealCallback(start_ent=start_ent, end_ent=end_ent,
+                                  total_steps=timesteps),
             HTFMetricsCallback(),
         ]
         metrics_cb: HTFMetricsCallback = callbacks[1]  # type: ignore[assignment]
@@ -373,6 +381,7 @@ class HTFTradingAgent:
         timesteps: int = 1_000_000,
         eval_env: Optional[gym.Env] = None,
         save_path: Optional[str] = None,
+        ent_floor: float = 0.0,
     ) -> Dict[str, Any]:
         """
         Curriculum Phase 2 — Full 4-TF cascade execution.
@@ -385,18 +394,25 @@ class HTFTradingAgent:
             timesteps: Number of environment steps for this phase.
             eval_env:  Optional evaluation environment for checkpointing.
             save_path: Directory to save the best model checkpoint.
+            ent_floor: Lower bound on the annealed entropy coefficient — with
+                       the default 0.0 this phase anneals 0.01→0.005, which is
+                       what saturates confidence at ~0.99 (2026-07-13 SOL gate
+                       failure). Pass e.g. 0.02 for a calibrated retrain.
 
         Returns:
             Metrics dict with phase tag and training summary.
         """
         logger.info("=== Phase 2: Full 4-TF Cascade Execution (%d steps) ===", timesteps)
 
+        start_ent = max(0.01, ent_floor)
+        end_ent = max(0.005, ent_floor)
         # Tighter clip_range and lower entropy for exploitation
         self.model.clip_range = lambda _: 0.15
-        self.model.ent_coef = 0.01
+        self.model.ent_coef = start_ent
 
         callbacks: list = [
-            EntropyAnnealCallback(start_ent=0.01, end_ent=0.005, total_steps=timesteps),
+            EntropyAnnealCallback(start_ent=start_ent, end_ent=end_ent,
+                                  total_steps=timesteps),
             HTFMetricsCallback(),
         ]
         metrics_cb: HTFMetricsCallback = callbacks[1]  # type: ignore[assignment]
